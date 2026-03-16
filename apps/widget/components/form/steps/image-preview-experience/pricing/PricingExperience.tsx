@@ -53,6 +53,7 @@ type PricingExperiencePillProps = {
   allowToggle?: boolean;
   autoReveal?: boolean;
   requirePhone?: boolean;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   style?: React.CSSProperties;
   accentColor?: string;
@@ -140,14 +141,40 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   const pillLabel = (label && String(label).trim()) ? String(label).trim() : 'Show pricing';
   const base = accent || '#0f172a';
   const tagBg = withAlpha(accent || base, 1);
-  const railWidthClass = "w-[10.75rem] max-w-[calc(100vw-5rem)]";
+  const transparentUsesFullWidth = Boolean(
+    transparentBackground && /\bw-full\b/.test(`${containerClassName || ""} ${className || ""}`)
+  );
+  const labelWidthClass = transparentBackground
+    ? transparentUsesFullWidth
+      ? "w-full"
+      : "w-auto max-w-full"
+    : "w-[clamp(18rem,46vw,24rem)] max-w-[calc(100vw-2.5rem)]";
+  const priceWidthClass = transparentBackground
+    ? transparentUsesFullWidth
+      ? "w-[min(100%,calc(100%-0.1rem))]"
+      : "w-auto max-w-full"
+    : "w-[clamp(19rem,48vw,25rem)] max-w-[calc(100vw-2rem)]";
+  const revealedPriceClass = transparentBackground
+    ? transparentUsesFullWidth
+      ? "w-auto max-w-[calc(100%-0.5rem)] self-center px-[0.85rem]"
+      : "w-auto max-w-[calc(100vw-6rem)] self-center px-[0.85rem]"
+    : priceWidthClass;
   // When transparentBackground, parent provides the bg - stay fully transparent to avoid double-layer/halo
   const outerBg = transparentBackground ? 'transparent' : tagBg;
+  const pillOverflowClass = transparentBackground && !transparentUsesFullWidth ? "overflow-hidden" : "overflow-visible";
+  const compactOverlayPill = Boolean(transparentBackground && !transparentUsesFullWidth);
+  const compactAlignClass = compactOverlayPill ? "items-end text-right" : "items-center text-center";
+  const compactSelfClass = compactOverlayPill ? "self-end" : "self-center";
+  const contentInsetClass =
+    compactOverlayPill
+      ? "pl-[1.55rem] pr-[0.55rem] py-[0.3rem]"
+      : "px-[1.5%] py-[1.5%]";
 
   return (
     <div
       className={cn(
-        "w-auto h-full overflow-hidden",
+        "relative w-auto h-full",
+        pillOverflowClass,
         transparentBackground ? "border-0" : "rounded-[12%] border border-white/10",
         containerClassName
       )}
@@ -155,7 +182,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         backgroundColor: outerBg,
         backdropFilter: 'none',
         WebkitBackdropFilter: 'none',
-        width: 'fit-content',
+        width: transparentBackground ? (transparentUsesFullWidth ? '100%' : 'fit-content') : 'fit-content',
         minWidth: 'unset',
         maxWidth: 'calc(100vw - 2rem)',
       }}
@@ -166,7 +193,9 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         disabled={effectiveDisabled}
         onClick={onClick}
         className={cn(
-          'w-full h-full overflow-hidden rounded-[12%] text-white border-0 bg-white/[0.05] transition-all duration-200',
+          'relative h-full rounded-[12%] text-white border-0 bg-white/[0.05] transition-all duration-200',
+          pillOverflowClass,
+          transparentBackground ? (transparentUsesFullWidth ? 'w-full' : 'w-auto max-w-full') : 'w-full',
           'hover:bg-white/[0.10] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
           'disabled:opacity-60 disabled:cursor-not-allowed',
           className
@@ -178,37 +207,62 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         }}
         {...props}
       >
+        <span
+          className="pointer-events-none absolute left-[0.45rem] top-1/2 z-10 h-[0.7rem] w-[0.7rem] -translate-y-1/2 rounded-full bg-[rgba(55,65,81,0.9)]"
+          aria-hidden
+        />
         {!revealed ? (
-          <div className="relative box-border flex w-auto flex-col items-center justify-center gap-1.5 px-3 py-2.5 text-center">
-            <span
-              className="pointer-events-none absolute left-2.5 top-2.5 h-3 w-3 rounded-full bg-black/30 ring-1 ring-white/20"
-              aria-hidden
-            />
-            <div className="flex flex-col items-center gap-1.5">
-              <div className={cn(railWidthClass, "pl-4 pr-1 text-center whitespace-nowrap text-[clamp(0.72rem,1.35vw,0.92rem)] font-normal tracking-[0.04em] leading-none text-white uppercase")}>
+          <div className={cn("relative box-border flex h-full w-full flex-col justify-center", compactAlignClass, contentInsetClass)}>
+            <div className={cn("flex min-h-[3.95rem] w-full flex-col justify-center gap-[0.18rem] sm:gap-[0.22rem]", compactAlignClass)}>
+              <div
+                className={cn(
+                  labelWidthClass,
+                  compactSelfClass,
+                  compactOverlayPill ? "text-right" : "text-center",
+                  "text-[clamp(1.42rem,3.1vw,2rem)] font-medium tracking-[0.035em] leading-[1.05] text-white uppercase"
+                )}
+                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+              >
                 {pillLabel}
               </div>
-              <div className={cn(railWidthClass, "box-border rounded-xl bg-white/[0.07] border border-white/10 inline-flex items-center justify-center px-3 py-1.5 sm:px-3.5 text-[clamp(0.88rem,1.8vw,1.18rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-[1.05] whitespace-nowrap [font-family:'Courier_Prime','IBM_Plex_Mono','Courier_New',monospace]")}>
-                <span className="inline-flex items-center leading-none px-[0.24em] py-[0.05em]">
+              <div
+                className={cn(
+                  "box-border inline-flex min-h-[3.2rem] w-auto max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[0.8rem] py-[2.15%] text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none whitespace-nowrap",
+                  compactSelfClass
+                )}
+                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+              >
+                <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
                   <span className="text-white/95 leading-none">{lockedMask.prefix}</span>
-                  <span className="inline-flex items-center leading-none">
-                    <span className="inline-block px-[0.12em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
+                  <span className="inline-flex items-center leading-none -ml-[0.02em]">
+                    <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
                   </span>
                 </span>
               </div>
             </div>
           </div>
         ) : (
-          <div className="relative box-border flex w-auto flex-col items-center justify-center gap-1.5 px-3 py-2.5 text-center">
-            <span
-              className="pointer-events-none absolute left-2.5 top-2.5 h-3 w-3 rounded-full bg-black/30 ring-1 ring-white/20"
-              aria-hidden
-            />
-            <div className="flex flex-col items-center gap-1.5">
-              <div className={cn(railWidthClass, "pl-4 pr-1 text-center whitespace-nowrap text-[clamp(0.72rem,1.35vw,0.92rem)] font-normal tracking-[0.04em] leading-none text-white uppercase")}>
+          <div className={cn("relative box-border flex h-full w-full flex-col", compactAlignClass, contentInsetClass)}>
+            <div className={cn("flex min-h-[4rem] w-full flex-1 flex-col justify-center gap-[0.18rem] sm:gap-[0.22rem]", compactAlignClass)}>
+              <div
+                className={cn(
+                  labelWidthClass,
+                  compactSelfClass,
+                  compactOverlayPill ? "text-right" : "text-center",
+                  "text-[clamp(1.18rem,2.55vw,1.68rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
+                )}
+                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+              >
                 {pillLabel}
               </div>
-              <div className={cn(railWidthClass, "box-border rounded-xl bg-white/[0.07] border border-white/10 inline-flex items-center justify-center px-3 py-1.5 sm:px-3.5 text-[clamp(0.88rem,1.8vw,1.18rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-[1.05] whitespace-nowrap [font-family:'Courier_Prime','IBM_Plex_Mono','Courier_New',monospace]")}>
+              <div
+                className={cn(
+                  revealedPriceClass,
+                  compactSelfClass,
+                  "box-border inline-flex min-h-[3rem] min-w-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[2.5%] py-[2.15%] text-[clamp(0.95rem,1.8vw,1.65rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none whitespace-nowrap overflow-hidden"
+                )}
+                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+              >
                 {loading ? (
                   <span className="text-white/90">Calculating…</span>
                 ) : (
@@ -238,6 +292,7 @@ function PricingExperiencePill(props: PricingExperiencePillProps) {
     allowToggle = true,
     autoReveal = true,
     loading = false,
+    onClick,
     className,
     style,
     accentColor: accentColorProp,
@@ -262,6 +317,7 @@ function PricingExperiencePill(props: PricingExperiencePillProps) {
       loading={loading}
       allowToggle={allowToggle}
       autoReveal={autoReveal}
+      onClick={onClick}
       accentColor={accentColorProp ?? theme.primaryColor}
       transparentBackground={transparentBackground}
       containerClassName={containerClassName}
@@ -372,7 +428,7 @@ function PricingExperiencePanel(props: PricingExperiencePanelProps) {
               </span>
               <div className="flex items-center gap-2">
                 <div
-                  className="text-[36px] font-medium whitespace-nowrap tabular-nums tracking-[0.01em] leading-none text-white/95"
+                  className="text-[2.25rem] font-medium whitespace-nowrap tabular-nums tracking-[0.01em] leading-none text-white/95"
                   style={{ color: theme.primaryColor, fontFamily: theme.fontFamily }}
                 >
                   {formattedRangeMin && formattedRangeMax ? (

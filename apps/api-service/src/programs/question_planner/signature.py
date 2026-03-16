@@ -28,8 +28,7 @@ class QuestionPlannerSignature(dspy.Signature):
             "  - price_tier, when present, should be one of: '$', '$$', '$$$', '$$$$' (relative budget cue only)\n"
             "- allow_multiple: boolean (optional; renders `multi_select` for multiple_choice)\n"
             "- allow_other: boolean (optional; enables 'Other' free-text)\n"
-            "- For `budget_range` slider: include numeric `min`, `max`, `step` and `currency` (required), plus optional `unit`\n"
-            "- `budget_range` should be included as the final planning item so it can summarize/confirm spend intent after style decisions.\n"
+            "- Do not include `budget_range`; budget is collected by a deterministic step outside planner output.\n"
         )
     )
 

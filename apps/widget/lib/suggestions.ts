@@ -110,8 +110,14 @@ export const getSuggestions = async (
       return [];
     }
 
-    // Create a map of prompt_id to prompt data
-    const promptMap = new Map(prompts.map(p => [p.id, p]));
+    // Supabase typing can widen to `never[]` without generated table types.
+    // Normalize to a concrete shape before building the map.
+    const promptRows = (prompts || []) as Array<{
+      id: string;
+      prompt: string;
+      variables?: any;
+    }>;
+    const promptMap = new Map(promptRows.map((p) => [p.id, p]));
 
     // Create suggestions by combining image data with prompt data
     const suggestions: Array<{

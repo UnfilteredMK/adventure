@@ -9,7 +9,7 @@ import { Slider as SliderPrimitive } from "@/components/ui/slider";
 import { FormLoader } from "@/components/form/FormLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt, ReflectionFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
-import { ArrowLeft, ArrowRight, ImagePlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, ImagePlus } from "lucide-react";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 
 interface FormQuestionSectionProps {
@@ -37,7 +37,7 @@ interface FormQuestionSectionProps {
   onBudgetChange: (value: number) => void;
   promptDraft: string;
   setPromptDraft: (value: string) => void;
-  handlePromptSubmit: () => void;
+  handlePromptSubmit: (uploadedUrl?: string) => void;
   onRegeneratePreview: (uploadedUrl?: string) => void;
   previewEnabled: boolean;
   previewHasImage: boolean;
@@ -55,7 +55,14 @@ interface FormQuestionSectionProps {
   showQuestionPaneUnderPreview: boolean;
   state: any;
   stepForRenderer: any;
-  theme: { borderRadius?: number; fontFamily?: string; textColor?: string; primaryColor?: string; secondaryColor?: string };
+  theme: {
+    borderRadius?: number;
+    fontFamily?: string;
+    textColor?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    buttonStyle?: { backgroundColor?: string; textColor?: string };
+  };
   usePreviewDominantLayout: boolean;
   guidedThumbnailMode: boolean;
 }
@@ -214,6 +221,27 @@ export function FormQuestionSection({
     },
     [instanceId, onRegeneratePreview, setRefinementUploading]
   );
+  const currentUploadedReferenceUrl = useMemo(() => {
+    const stepData = (state?.stepData || {}) as Record<string, unknown>;
+    const sources = [
+      stepData["step-refinement-upload-scene-image"],
+      stepData["step-upload-scene-image"],
+      stepData["step-upload-user-image"],
+      stepData["step-upload-product-image"],
+    ];
+    for (const source of sources) {
+      if (typeof source === "string" && source.trim()) return source;
+      if (Array.isArray(source)) {
+        const first = source.find((item) => typeof item === "string" && item.trim()) as string | undefined;
+        if (first) return first;
+      }
+    }
+    return null;
+  }, [state?.stepData]);
+  const submitPrompt = useCallback(() => {
+    if (promptText.length < 4) return;
+    handlePromptSubmit(currentUploadedReferenceUrl || undefined);
+  }, [currentUploadedReferenceUrl, handlePromptSubmit, promptText]);
 
   const inputModeToggle = showPromptControls ? (
       <div className="inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5">
@@ -443,117 +471,87 @@ export function FormQuestionSection({
                         <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5">
                           {inputModeToggle ? <div className="mb-2 flex justify-center">{inputModeToggle}</div> : null}
                           {useCompactNav ? (
-                            <div className="flex items-center gap-3 min-w-0">
-                              {canGoBack ? (
-                                <Button
-                                  type="button"
-                                  onClick={handleBack}
-                                  variant="outline"
-                                  className="h-8 w-10 shrink-0 rounded-full p-0"
-                                  style={{
-                                    borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.14))",
-                                    color: theme.textColor,
-                                    fontFamily: theme.fontFamily,
-                                  }}
-                                  aria-label="Go back"
-                                >
-                                  <ArrowLeft className="h-3 w-3" />
-                                </Button>
-                              ) : (
-                                <div className="h-8 w-10 shrink-0" aria-hidden="true" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <div
-                                  className="rounded-lg border p-2"
-                                  style={{
-                                    backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
-                                    borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
-                                    borderRadius: `${theme.borderRadius ?? 8}px`,
-                                  }}
-                                >
+                            <div className="min-w-0">
+                              <div
+                                className="rounded-xl border p-2"
+                                style={{
+                                  backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
+                                  borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
+                                  borderRadius: `${theme.borderRadius ?? 12}px`,
+                                }}
+                              >
+                                <div className="flex items-end gap-2 min-w-0">
                                   <textarea
                                     value={promptDraft}
                                     onChange={(e) => setPromptDraft(e.target.value)}
                                     onKeyDown={(e) => {
                                       if (e.key === "Enter" && !e.shiftKey) {
                                         e.preventDefault();
-                                        if (promptText.length >= 4) handlePromptSubmit();
+                                        submitPrompt();
                                       }
                                     }}
                                     rows={2}
-                                    placeholder="Add details..."
-                                    className="min-h-14 w-full resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                    placeholder="Add a prompt to refine this image..."
+                                    className="min-h-14 flex-1 resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                                   />
+                                  <Button
+                                    type="button"
+                                    onClick={submitPrompt}
+                                    disabled={promptText.length < 4}
+                                    className="h-8 w-8 shrink-0 rounded-full p-0"
+                                    style={{
+                                      backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
+                                      color: "#fff",
+                                      fontFamily: theme.fontFamily,
+                                    }}
+                                    aria-label="Generate preview"
+                                    title="Generate"
+                                  >
+                                    <ArrowUp className="h-3 w-3" />
+                                  </Button>
                                 </div>
                               </div>
-                              <Button
-                                type="button"
-                                onClick={() => setAdventureInputMode("questions")}
-                                className="h-8 w-10 shrink-0 rounded-full p-0"
-                                style={{
-                                  backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-                                  color: "#fff",
-                                  fontFamily: theme.fontFamily,
-                                }}
-                                aria-label="Continue to guided question"
-                              >
-                                <ArrowRight className="h-3 w-3" />
-                              </Button>
                             </div>
                           ) : (
                             <>
                               <div
-                                className="rounded-lg border p-2"
+                                className="rounded-xl border p-2"
                                 style={{
                                   backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
                                   borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
-                                  borderRadius: `${theme.borderRadius ?? 8}px`,
+                                  borderRadius: `${theme.borderRadius ?? 12}px`,
                                 }}
                               >
-                                <textarea
-                                  value={promptDraft}
-                                  onChange={(e) => setPromptDraft(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                      e.preventDefault();
-                                      if (promptText.length >= 4) handlePromptSubmit();
-                                    }
-                                  }}
-                                  rows={3}
-                                  placeholder="Add details..."
-                                  className="min-h-20 w-full resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                                />
-                              </div>
-                              <div className="flex min-w-0 justify-center gap-2 pt-2.5">
-                                {canGoBack ? (
+                                <div className="flex items-end gap-2 min-w-0">
+                                  <textarea
+                                    value={promptDraft}
+                                    onChange={(e) => setPromptDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault();
+                                        submitPrompt();
+                                      }
+                                    }}
+                                    rows={3}
+                                    placeholder="Add a prompt to refine this image..."
+                                    className="min-h-20 flex-1 resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                  />
                                   <Button
                                     type="button"
-                                    onClick={handleBack}
-                                    variant="outline"
-                                    className="h-9 min-w-[88px] px-3 text-xs font-medium shrink-0"
+                                    onClick={submitPrompt}
+                                    disabled={promptText.length < 4}
+                                    className="h-9 w-9 shrink-0 rounded-full p-0"
                                     style={{
-                                      borderColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-                                      color: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
+                                      backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
+                                      color: "#fff",
                                       fontFamily: theme.fontFamily,
-                                      borderRadius: `${theme.borderRadius ?? 12}px`,
                                     }}
+                                    aria-label="Generate preview"
+                                    title="Generate"
                                   >
-                                    Back
+                                    <ArrowUp className="h-3.5 w-3.5" />
                                   </Button>
-                                ) : null}
-                                <Button
-                                  type="button"
-                                  onClick={() => setAdventureInputMode("questions")}
-                                  className="h-9 min-w-[96px] px-3 text-xs font-medium shrink-0"
-                                  style={{
-                                    backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-                                    color: "#fff",
-                                    fontFamily: theme.fontFamily,
-                                    borderRadius: `${theme.borderRadius ?? 12}px`,
-                                  }}
-                                >
-                                  Continue
-                                </Button>
+                                </div>
                               </div>
                             </>
                           )}
@@ -727,7 +725,20 @@ export function FormQuestionSection({
                                   Upload a new photo and we will regenerate the preview.
                                 </div>
                               </div>
-                              <div className="mt-3 flex justify-center">
+                              <div className="mt-3 flex items-center justify-center gap-2">
+                                {currentUploadedReferenceUrl ? (
+                                  <div
+                                    className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-[color:var(--form-surface-border-color)] bg-black/5"
+                                    role="img"
+                                    aria-label="Current uploaded reference image"
+                                    title="Current image"
+                                  >
+                                    <div
+                                      className="h-full w-full bg-cover bg-center bg-no-repeat"
+                                      style={{ backgroundImage: `url("${currentUploadedReferenceUrl}")` }}
+                                    />
+                                  </div>
+                                ) : null}
                                 <Button
                                   type="button"
                                   disabled={refinementUploading}
@@ -741,7 +752,7 @@ export function FormQuestionSection({
                                   }}
                                 >
                                   <ImagePlus className="mr-1.5 h-4 w-4 shrink-0" aria-hidden />
-                                  {refinementUploading ? "Uploading..." : "Choose image"}
+                                  {refinementUploading ? "Uploading..." : currentUploadedReferenceUrl ? "Replace image" : "Choose image"}
                                 </Button>
                               </div>
                             </div>

@@ -13,10 +13,11 @@ import { StepLayout } from "../../ui-layout/StepLayout";
 import { useFormTheme } from "../../../demo/FormThemeProvider";
 import { ImageGallery } from "@/components/widget/gallery/ImageGallery";
 import { LeadCaptureModal } from "@/components/widget/LeadCaptureModal";
+import { LeadGenPopover } from "../lead-gen/LeadGenPopover";
 import { ReferenceImageUpload } from "@/components/widget/user-input-section/ReferenceImageUpload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
@@ -96,6 +97,7 @@ export function GalleryStep({
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [showLeadModal, setShowLeadModal] = useState(false);
+  const [showPricingGate, setShowPricingGate] = useState(false);
   const [regenerationsRemaining, setRegenerationsRemaining] = useState<number>(0);
 
   const leadSubmission = useFormSubmission({ instanceId: instanceId || "", sessionId });
@@ -216,6 +218,25 @@ export function GalleryStep({
     }
     return { labor, material, total: labor + material };
   }, [quoteItems]);
+  const pricingGateStyle = useMemo(
+    () =>
+      ({
+        ["--sif-overlay-bg" as any]: "rgba(51, 65, 85, 0.52)",
+        ["--sif-overlay-hover-bg" as any]: "rgba(51, 65, 85, 0.64)",
+        ["--sif-overlay-border" as any]: "rgba(255,255,255,0.24)",
+        ["--sif-lead-gen-overlay-bg" as any]: "rgba(51, 65, 85, 0.52)",
+        ["--sif-lead-gen-fg" as any]: "rgba(255,255,255,0.95)",
+        ["--sif-lead-gen-muted" as any]: "rgba(255,255,255,0.72)",
+        ["--sif-lead-gen-input-bg" as any]: "rgba(255,255,255,0.12)",
+        ["--sif-lead-gen-input-border" as any]: "rgba(255,255,255,0.20)",
+        ["--sif-lead-gen-placeholder" as any]: "rgba(255,255,255,0.58)",
+        ["--sif-lead-gen-action-bg" as any]: "rgba(255,255,255,0.18)",
+        ["--sif-lead-gen-action-fg" as any]: "#ffffff",
+        ["--sif-lead-gen-action-border" as any]: "rgba(255,255,255,0.26)",
+        ["--sif-lead-gen-ring" as any]: "rgba(255,255,255,0.38)",
+      }) as React.CSSProperties,
+    []
+  );
   const formattedEstimate = useMemo(() => {
     if (quoteRange) {
       const lo = formatCurrency(quoteRange.min, { locale, currency: quoteCurrency });
@@ -791,38 +812,112 @@ export function GalleryStep({
                 <CardTitle className="text-sm">Estimate (preview)</CardTitle>
                 {!blurGateActive && (
                   <Dialog open={pricingModalOpen} onOpenChange={setPricingModalOpen}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="h-8 px-3 text-xs">
-                        View details
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-xl">
-                      <DialogHeader>
-                        <DialogTitle>Estimate details</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        {quoteRange ? (
-                          <div className="space-y-1">
-                            <div className="text-xs text-muted-foreground">Range</div>
-                            <div className="text-xl font-semibold tabular-nums">
-                              {formatCurrency(adjustedRange?.min ?? quoteRange.min, { locale, currency: quoteCurrency })}{" "}
-                              <span className="text-muted-foreground">–</span>{" "}
-                              {formatCurrency(adjustedRange?.max ?? quoteRange.max, { locale, currency: quoteCurrency })}
+                    {instanceId && sessionId && !hasSubmitted ? (
+                      <LeadGenPopover
+                        open={showPricingGate}
+                        onOpenChange={setShowPricingGate}
+                        instanceId={instanceId}
+                        sessionId={sessionId}
+                        gateContext="pricing_details"
+                        surface="overlay"
+                        contentStyle={pricingGateStyle}
+                        title="Where should we send the pricing to?"
+                        description="Enter your email to reveal pricing."
+                        finePrint="Instant reveal after sending."
+                        ctaLabel="Send pricing"
+                        phoneTitle="Best phone number?"
+                        phoneDescription="We can text updates too."
+                        requirePhone
+                        submitOnEmail={false}
+                        submissionData={{ surface: "preview_pricing" }}
+                        side="top"
+                        align="end"
+                        sideOffset={6}
+                        onSubmitted={() => {
+                          setHasSubmitted(true);
+                          setShowPricingGate(false);
+                          setPricingModalOpen(true);
+                        }}
+                      >
+                        <Button variant="outline" className="h-8 px-3 text-xs">
+                          View details
+                        </Button>
+                      </LeadGenPopover>
+                    ) : (
+                      <DialogTrigger asChild>
+                        <Button variant="outline" className="h-8 px-3 text-xs">
+                          View details
+                        </Button>
+                      </DialogTrigger>
+                    )}
+                    <DialogContent
+                      className="max-w-xl border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0 shadow-2xl"
+                      style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+                    >
+                      <DialogHeader className="space-y-3 border-b border-[color:var(--form-surface-border-color)] px-6 py-5 text-left">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div
+                            className="rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.16em] bg-[var(--form-surface-color)] border border-[color:var(--form-surface-border-color)]"
+                            style={{ color: theme.textColor }}
+                          >
+                            Pricing preview
+                          </div>
+                          {quoteRange ? (
+                            <div
+                              className="rounded-full px-3 py-1.5 text-xs font-medium border border-[color:var(--form-surface-border-color)]"
+                              style={{ color: theme.primaryColor, backgroundColor: "color-mix(in srgb, var(--form-primary-color) 10%, white 90%)" }}
+                            >
+                              Adjustable range
                             </div>
-                            <div className="text-xs text-muted-foreground">
+                          ) : null}
+                        </div>
+                        <DialogTitle className="text-xl font-semibold tracking-tight">Estimate details</DialogTitle>
+                        <DialogDescription className="text-sm opacity-75" style={{ color: theme.textColor }}>
+                          Review the same pricing preview shown in the adventure flow, with a finish-level slider and itemized totals.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 px-6 py-5">
+                        {quoteRange ? (
+                          <div className="rounded-2xl border border-[color:var(--form-surface-border-color)] bg-white/50 p-4 backdrop-blur-sm">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div
+                                className="rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] border border-[color:var(--form-surface-border-color)]"
+                                style={{ color: theme.textColor }}
+                              >
+                                Range
+                              </div>
+                              <div className="text-[11px] opacity-70">UI-only preview</div>
+                            </div>
+                            <div className="text-xl font-semibold tabular-nums">
+                              <span style={{ color: theme.primaryColor }}>
+                                {formatCurrency(adjustedRange?.min ?? quoteRange.min, { locale, currency: quoteCurrency })}
+                              </span>{" "}
+                              <span className="opacity-50">–</span>{" "}
+                              <span>
+                                {formatCurrency(adjustedRange?.max ?? quoteRange.max, { locale, currency: quoteCurrency })}
+                              </span>
+                            </div>
+                            <div className="mt-2 text-xs opacity-75">
                               Slide to preview cheaper vs higher-end finish levels (UI-only preview).
                             </div>
                           </div>
                         ) : (
-                          <div className="space-y-1">
-                            <div className="text-xs text-muted-foreground">Total</div>
-                            <div className="text-xl font-semibold tabular-nums">{formattedEstimate}</div>
+                          <div className="rounded-2xl border border-[color:var(--form-surface-border-color)] bg-white/50 p-4 backdrop-blur-sm">
+                            <div
+                              className="mb-3 inline-flex rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] border border-[color:var(--form-surface-border-color)]"
+                              style={{ color: theme.textColor }}
+                            >
+                              Total
+                            </div>
+                            <div className="text-xl font-semibold tabular-nums" style={{ color: theme.primaryColor }}>
+                              {formattedEstimate}
+                            </div>
                           </div>
                         )}
 
                         {quoteRange && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <div className="rounded-2xl border border-[color:var(--form-surface-border-color)] bg-white/50 p-4 backdrop-blur-sm">
+                            <div className="mb-3 flex items-center justify-between text-xs opacity-75">
                               <span>Budget-friendly</span>
                               <span>Higher-end</span>
                             </div>
@@ -832,18 +927,41 @@ export function GalleryStep({
                               max={100}
                               value={pricingSlider}
                               onChange={(e) => setPricingSlider(Number(e.target.value))}
-                              className="w-full"
+                              className="sif-range"
+                              style={{ ["--form-primary-color" as any]: theme.primaryColor }}
                             />
+                            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/8">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${pricingSlider}%`,
+                                  background: `linear-gradient(90deg, ${theme.primaryColor} 0%, ${theme.primaryColor}cc 100%)`,
+                                }}
+                              />
+                            </div>
                           </div>
                         )}
 
                         {quoteItems.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="text-xs font-semibold text-muted-foreground">Line items</div>
-                            <div className="space-y-1.5">
+                          <div className="rounded-2xl border border-[color:var(--form-surface-border-color)] bg-white/50 p-4 backdrop-blur-sm">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div
+                                className="rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] border border-[color:var(--form-surface-border-color)]"
+                                style={{ color: theme.textColor }}
+                              >
+                                Line items
+                              </div>
+                              <div className="text-xs font-medium tabular-nums" style={{ color: theme.primaryColor }}>
+                                {formatCurrency(quoteTotals.total, { locale, currency: quoteCurrency })}
+                              </div>
+                            </div>
+                            <div className="space-y-2">
                               {quoteItems.map((it) => (
-                                <div key={it.id} className="flex items-center justify-between text-sm">
-                                  <span className="text-muted-foreground">{it.label}</span>
+                                <div
+                                  key={it.id}
+                                  className="flex items-center justify-between rounded-2xl border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] px-3 py-2 text-sm"
+                                >
+                                  <span className="opacity-75">{it.label}</span>
                                   <span className="font-medium tabular-nums">
                                     {formatCurrency(Number(it.labor || 0) + Number(it.material || 0), { locale, currency: quoteCurrency })}
                                   </span>

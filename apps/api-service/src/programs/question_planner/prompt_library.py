@@ -65,17 +65,13 @@ def _planner_goal_and_instructions() -> str:
             "- Vertical-agnostic: your approach should work for any industry/service.\n"
             "- Do not copy an industry's specifics from examples unless the current `services_summary` calls for it.\n"
             "- MAXIMUM 4 questions before concept. Keep the form short to show value early.\n"
-            "- Funnel order (STRICT): style_direction → project_parts/update_areas → budget_range. No other steps.\n"
+            "- Funnel order (STRICT): style_direction → project_parts/update_areas. No other steps.\n"
             "- Do NOT add granular steps like fixtures, lighting_style, storage, materials, finish, countertops, flooring.\n"
             "  Those details are for the refinements phase AFTER the concept appears. Before concept: only style, scope, budget.\n"
             "- Ask 1 scoping question (project_parts / update_areas / remodel_intensity) to narrow what the user wants done.\n"
             "  Use keys like project_parts, update_areas, or remodel_intensity — NOT 'scope' (banned).\n"
-            "- Ask 1 budget-range question as the final step in each batch.\n"
-            "  This still appears before deterministic upload steps in the widget flow, and acts as the final budget calibration checkpoint.\n"
-            "- Once budget is answered, weave it into the `humanism` / subtext of subsequent questions.\n"
-            "  Example: with a ~$15k budget answered, a follow-up materials question might have humanism like\n"
-            "  \"With your $15k budget, let's find the right finishes\" — so the guide feels aware of the budget.\n"
-            "- Avoid precise budgets or collecting sensitive financial info; prefer a slider range tied to the service scale.\n"
+            "- Budget is collected by a deterministic widget step, not by planner-generated questions.\n"
+            "- Do not generate a `budget_range` plan item.\n"
             "- Avoid operational logistics like permits, timeline, or contractor scheduling (unless explicitly required by the service context).\n"
             "- Use memory (`answered_qa`, `asked_step_ids`) to avoid repeats and stay consistent.\n"
             "- Use constraints/hints (allowed types, option targets, batch constraints, required uploads) as guidance, not rigid requirements.\n"
@@ -119,7 +115,7 @@ def build_planner_prompt() -> str:
             [
                 "`planner_context_json`: compact JSON with service + memory + constraints (see above).",
                 "`max_steps`: maximum number of plan items to emit.",
-                "`allowed_mini_types`: allowed UI step types (policy). In this service, use `multiple_choice` for normal questions and `slider` for `budget_range`.",
+                "`allowed_mini_types`: allowed UI step types (policy). In this service, use `multiple_choice` for planning questions.",
             ],
         ),
         _bullets(
@@ -137,23 +133,21 @@ def build_planner_prompt() -> str:
                 "Use `services_summary` to keep questions/wording relevant; avoid invented facts.",
                 "Avoid overly-generic buckets unless unavoidable (e.g. 'Basic/Mid/High/Luxury').",
                 "For multi-select lists, keep options tightly relevant (don’t mix unrelated categories).",
-                "ORDERING (IMPORTANT): Exactly 3 steps after service: style → scope → budget. No extras.\n"
+                "ORDERING (IMPORTANT): Exactly 2 steps after service: style → scope. No extras.\n"
                 "  - Position 1: style_direction (visual direction).\n"
                 "  - Position 2: project_parts or update_areas or remodel_intensity (scope: what to update).\n"
-                "  - Position 3: budget_range slider (MUST be present and numeric).\n"
                 "  - Do NOT add fixture_preference, lighting_style, storage_style, materials, finish, countertops, flooring, etc.\n"
                 "  - Those granular choices belong in the refinements phase after the concept appears.",
                 "KEYS (IMPORTANT): For the pre-concept funnel, use ONLY these keys:\n"
                 "  - style_direction (visual direction)\n"
                 "  - project_parts or update_areas or remodel_intensity (scope)\n"
-                "  - budget_range (slider)\n"
                 "  - Do NOT use: fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
             ],
         ),
         _bullets(
             "REQUIRED RENDER HINTS:",
             [
-                "In this service, most questions are rendered as `multiple_choice`; `budget_range` MUST be rendered as `slider`.\n"
+                "In this service, pre-concept planning questions are rendered as `multiple_choice`.\n"
                 "For `multiple_choice` items, every plan item MUST include `option_hints`.\n"
                 "  - Format: either a list of strings (labels) OR a list of objects {label, value?, image_prompt?, price_tier?}.\n"
                 "  - For steps that will be shown as image choices (e.g. style_direction, material_preference, shape), include short `image_prompt` per option so each option can be rendered as an image (e.g. \"modern minimalist kitchen cabinets\"). Keep `label` as plain English for overlay.\n"
@@ -166,17 +160,6 @@ def build_planner_prompt() -> str:
                 "      '$$$$' option: \"wide-plank white oak, Calacatta marble, bespoke millwork\"\n"
                 "    The images generated for each option must LOOK different in material quality, not just style.\n"
                 "  - DO NOT include `price_tier` on irrelevant questions (e.g., scheduling, logistics, pure yes/no, or non-cost-sensitive preferences).\n"
-                "  - For `budget_range`, set `type_hint: \"slider\"` and ALWAYS include calibrated numeric fields: `min`, `max`, `step`, `currency: \"USD\"`.\n"
-                "    Calibrate to the SPECIFIC service context — do NOT use generic fallbacks. Examples by service:\n"
-                "      Bathroom remodel: min=3000, max=35000, step=1000\n"
-                "      Kitchen remodel: min=10000, max=80000, step=2500\n"
-                "      Full home renovation: min=50000, max=400000, step=10000\n"
-                "      Landscaping: min=2000, max=40000, step=1000\n"
-                "      Interior painting: min=500, max=8000, step=250\n"
-                "      Flooring: min=1500, max=20000, step=500\n"
-                "      Roof replacement: min=5000, max=30000, step=1000\n"
-                "      HVAC: min=3000, max=15000, step=500\n"
-                "    Always pick a realistic range for the SPECIFIC service, not a catch-all.\n"
                 "  - For `remodel_intensity`, prefer labels like \"Light refresh\" / \"Partial remodel\" / \"Full remodel\".\n"
                 "  - Keep to ~3–8 options; include an 'Not sure yet' / 'Other' only when it makes sense.",
                 "If a question should allow selecting multiple answers, set `allow_multiple: true`.",

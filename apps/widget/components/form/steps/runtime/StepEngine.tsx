@@ -33,7 +33,7 @@ import {
   FORM_STATE_SCHEMA_VERSION,
   PRICING_ESTIMATE_KEY,
 } from "./step-engine/constants";
-import { deriveBudgetSliderRange } from "./step-engine/utils/budget";
+import { deriveBudgetSliderRange, roundBudgetStep } from "./step-engine/utils/budget";
 import { hexToRgba } from "@/types/design";
 import { clamp01, fnv1a32, joinSummaries, mergeUniqueStrings, normalizeOptionalString } from "./step-engine/utils/core";
 import {
@@ -123,6 +123,7 @@ export function StepEngine({
   showBrandingHeader = false,
   onMeta
 }: StepEngineProps) {
+  const REFINEMENT_UPLOAD_STEP_ID = "step-refinement-upload-scene-image";
   const { setFacts } = useExperienceState();
   const { theme, config: designConfig } = useFormTheme();
   const effectiveSessionScopeKey = sessionScopeKey || instanceId;
@@ -189,6 +190,8 @@ export function StepEngine({
   const [initialQuestionCountSnapshot, setInitialQuestionCountSnapshot] = useState<number | null>(null);
   // Never show image preview until we have received at least one generate-steps response that returned steps.
   const [hasReceivedQuestionsFromGenerateSteps, setHasReceivedQuestionsFromGenerateSteps] = useState(false);
+  const [budgetApiRange, setBudgetApiRange] = useState<{ min: number; max: number; currency: string } | null>(null);
+  const budgetApiLoadedSessionRef = useRef<string | null>(null);
   const devModeEnabled = useMemo(() => isDevModeEnabled(), []);
   
   const { trackStepStart, trackStepComplete } = useFormMetrics({
@@ -318,11 +321,21 @@ export function StepEngine({
 
   const deterministicBudgetStep: StepDefinition = useMemo(() => {
     const cfg = (config as any)?.previewPricing;
+    const apiMin = Number(budgetApiRange?.min);
+    const apiMax = Number(budgetApiRange?.max);
+    const hasApiBounds = Number.isFinite(apiMin) && Number.isFinite(apiMax) && apiMin > 0 && apiMax > 0;
     const cfgMin = Number(cfg?.totalMin);
     const cfgMax = Number(cfg?.totalMax);
+    const currency =
+      typeof budgetApiRange?.currency === "string" && budgetApiRange.currency.trim()
+        ? budgetApiRange.currency.trim().toUpperCase()
+        : "USD";
     const defaultMin = normalizedUseCase === "tryon" ? 500 : 2000;
     const defaultMax = normalizedUseCase === "tryon" ? 10000 : 50000;
-    const { min, max, step } = deriveBudgetSliderRange(cfgMin, cfgMax, defaultMin, defaultMax);
+    const derived = deriveBudgetSliderRange(cfgMin, cfgMax, defaultMin, defaultMax);
+    const min = hasApiBounds ? Math.min(apiMin, apiMax) : derived.min;
+    const max = hasApiBounds ? Math.max(apiMin, apiMax) : derived.max;
+    const step = hasApiBounds ? Math.max(100, roundBudgetStep(max - min)) : derived.step;
     return {
       id: DETERMINISTIC_BUDGET_ID,
       componentType: "slider",
@@ -332,7 +345,7 @@ export function StepEngine({
         min,
         max,
         step: Math.max(100, step),
-        currency: "USD",
+        currency,
         unit: "$",
         unitType: "currency",
         format: "currency",
@@ -342,7 +355,7 @@ export function StepEngine({
         subtext: "Move the slider to set your target spend so pricing and image quality stay aligned.",
       },
     };
-  }, [config, normalizedUseCase]);
+  }, [budgetApiRange, config, normalizedUseCase]);
 
   const budgetSliderConfig = useMemo(() => {
     const data = (deterministicBudgetStep as any)?.data || {};
@@ -417,6 +430,48 @@ export function StepEngine({
     return Number.isFinite(n) ? n : null;
   }, [state?.stepData]);
 
+  useEffect(() => {
+    if (!sessionId || !instanceId) return;
+    if (!hasReceivedQuestionsFromGenerateSteps) return;
+    if (budgetApiLoadedSessionRef.current === sessionId) return;
+    budgetApiLoadedSessionRef.current = sessionId;
+
+    const stepData = (state?.stepData as any) || {};
+    const questionStepIds = (state?.steps || [])
+      .filter((step) => isQuestionStepForAskedIds(step))
+      .map((step) => String((step as any)?.id || ""))
+      .filter(Boolean);
+
+    fetch(`/api/ai-form/${instanceId}/pricing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        sessionId,
+        stepDataSoFar: stepData,
+        askedStepIds: questionStepIds,
+        noCache: false,
+        useCase: config?.useCase,
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Budget pricing ${r.status}`))))
+      .then((json: any) => {
+        const estimate = json?.estimate && typeof json.estimate === "object" ? json.estimate : json;
+        const range = estimate?.servicePriceRange && typeof estimate.servicePriceRange === "object"
+          ? estimate.servicePriceRange
+          : null;
+        const low = Number(range?.low ?? estimate?.totalMin);
+        const high = Number(range?.high ?? estimate?.totalMax);
+        if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0) return;
+        const currency =
+          typeof estimate?.currency === "string" && estimate.currency.trim() ? String(estimate.currency).trim().toUpperCase() : "USD";
+        setBudgetApiRange({ min: Math.min(low, high), max: Math.max(low, high), currency });
+      })
+      .catch((e) => {
+        console.warn("[StepEngine] budget pricing seed failed", e);
+      });
+  }, [config?.useCase, hasReceivedQuestionsFromGenerateSteps, instanceId, sessionId, state?.stepData, state?.steps]);
+
   const handleBudgetChange = useCallback(
     (value: number) => {
       updateStepData(DETERMINISTIC_BUDGET_ID, value);
@@ -455,7 +510,7 @@ export function StepEngine({
       .then((json: any) => {
         const miniSteps = Array.isArray(json?.miniSteps) ? json.miniSteps : [];
         const deterministicUploadStep = {
-          id: "step-refinement-upload-scene-image",
+          id: REFINEMENT_UPLOAD_STEP_ID,
           type: "file_upload",
           question: "", // Rendered in FormQuestionPaneSection to avoid duplicate headers
           humanism: "Start from your real space for better refinements.",
@@ -1050,34 +1105,58 @@ export function StepEngine({
       !budgetAnswered &&
       !(completed && typeof (completed as any).has === "function" && (completed as any).has(DETERMINISTIC_BUDGET_ID));
 
-    const plannerBudgetStep = (state.steps || []).find((s: any) => {
-      const id = String((s as any)?.id || "");
-      return id === DETERMINISTIC_BUDGET_ID && String((s as any)?.type || "").toLowerCase() === "slider";
-    });
-    const budgetStepForInsert = plannerBudgetStep
-      ? ({
-          id: DETERMINISTIC_BUDGET_ID,
+    if (typeof budgetIdx !== "number" || budgetNeedsReposition) {
+      addSteps([deterministicBudgetStep], false, { insertAtIndex: budgetInsertAtIndex, moveExisting: true });
+    }
+    if (typeof budgetIdx === "number") {
+      const currentBudgetStep = (state.steps || [])[budgetIdx] as any;
+      const budgetData = (deterministicBudgetStep as any)?.data || {};
+      const budgetCopy = (deterministicBudgetStep as any)?.copy || {};
+      const nextQuestion = String(budgetCopy.headline || "What budget range should we design around?");
+      const nextMin = Number(budgetData.min ?? 2000);
+      const nextMax = Number(budgetData.max ?? 50000);
+      const nextStep = Number(budgetData.step ?? 500);
+      const nextCurrency = String(budgetData.currency || "USD");
+      const nextUnit = String(budgetData.unit || "$");
+      const nextUnitType = String(budgetData.unitType || "currency");
+      const nextFormat = String(budgetData.format || "currency");
+      const isDifferent =
+        String(currentBudgetStep?.question || "") !== nextQuestion ||
+        Number(currentBudgetStep?.min) !== nextMin ||
+        Number(currentBudgetStep?.max) !== nextMax ||
+        Number(currentBudgetStep?.step) !== nextStep ||
+        String(currentBudgetStep?.currency || "") !== nextCurrency ||
+        String(currentBudgetStep?.unit || "") !== nextUnit ||
+        String(currentBudgetStep?.unitType || "") !== nextUnitType ||
+        String(currentBudgetStep?.format || "") !== nextFormat;
+      if (isDifferent) {
+        patchStep(DETERMINISTIC_BUDGET_ID, {
           componentType: "slider",
-          intent: "collect_context",
+          type: "slider",
+          question: nextQuestion,
+          min: nextMin,
+          max: nextMax,
+          step: nextStep,
+          currency: nextCurrency,
+          unit: nextUnit,
+          unitType: nextUnitType,
+          format: nextFormat,
           data: {
-            min: Number((plannerBudgetStep as any)?.min ?? deterministicBudgetStep.data?.min ?? 1000),
-            max: Number((plannerBudgetStep as any)?.max ?? deterministicBudgetStep.data?.max ?? 5000),
-            step: Number((plannerBudgetStep as any)?.step ?? deterministicBudgetStep.data?.step ?? 500),
-            currency: String((plannerBudgetStep as any)?.currency || "USD"),
-            unit: String((plannerBudgetStep as any)?.unit || "$"),
-            unitType: String((plannerBudgetStep as any)?.unitType || "currency"),
-            format: String((plannerBudgetStep as any)?.format || "currency"),
+            min: nextMin,
+            max: nextMax,
+            step: nextStep,
+            currency: nextCurrency,
+            unit: nextUnit,
+            unitType: nextUnitType,
+            format: nextFormat,
             required: true,
           },
           copy: {
-            headline: String((plannerBudgetStep as any)?.question || deterministicBudgetStep.copy?.headline || "What budget range should we design around?"),
-            subtext: deterministicBudgetStep.copy?.subtext,
+            headline: nextQuestion,
+            subtext: String(budgetCopy.subtext || ""),
           },
-        } as StepDefinition)
-      : deterministicBudgetStep;
-
-    if (typeof budgetIdx !== "number" || budgetNeedsReposition) {
-      addSteps([budgetStepForInsert], false, { insertAtIndex: budgetInsertAtIndex, moveExisting: true });
+        });
+      }
     }
 
     const needsReposition =
@@ -1101,6 +1180,7 @@ export function StepEngine({
     desiredDeterministicUploadSteps,
     flowPlan?.sessionId,
     hasReceivedQuestionsFromGenerateSteps,
+    patchStep,
     state,
   ]);
 
@@ -1217,17 +1297,30 @@ export function StepEngine({
     saveFormState(flowPlan.sessionId, nextState);
   }, [formState, flowPlan?.sessionId, state]);
 
+  const isStepAnsweredForCounts = useCallback(
+    (step: any, stepData?: Record<string, any> | null) => {
+      const id = String((step as any)?.id || "");
+      const value = stepData?.[id];
+      if (hasMeaningfulAnswer(value)) return true;
+      if (id === DETERMINISTIC_SCENE_IMAGE_ID && stepData && Object.prototype.hasOwnProperty.call(stepData, id)) {
+        return value === null || value === "__skip__";
+      }
+      return false;
+    },
+    []
+  );
+
   // Keep form state total/answered question counts in sync when backend adds steps or user answers.
   useEffect(() => {
     if (!formState || !flowPlan?.sessionId || !state?.steps) return;
     const questionSteps = (state.steps || []).filter((step) => isQuestionStepForAskedIds(step));
     const total = questionSteps.length;
-    const answered = questionSteps.filter((step) => hasMeaningfulAnswer(state?.stepData?.[step.id])).length;
+    const answered = questionSteps.filter((step) => isStepAnsweredForCounts(step, state?.stepData)).length;
     if (formState.totalQuestionSteps === total && formState.answeredQuestionCount === answered) return;
     const nextState = { ...formState, totalQuestionSteps: total, answeredQuestionCount: answered };
     setFormState(nextState);
     saveFormState(flowPlan.sessionId, nextState);
-  }, [formState, flowPlan?.sessionId, state?.steps, state?.stepData]);
+  }, [flowPlan?.sessionId, formState, isStepAnsweredForCounts, state?.stepData, state?.steps]);
 
   // Log context state changes
   useEffect(() => {
@@ -1515,10 +1608,10 @@ export function StepEngine({
           .filter((step) => isQuestionStepForAskedIds(step))
           .map((step) => step.id);
         
-        // CRITICAL: Use the LATEST stepData from state, not the stale stepDataSoFar parameter
-        // This ensures if user changes their answer while batch 2 is loading, we use the latest data
+        // Merge latest state with the triggering payload, but let the triggering payload win.
+        // This preserves explicit clears/skips (e.g. scene upload skipped => null) over stale cached values.
         const latestStepData = state?.stepData || {};
-        const mergedStepData = { ...stepDataSoFar, ...latestStepData };
+        const mergedStepData = { ...latestStepData, ...stepDataSoFar };
         const answeredQA = buildAnsweredQA({ steps: state?.steps || [], stepData: mergedStepData, max: 40 });
         
         console.log('[StepEngine] Fetching batch with stepData', {
@@ -2057,6 +2150,14 @@ export function StepEngine({
   const handleStepComplete = async (data: any) => {
     if (!currentStep) return;
     const isRefinementSceneUploadStep = currentStep.id === "step-refinement-upload-scene-image";
+    const isSceneUploadStep =
+      currentStep.id === DETERMINISTIC_SCENE_IMAGE_ID || currentStep.id === REFINEMENT_UPLOAD_STEP_ID;
+    const isSceneUploadSkipped =
+      isSceneUploadStep &&
+      (data === null || data === undefined || data === "__skip__" || data === "" || (Array.isArray(data) && data.length === 0));
+    if (isSceneUploadSkipped) {
+      setPendingPreviewSceneUploadUrl(null);
+    }
     const shouldMirrorRefinementSceneUpload =
       isRefinementSceneUploadStep &&
       typeof data === "string" &&
@@ -2568,11 +2669,19 @@ export function StepEngine({
 
   const completedQuestionCount = useMemo(() => {
     if (!state?.steps || !state?.stepData) return 0;
+    const previewTriggerStepIds = new Set<string>([
+      DETERMINISTIC_SCENE_IMAGE_ID,
+      DETERMINISTIC_USER_IMAGE_ID,
+      DETERMINISTIC_PRODUCT_IMAGE_ID,
+      REFINEMENT_UPLOAD_STEP_ID,
+    ]);
     return state.steps.filter((step) => {
-      if (!isPreviewGateQuestionStep(step)) return false;
-      return hasMeaningfulAnswer(state.stepData[step.id]);
+      const stepId = String((step as any)?.id || "");
+      const isPreviewTriggerStep = isPreviewGateQuestionStep(step) || previewTriggerStepIds.has(stepId);
+      if (!isPreviewTriggerStep) return false;
+      return isStepAnsweredForCounts(step, state.stepData);
     }).length;
-  }, [state?.stepData, state?.steps]);
+  }, [isStepAnsweredForCounts, state?.stepData, state?.steps]);
 
   const isBootstrapStepId = useCallback((stepId: string | null | undefined) => {
     const id = String(stepId || "");
@@ -2820,9 +2929,9 @@ export function StepEngine({
     (usePreviewDominantLayout || useDesktopPreviewLayout) &&
       (previewHasImage || previewVisible || !previewQuestionRevealReady)
   );
-  // In preview-pricing mode, keep the question pane hidden after first image generation
-  // so users focus on the preview + pricing actions only.
-  const shouldHideQuestionPaneForLeadGate = Boolean(previewEnabled && previewHasImage);
+  // Keep the question pane hidden on the active forward path after preview generation,
+  // but allow it when the user explicitly backtracks to already-visited steps.
+  const shouldHideQuestionPaneForLeadGate = Boolean(previewEnabled && previewHasImage && !isBacktrackingInForm);
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
     previewQuestionRevealReady &&
@@ -2924,15 +3033,52 @@ export function StepEngine({
       }
     : null;
   const guidedThumbnailMode = false;
-  const isRefinementUploadStep = String((stepForRenderer as any)?.id) === "step-refinement-upload-scene-image";
+  const isRefinementUploadStep = String((stepForRenderer as any)?.id) === REFINEMENT_UPLOAD_STEP_ID;
   const hasPreviewSubsections = showEasePrompt;
-  const stepJoggerVisible = Boolean(showStepDescriptions && state?.steps && state.steps.length > 1);
+  const parseBatchOrder = (batchId: string | null | undefined): number | null => {
+    if (!batchId) return null;
+    const normalized = normalizeBatchId(batchId);
+    if (!normalized) return null;
+    const match = normalized.match(/^batch-(\d+)$/i);
+    if (!match) return null;
+    const n = Number(match[1]);
+    return Number.isFinite(n) ? n : null;
+  };
+  const stepJoggerRevealBatchOrder = (() => {
+    if (!state?.steps?.length) return null;
+    const revealThroughIndex = Math.max(state.currentStepIndex ?? 0, maxVisitedIndex ?? 0);
+    let maxOrder: number | null = null;
+    for (let i = 0; i <= revealThroughIndex && i < state.steps.length; i += 1) {
+      const stepId = String((state.steps[i] as any)?.id || "");
+      if (!stepId) continue;
+      const meta = stepMetaRef.current.get(stepId);
+      const order = parseBatchOrder(meta?.batchId);
+      if (order === null) continue;
+      maxOrder = maxOrder === null ? order : Math.max(maxOrder, order);
+    }
+    return maxOrder;
+  })();
+  const stepJoggerSteps = (() => {
+    if (!state?.steps?.length) return [];
+    const indexed = state.steps.map((step, index) => ({ step, index }));
+    const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
+    if (leadCapturedForUI) return withoutRefinementUpload;
+    return withoutRefinementUpload.filter(({ step }) => {
+      const stepId = String((step as any)?.id || "");
+      if (!stepId) return true;
+      const meta = stepMetaRef.current.get(stepId);
+      const order = parseBatchOrder(meta?.batchId);
+      if (order === null || stepJoggerRevealBatchOrder === null) return true;
+      return order <= stepJoggerRevealBatchOrder;
+    });
+  })();
+  const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1);
   const headerVisible = Boolean(showProgressBar || stepJoggerVisible);
   const getStepJoggerLabel = (step: any, index: number): string => {
     const stepId = String(step?.id || "");
     if (stepId.startsWith("step-service-primary")) return "Service";
     if (stepId.includes("budget")) return "Budget";
-    if (stepId.includes("upload-scene")) return "Space Photo";
+    if (stepId.includes("upload-scene")) return "Upload Photo";
     if (stepId.includes("upload-user")) return "Person Photo";
     if (stepId.includes("upload-product")) return "Product Photo";
     if (stepId.includes("lead") || stepId.includes("email") || stepId.includes("phone") || stepId.includes("full-name")) return "Contact";
@@ -2986,7 +3132,7 @@ export function StepEngine({
         {stepJoggerVisible ? (
           <div className="px-4 pb-2">
             <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
-              {state!.steps.map((step: any, index: number) => {
+              {stepJoggerSteps.map(({ step, index }) => {
                 const isCurrent = index === (state?.currentStepIndex || 0);
                 const canNavigate = index <= maxVisitedIndex && !isCurrent;
                 const label = getStepJoggerLabel(step, index);
@@ -3115,7 +3261,10 @@ export function StepEngine({
 	                      onBudgetChange={handleBudgetChange}
 	                      promptDraft={promptDraft}
 	                      setPromptDraft={setPromptDraft}
-	                      handlePromptSubmit={() => {
+	                      handlePromptSubmit={(uploadedUrl?: string) => {
+                          if (uploadedUrl && typeof uploadedUrl === "string") {
+                            setPendingPreviewSceneUploadUrl(uploadedUrl);
+                          }
 	                        setPromptSubmitCount((prev) => prev + 1);
 	                        setPreviewRefreshNonce((prev) => prev + 1);
                       }}

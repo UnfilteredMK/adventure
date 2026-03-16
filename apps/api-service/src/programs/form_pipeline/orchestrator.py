@@ -28,7 +28,6 @@ from programs.form_pipeline.constraints import extract_token_budget
 from programs.form_pipeline.context_builder import build_context
 from programs.form_pipeline.utils import _compact_json
 from programs.question_planner.cache import planner_cache_key
-from programs.question_planner.budget_bounds import ensure_budget_in_plan
 from programs.question_planner.plan_parsing import derive_step_id_from_key, extract_plan_items, normalize_plan_key
 from programs.question_planner.program import QuestionPlannerProgram
 from programs.question_planner.renderer.cache import render_cache_key
@@ -784,8 +783,6 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
         merged_plan_items.append(normalized)
         seen_keys.add(key)
 
-    merged_plan_items = ensure_budget_in_plan(merged_plan_items, asked_step_ids=asked_ids)
-
     # Slice per-call: render only the next batch of planned steps.
     sliced: List[Dict[str, Any]] = []
     max_steps_this_call = int(_resolve_max_steps_this_call(payload, ctx))
@@ -981,6 +978,9 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Final copy sanitation (question marks, remove duplicated enumerations, etc.)
     emitted = sanitize_steps(emitted, lint_config, plan_step_ids=planned_id_order)
+    # Budget is now deterministic client-side and seeded from pricing API bounds.
+    # Never emit planner-provided budget sliders from generate-steps.
+    emitted = [s for s in emitted if str((s or {}).get("id") or "").strip() != "step-budget-range"]
     t_post_ms = int((time.time() - _t0) * 1000)
 
     # Cache rendered output (validated miniSteps only).

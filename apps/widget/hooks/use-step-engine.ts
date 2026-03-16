@@ -252,10 +252,12 @@ export function useStepEngine({
     // Clear any previous progressive error when user continues.
     setError(null);
 
+    const resolvedStepData = stepData !== undefined ? stepData : state.stepData[currentStep.id];
+
     // Save step data
     const updatedStepData = {
       ...state.stepData,
-      [currentStep.id]: stepData || state.stepData[currentStep.id]
+      [currentStep.id]: resolvedStepData
     };
 
     // Mark step as completed
@@ -264,7 +266,7 @@ export function useStepEngine({
 
     // Call step complete callback
     if (onStepComplete) {
-      onStepComplete(currentStep.id, stepData || state.stepData[currentStep.id]);
+      onStepComplete(currentStep.id, resolvedStepData);
     }
 
     // Check if we should skip next step
@@ -508,7 +510,7 @@ export function useStepEngine({
           try {
             res = await fetchNextStep({
               stepId: currentStep.id,
-              answer: stepData || state.stepData[currentStep.id],
+              answer: resolvedStepData,
               stepDataSoFar: updatedStepData,
               stepsSoFar: state.steps,
             });

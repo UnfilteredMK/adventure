@@ -129,11 +129,7 @@ def extract_plan_items(text: Any, *, max_items: int, asked_step_ids: Set[str]) -
         out.append(normalized)
         if len(out) >= int(max_items):
             break
-    # Preserve planner ordering, but normalize budget placement so `budget_range`
-    # is always the final generated planning item in the batch.
-    budget_items = [x for x in out if str(x.get("key") or "").strip() == "budget_range"]
-    non_budget_items = [x for x in out if str(x.get("key") or "").strip() != "budget_range"]
-    return [*non_budget_items, *budget_items]
+    return out
 
 
 __all__ = ["normalize_plan_key", "derive_step_id_from_key", "extract_plan_items"]

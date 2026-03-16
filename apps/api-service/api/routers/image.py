@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any, Dict, Optional
@@ -116,6 +117,20 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             return
         ttl = max(5, min(3600, int(ttl_sec or 0)))
         _PROMPT_CACHE[key] = (time.time() + ttl, value)
+
+    def _option_images_debug_enabled() -> bool:
+        return str(os.getenv("AI_FORM_OPTION_IMAGES_DEBUG_LOG") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def _option_images_debug_log(label: str, data: Dict[str, Any], *, force: bool = False) -> None:
+        if not force and not _option_images_debug_enabled():
+            return
+        try:
+            text = json.dumps(data, ensure_ascii=False, sort_keys=True)
+            if len(text) > 6000:
+                text = text[:6000] + "…"
+            print(f"[option_images] {label} {text}", flush=True)
+        except Exception:
+            print(f"[option_images] {label} (unable to serialize)", flush=True)
 
     @router.post("/image")
     def image(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
@@ -339,6 +354,32 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             session_id = str((payload.get("session") or {}).get("sessionId") or "").strip()
         model_id = str(payload.get("modelId") or payload.get("model_id") or os.getenv("REPLICATE_OPTION_IMAGES_MODEL_ID") or "").strip() or "black-forest-labs/flux-schnell"
         seed_base = f"{session_id}|{model_id}" if session_id else None
+
+        payload_reference_images = payload.get("referenceImages")
+        reference_images_count = len(payload_reference_images) if isinstance(payload_reference_images, list) else 0
+        _option_images_debug_log(
+            "request",
+            {
+                "stepId": step_id or None,
+                "question": question,
+                "sessionId": session_id or None,
+                "modelId": model_id,
+                "optionsCount": len(options),
+                "referenceImagesCount": reference_images_count,
+                "budgetRange": budget_raw or None,
+                "serviceSummary": service_str[:280],
+                "options": [
+                    {
+                        "label": (str(opt.get("label") or opt.get("value") or "").strip() if isinstance(opt, dict) else str(opt or "").strip()),
+                        "value": (str(opt.get("value") or "").strip() if isinstance(opt, dict) else str(opt or "").strip()),
+                        "image_prompt": (str(opt.get("image_prompt") or opt.get("imagePrompt") or "").strip()[:200] if isinstance(opt, dict) else ""),
+                        "price_tier": (str(opt.get("price_tier") or opt.get("priceTier") or "").strip() if isinstance(opt, dict) else ""),
+                    }
+                    for opt in options
+                ],
+            },
+        )
+
         for opt in options:
             if isinstance(opt, str):
                 label = opt.strip()
@@ -377,7 +418,33 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             for j, idx in enumerate(indices):
                 if j < len(urls) and urls[j]:
                     normalized[idx]["imageUrl"] = urls[j]
-        return {"ok": True, "stepId": step_id, "question": question, "options": normalized, "stats": stats}
+        with_images = sum(1 for item in normalized if isinstance(item.get("imageUrl"), str) and str(item.get("imageUrl")).strip())
+        response_obj = {"ok": True, "stepId": step_id, "question": question, "options": normalized, "stats": stats}
+        _option_images_debug_log(
+            "response",
+            {
+                "stepId": step_id or None,
+                "question": question,
+                "modelId": model_id,
+                "optionsCount": len(normalized),
+                "optionsWithImageUrl": with_images,
+                "stats": stats,
+            },
+        )
+        # Keep a compact warning always-on when generation attempted but produced no images.
+        if prompts and with_images == 0:
+            _option_images_debug_log(
+                "warning_no_images_returned",
+                {
+                    "stepId": step_id or None,
+                    "question": question,
+                    "modelId": model_id,
+                    "promptCount": len(prompts),
+                    "stats": stats,
+                },
+                force=True,
+            )
+        return response_obj
 
     @compat_router.post("/option-images/regenerate")
     @router.post("/option-images/regenerate")

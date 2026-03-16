@@ -57,56 +57,7 @@ def _is_price_relevant_key(key: str) -> bool:
     return bool(k) and any(h in k for h in _PRICE_RELEVANT_KEY_HINTS)
 
 
-def _default_budget_step(min_v: int = 3000, max_v: int = 5000) -> dict:
-    span = max(500, int(round((max_v - min_v) / 8)))
-    return {
-        "key": "budget_range",
-        "question": "What budget range should we design around?",
-        "type_hint": "slider",
-        "min": int(min_v),
-        "max": int(max_v),
-        "step": int(span),
-        "currency": "USD",
-    }
-
-
-def _normalize_budget_range_item(item: dict) -> dict:
-    try:
-        min_raw = float(item.get("min"))
-        max_raw = float(item.get("max"))
-        if max_raw <= min_raw:
-            raise ValueError("invalid budget bounds")
-    except Exception:
-        return _default_budget_step()
-
-    baseline = (min_raw + max_raw) / 2.0
-    if baseline <= 0:
-        return _default_budget_step()
-    target_min = int(round(baseline * 0.8))
-    target_max = int(round(baseline * 1.2))
-    if target_max <= target_min:
-        target_max = target_min + 1000
-
-    # Keep ranges practical and avoid huge windows in demos.
-    target_min = max(500, target_min)
-    target_max = min(max(target_min + 500, target_max), 250000)
-    span = target_max - target_min
-    step = max(250, int(round(span / 8)))
-    if step >= 1000:
-        step = int(round(step / 500) * 500)
-    elif step >= 250:
-        step = int(round(step / 250) * 250)
-    return {
-        **item,
-        "type_hint": "slider",
-        "min": int(target_min),
-        "max": int(target_max),
-        "step": int(max(1, step)),
-        "currency": "USD",
-    }
-
-
-def _normalize_plan_for_budget_and_tiers(question_plan_json: Any) -> Any:
+def _normalize_plan_for_tiers(question_plan_json: Any) -> Any:
     if not isinstance(question_plan_json, dict):
         return question_plan_json
     plan = question_plan_json.get("plan")
@@ -114,15 +65,11 @@ def _normalize_plan_for_budget_and_tiers(question_plan_json: Any) -> Any:
         return question_plan_json
 
     next_plan: list[dict] = []
-    budget_item: dict | None = None
     for raw_item in plan:
         if not isinstance(raw_item, dict):
             continue
         item = dict(raw_item)
         key = str(item.get("key") or "").strip().lower()
-        if key == "budget_range":
-            budget_item = _normalize_budget_range_item(item)
-            continue
 
         option_hints = item.get("option_hints")
         if isinstance(option_hints, list):
@@ -142,10 +89,6 @@ def _normalize_plan_for_budget_and_tiers(question_plan_json: Any) -> Any:
                     normalized_opts.append(opt)
             item["option_hints"] = normalized_opts
         next_plan.append(item)
-
-    if budget_item is None:
-        budget_item = _default_budget_step()
-    next_plan.append(budget_item)
     return {**question_plan_json, "plan": next_plan}
 
 
@@ -207,7 +150,7 @@ def default_design_demos() -> list[dspy.Example]:
                     ctx["copy_context"] = dict(DEFAULT_COPY_CONTEXT)
                 inputs["planner_context_json"] = ctx
             if isinstance(outputs.get("question_plan_json"), dict):
-                outputs["question_plan_json"] = _normalize_plan_for_budget_and_tiers(outputs["question_plan_json"])
+                outputs["question_plan_json"] = _normalize_plan_for_tiers(outputs["question_plan_json"])
 
             # Normalize JSON payloads to strings.
             inputs["planner_context_json"] = _ensure_json_str(inputs.get("planner_context_json"))

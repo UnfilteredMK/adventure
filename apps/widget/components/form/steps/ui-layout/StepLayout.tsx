@@ -28,6 +28,7 @@ interface StepLayoutProps {
 function getQuestion(step: any): string {
   return (
     String(step?.question || "").trim() ||
+    String(step?.copy?.headline || "").trim() ||
     String(step?.content?.prompt || "").trim() ||
     "Tell us a bit more"
   );
@@ -36,6 +37,7 @@ function getQuestion(step: any): string {
 function getSubtext(step: any): string {
   return (
     String(step?.humanism || "").trim() ||
+    String(step?.copy?.subtext || "").trim() ||
     String(step?.subtext || "").trim() ||
     String(step?.content?.subtext || "").trim()
   );
