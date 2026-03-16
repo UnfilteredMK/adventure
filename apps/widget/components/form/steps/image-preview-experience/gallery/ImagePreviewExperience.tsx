@@ -1886,7 +1886,7 @@ export function ImagePreviewExperience(props: {
     })}`;
   }, [accuratePricing, pricingCurrency, pricingLocale]);
 
-  const pillLabel = leadGateEnabled ? (leadCaptured ? "pricing" : "Show pricing") : "pricing";
+  const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
   // Price pill shows the image-specific price range (totalMin – totalMax) from the API
   const pillPrice = formattedAccuratePricingRange
     ? formattedAccuratePricingRange
@@ -2189,6 +2189,7 @@ export function ImagePreviewExperience(props: {
 	                <motion.div
 	                  key="hero"
 	                  layoutId={lightboxLayoutId}
+	                  layout={false}
 	                  className="h-full w-full cursor-zoom-in"
 	                  role="button"
 	                  tabIndex={0}
@@ -2687,11 +2688,11 @@ export function ImagePreviewExperience(props: {
 	                    ) : null}
 				                    {shouldShowBottomPricingPill ? (
 				                      <div
-				                        className="ml-auto shrink-0 w-auto flex flex-col rounded-2xl overflow-hidden px-2 py-1 sm:px-2.5 sm:py-1.5 shadow-lg shadow-black/25 backdrop-blur-md"
+				                        data-pricing-pill
+				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-2xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[8rem] transition-[max-width,padding] duration-300 ease-out"
 			                        style={{
-                                width: "fit-content",
-                                minWidth: "15rem",
-                                maxWidth: "calc(100vw - 1rem)",
+			                          maxWidth: 'clamp(45%, 72% - 7vw, 50%)',
+			                          padding: 'clamp(0.25rem, 1.5vw, 0.625rem) clamp(0.5rem, 2vw, 0.625rem)',
 			                          backgroundColor: pillBg,
 			                          backdropFilter: 'blur(12px)',
 			                          WebkitBackdropFilter: 'blur(12px)',
@@ -2699,8 +2700,8 @@ export function ImagePreviewExperience(props: {
 			                      >
 				                          <PricingExperience
 				                            variant="pill"
-				                            className="w-auto border-0"
-				                            containerClassName="w-auto min-w-[13rem] px-1 py-0"
+				                            className="w-full border-0"
+				                            containerClassName="w-full min-w-0 px-1 py-0"
                             transparentBackground
                             label={pillLabel}
                           termsHref="/terms"

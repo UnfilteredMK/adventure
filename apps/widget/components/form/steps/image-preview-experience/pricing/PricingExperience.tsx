@@ -156,20 +156,12 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     : "w-[clamp(19rem,48vw,25rem)] max-w-[calc(100vw-2rem)]";
   const revealedPriceClass = transparentBackground
     ? transparentUsesFullWidth
-      ? "w-auto max-w-[calc(100%-0.5rem)] self-center px-[0.85rem]"
+      ? "w-full min-w-0 px-[clamp(0.5rem,2vw,0.85rem)]"
       : "w-auto max-w-[calc(100vw-6rem)] self-center px-[0.85rem]"
     : priceWidthClass;
   // When transparentBackground, parent provides the bg - stay fully transparent to avoid double-layer/halo
   const outerBg = transparentBackground ? 'transparent' : tagBg;
   const pillOverflowClass = transparentBackground && !transparentUsesFullWidth ? "overflow-hidden" : "overflow-visible";
-  const compactOverlayPill = Boolean(transparentBackground && !transparentUsesFullWidth);
-  const compactAlignClass = compactOverlayPill ? "items-end text-right" : "items-center text-center";
-  const compactSelfClass = compactOverlayPill ? "self-end" : "self-center";
-  const contentInsetClass =
-    compactOverlayPill
-      ? "pl-[1.55rem] pr-[0.55rem] py-[0.3rem]"
-      : "px-[1.5%] py-[1.5%]";
-
   return (
     <div
       className={cn(
@@ -207,28 +199,33 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         }}
         {...props}
       >
-        <span
-          className="pointer-events-none absolute left-[0.45rem] top-1/2 z-10 h-[0.7rem] w-[0.7rem] -translate-y-1/2 rounded-full bg-[rgba(55,65,81,0.9)]"
-          aria-hidden
-        />
-        {!revealed ? (
-          <div className={cn("relative box-border flex h-full w-full flex-col justify-center", compactAlignClass, contentInsetClass)}>
-            <div className={cn("flex min-h-[3.95rem] w-full flex-col justify-center gap-[0.18rem] sm:gap-[0.22rem]", compactAlignClass)}>
+        <div className="flex h-full w-full items-stretch">
+          <div className="relative shrink-0 w-[clamp(0.5rem,5cqi,1.2rem)] flex items-center justify-center">
+            <span
+              className="pointer-events-none h-[clamp(0.35rem,3cqi,0.6rem)] w-[clamp(0.35rem,3cqi,0.6rem)] shrink-0 rounded-full bg-[rgba(55,65,81,0.9)]"
+              aria-hidden
+            />
+          </div>
+          {!revealed ? (
+            <div
+              data-pricing-label-reveal
+              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.1rem,1cqi,0.22rem)] text-center pl-[clamp(0.35rem,3cqi,0.75rem)] pr-0 py-[clamp(0.15rem,1.5cqi,0.3rem)] min-h-[clamp(2.5rem,15cqi,4rem)]")}
+            >
               <div
+                data-pricing-label
                 className={cn(
                   labelWidthClass,
-                  compactSelfClass,
-                  compactOverlayPill ? "text-right" : "text-center",
-                  "text-[clamp(1.42rem,3.1vw,2rem)] font-medium tracking-[0.035em] leading-[1.05] text-white uppercase"
+                  "w-full min-w-0",
+                  "text-[clamp(0.72rem,5.5cqi,1.9rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
                 )}
                 style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
               >
                 {pillLabel}
               </div>
               <div
+                data-pricing-reveal
                 className={cn(
-                  "box-border inline-flex min-h-[3.2rem] w-auto max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[0.8rem] py-[2.15%] text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none whitespace-nowrap",
-                  compactSelfClass
+                  "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] w-full min-w-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
                 style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
               >
@@ -240,38 +237,39 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 </span>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className={cn("relative box-border flex h-full w-full flex-col", compactAlignClass, contentInsetClass)}>
-            <div className={cn("flex min-h-[4rem] w-full flex-1 flex-col justify-center gap-[0.18rem] sm:gap-[0.22rem]", compactAlignClass)}>
+          ) : (
+            <div
+              data-pricing-label-reveal
+              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.1rem,1cqi,0.22rem)] text-center pl-[clamp(0.35rem,3cqi,0.75rem)] pr-0 py-[clamp(0.15rem,1.5cqi,0.3rem)] min-h-[clamp(2.5rem,15cqi,4rem)]")}
+            >
               <div
+                data-pricing-label
                 className={cn(
                   labelWidthClass,
-                  compactSelfClass,
-                  compactOverlayPill ? "text-right" : "text-center",
-                  "text-[clamp(1.18rem,2.55vw,1.68rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
+                  "w-full min-w-0",
+                  "text-[clamp(0.72rem,5.5cqi,1.9rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
                 )}
                 style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
               >
                 {pillLabel}
               </div>
               <div
+                data-pricing-reveal
                 className={cn(
                   revealedPriceClass,
-                  compactSelfClass,
-                  "box-border inline-flex min-h-[3rem] min-w-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[2.5%] py-[2.15%] text-[clamp(0.95rem,1.8vw,1.65rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none whitespace-nowrap overflow-hidden"
+                  "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] min-w-0 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
                 style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
               >
                 {loading ? (
-                  <span className="text-white/90">Calculating…</span>
+                  <span className="text-white/90 min-w-0">Calculating…</span>
                 ) : (
-                  price
+                  <span className="min-w-0">{price}</span>
                 )}
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </button>
     </div>
   );
