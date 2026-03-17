@@ -17,6 +17,7 @@ interface ImageChoiceGridProps {
   onSwipeComplete?: (value: string | string[]) => void;
   options: Array<{ label: string; value?: string; imageUrl?: string; description?: string; priceTier?: PriceTier }>;
   multiple?: boolean;
+  maxSelections?: number;
   variant?: ImageChoiceVariant;
   columns?: number;
   className?: string;
@@ -63,6 +64,7 @@ export function ImageChoiceGrid({
   onSwipeComplete,
   options,
   multiple,
+  maxSelections,
   variant = "selectors",
   columns,
   className,
@@ -79,6 +81,8 @@ export function ImageChoiceGrid({
     if (multiple) {
       if (selectedArray.includes(val)) {
         onChange(selectedArray.filter((v) => v !== val));
+      } else if (Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections)) {
+        return;
       } else {
         onChange([...selectedArray, val]);
       }

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import Replicate from 'replicate';
 import { ImageStorage } from '@/storage/image-storage';
 import { StorageConfig } from '@/storage/types';
+import { IMAGE_STORAGE_PREFIXES } from '@/storage/prefixes';
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
 
         // Upload to S3
         const s3ImageUrl = await imageStorage.uploadImage(imageBlob, {
-          path: `generated/${pendingImage.id}.png`,
+          path: `${IMAGE_STORAGE_PREFIXES.subcategory}/generated/${pendingImage.id}.png`,
           bucket: 'images',
         });
 

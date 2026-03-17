@@ -1,6 +1,4 @@
-import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { logger } from "@/lib/server/logger";
 import { isImageRefLike } from "@/lib/ai-form/utils/reference-images";
 
@@ -9,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
-function decodeDataUrl(dataUrl: string): { contentType: string; buffer: Buffer; extension: string } | null {
+function decodeDataUrl(dataUrl: string): { contentType: string; buffer: Buffer } | null {
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl);
   if (!match) return null;
   const contentType = String(match[1] || "image/png").toLowerCase();
@@ -21,25 +19,7 @@ function decodeDataUrl(dataUrl: string): { contentType: string; buffer: Buffer; 
     return null;
   }
   if (!buffer || buffer.length === 0 || buffer.length > MAX_BYTES) return null;
-
-  const extension =
-    contentType === "image/jpeg"
-      ? "jpg"
-      : contentType === "image/webp"
-        ? "webp"
-        : contentType === "image/gif"
-          ? "gif"
-          : contentType === "image/png"
-            ? "png"
-            : "png";
-  return { contentType, buffer, extension };
-}
-
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseKey) return null;
-  return createClient(supabaseUrl, supabaseKey);
+  return { contentType, buffer };
 }
 
 export async function POST(request: NextRequest) {
@@ -71,38 +51,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const bucket = process.env.AI_FORM_REFERENCE_IMAGE_BUCKET || "reference-images";
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    logger.warn("[upload-reference-image] missing_supabase_config", { instanceId, bucket, fallback: "data-url" });
-    return NextResponse.json({ ok: true, url: image, stored: false }, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  const digest = createHash("sha256").update(decoded.buffer).digest("hex").slice(0, 24);
-  const objectPath = `${instanceId}/${Date.now()}-${digest}.${decoded.extension}`;
-  const { error: uploadErr } = await supabase.storage.from(bucket).upload(objectPath, decoded.buffer, {
+  logger.info("[upload-reference-image] bypass_storage", {
+    instanceId,
     contentType: decoded.contentType,
-    upsert: false,
+    bytes: decoded.buffer.length,
   });
-
-  if (uploadErr) {
-    logger.warn("[upload-reference-image] storage_upload_failed", {
-      instanceId,
-      bucket,
-      objectPath,
-      error: uploadErr.message || String(uploadErr),
-      fallback: "data-url",
-    });
-    return NextResponse.json({ ok: true, url: image, stored: false }, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-  const publicUrl = typeof data?.publicUrl === "string" ? data.publicUrl : "";
-  if (!publicUrl) {
-    logger.warn("[upload-reference-image] missing_public_url", { instanceId, bucket, objectPath, fallback: "data-url" });
-    return NextResponse.json({ ok: true, url: image, stored: false }, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  logger.info("[upload-reference-image] stored", { instanceId, bucket, objectPath, contentType: decoded.contentType });
-  return NextResponse.json({ ok: true, url: publicUrl, stored: true }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, url: image, stored: false }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -291,6 +292,104 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         "$$$": "Premium materials, natural stone, custom cabinetry, high-end fixtures.",
         "$$$$": "Luxury, bespoke finishes, marble, custom millwork, designer fixtures.",
     }
+
+    @compat_router.post("/subcategory-catalog/generate")
+    @router.post("/subcategory-catalog/generate")
+    async def subcategory_catalog_generate(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
+        from programs.form_pipeline.orchestrator import _should_skip_option_image_for_label  # noqa: E402
+        from programs.image_generator.providers.image_generation import generate_option_images_for_step  # noqa: E402
+        from programs.subcategory_catalog.orchestrator import generate_subcategory_catalog  # noqa: E402
+
+        planned = generate_subcategory_catalog(payload)
+        if not planned.get("ok"):
+            error = str(planned.get("error") or "").strip().lower()
+            status = HTTP_400_BAD_REQUEST if error == "missing_service_context" else 500
+            return JSONResponse(status_code=status, content=planned)
+
+        question = str(planned.get("question") or "").strip() or "Choose a starting visual direction."
+        concepts = planned.get("concepts") if isinstance(planned.get("concepts"), list) else []
+        service_str = str(
+            payload.get("serviceSummary")
+            or payload.get("service_summary")
+            or payload.get("service")
+            or payload.get("subcategoryName")
+            or payload.get("subcategory_name")
+            or payload.get("industry")
+            or payload.get("categoryName")
+            or "Service"
+        ).strip() or "Service"
+        context_prompt = f"{service_str}: {question}"
+
+        try:
+            max_opts = int(os.getenv("AI_FORM_SUBCATEGORY_CATALOG_MAX_OPTIONS") or "40")
+        except Exception:
+            max_opts = 40
+        max_opts = max(1, min(40, int(max_opts or 40)))
+
+        model_id = str(payload.get("modelId") or payload.get("model_id") or os.getenv("REPLICATE_OPTION_IMAGES_MODEL_ID") or "").strip() or "black-forest-labs/flux-schnell"
+        subcategory_id = str(payload.get("subcategoryId") or payload.get("subcategory_id") or "").strip()
+        seed_label = subcategory_id or str(payload.get("service") or payload.get("subcategoryName") or service_str).strip()
+        seed_label = re.sub(r"[^a-z0-9]+", "-", seed_label.lower()).strip("-") or "subcategory"
+        seed_base = f"subcategory-catalog:{seed_label}|{model_id}"
+
+        prompts: list[str] = []
+        indices: list[int] = []
+        normalized: list[dict[str, Any]] = []
+
+        for concept in concepts:
+            if not isinstance(concept, dict):
+                continue
+            label = str(concept.get("label") or concept.get("value") or "").strip()
+            value = str(concept.get("value") or "").strip() or re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or label
+            image_prompt = str(concept.get("image_prompt") or concept.get("imagePrompt") or label).strip()
+            description = str(concept.get("description") or concept.get("descriptor") or "").strip()
+            price_tier = str(concept.get("price_tier") or concept.get("priceTier") or "").strip()
+            if not label or not image_prompt:
+                continue
+
+            item: Dict[str, Any] = {
+                "image_prompt": image_prompt,
+                "label": label,
+                "value": value,
+            }
+            if description:
+                item["description"] = description
+            if price_tier in _PRICE_TIER_DESCS:
+                item["price_tier"] = price_tier
+            normalized.append(item)
+
+            if _should_skip_option_image_for_label(label) or len(indices) >= max_opts:
+                continue
+
+            prompt_text = image_prompt
+            if description and description.lower() not in image_prompt.lower():
+                prompt_text = f"{prompt_text}, {description}"
+            tier_suffix = f" {_PRICE_TIER_DESCS[price_tier]}" if price_tier in _PRICE_TIER_DESCS else ""
+            prompts.append(
+                f"Photorealistic photo, no text, no words, no letters, no labels, no captions, no watermarks, no signs. "
+                f"{context_prompt}. Option: {prompt_text}.{tier_suffix}"
+            )
+            indices.append(len(normalized) - 1)
+
+        stats: Dict[str, int] = {}
+        if prompts:
+            urls, stats = generate_option_images_for_step(prompts, model_id=model_id, seed_base=seed_base)
+            for j, idx in enumerate(indices):
+                if j < len(urls) and urls[j]:
+                    normalized[idx]["imageUrl"] = urls[j]
+
+        return {
+            "concepts": concepts,
+            "imageStats": stats,
+            "modelId": model_id,
+            "ok": True,
+            "options": normalized,
+            "plannerLmUsage": planned.get("lmUsage"),
+            "plannerSource": planned.get("source"),
+            "question": question,
+            "requestId": planned.get("requestId"),
+            "targetCount": planned.get("targetCount"),
+        }
 
     @compat_router.post("/option-images/generate")
     @router.post("/option-images/generate")

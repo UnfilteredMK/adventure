@@ -101,6 +101,16 @@ export function ImageChoiceGridStep({
     : (step as StepDefinition).content?.options || (step as StepDefinition).data?.options || [];
   const options = normalizeOptions(optionsRaw as any[]).filter((option) => !isOtherOption(option));
   const multiple = isUIStep ? Boolean((step as MultipleChoiceUI).multi_select) : Boolean((step as StepDefinition).data?.multiple);
+  const minSelections =
+    isUIStep && multiple && Number.isFinite(Number((step as any)?.min_selections))
+      ? Math.max(1, Math.floor(Number((step as any).min_selections)))
+      : multiple
+        ? 1
+        : 1;
+  const maxSelections =
+    isUIStep && multiple && Number.isFinite(Number((step as any)?.max_selections))
+      ? Math.max(1, Math.floor(Number((step as any).max_selections)))
+      : undefined;
   const [value, setValue] = React.useState<any>(stepData ?? (multiple ? [] : ""));
   React.useEffect(() => {
     if (stepData !== undefined) setValue(stepData);
@@ -122,7 +132,7 @@ export function ImageChoiceGridStep({
   const normalizedColumns = Number.isFinite(Number(columns)) ? Math.max(1, Math.min(6, Math.floor(Number(columns)))) : undefined;
 
   const selectedArray = Array.isArray(value) ? value : value ? [value] : [];
-  const canContinue = multiple ? selectedArray.length > 0 : Boolean(value);
+  const canContinue = multiple ? selectedArray.length >= minSelections : Boolean(value);
 
   return (
     <StepLayout
@@ -147,6 +157,7 @@ export function ImageChoiceGridStep({
           }}
           options={options}
           multiple={multiple}
+          maxSelections={maxSelections}
           variant={effectiveVariant}
           columns={normalizedColumns}
           thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
@@ -155,5 +166,4 @@ export function ImageChoiceGridStep({
     </StepLayout>
   );
 }
-
 

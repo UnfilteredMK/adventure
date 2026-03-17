@@ -188,6 +188,10 @@ def _normalize_option_hints(option_hints: Any) -> list:
     return out
 
 
+def _is_catalog_backed_style_step(key: str) -> bool:
+    return normalize_plan_key(key) == "style_direction"
+
+
 def _enforce_option_count(
     option_hints: list,
     *,
@@ -390,7 +394,7 @@ def render_plan_items_to_mini_steps(
                 choice_option_target=choice_option_target,
             )
             options = _coerce_options(raw_option_hints)
-            if not options:
+            if not options and not _is_catalog_backed_style_step(key):
                 # Hard backstop: choice steps require options for schema validation.
                 options = _coerce_options(["Not sure yet"])
 
@@ -418,6 +422,24 @@ def render_plan_items_to_mini_steps(
                     step["multi_select"] = True
                     if inferred_max is not None:
                         step["max_selections"] = int(inferred_max)
+
+            min_selections = item.get("min_selections")
+            if min_selections is None:
+                min_selections = item.get("minSelections")
+            if min_selections is not None:
+                try:
+                    step["min_selections"] = max(1, int(min_selections))
+                except Exception:
+                    pass
+
+            max_selections = item.get("max_selections")
+            if max_selections is None:
+                max_selections = item.get("maxSelections")
+            if max_selections is not None:
+                try:
+                    step["max_selections"] = max(1, int(max_selections))
+                except Exception:
+                    pass
 
             allow_other = item.get("allow_other")
             if allow_other is None:

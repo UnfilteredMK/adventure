@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { IMAGES_BUCKET, IMAGE_STORAGE_PREFIXES } from "@/storage/prefixes";
 
 export const dynamic = "force-dynamic";
 
@@ -108,11 +109,11 @@ export async function POST(request: NextRequest) {
     }
 
     const safeName = sanitizeFilename(originalName);
-    const objectPath = `logos/${instanceId}/${Date.now()}-${safeName}`;
+    const objectPath = `${IMAGE_STORAGE_PREFIXES.logos}/${instanceId}/${Date.now()}-${safeName}`;
 
     const bytes = new Uint8Array(await (blob as any).arrayBuffer());
     const { error: uploadError, data: uploadData } = await supabaseAdmin.storage
-      .from("images")
+      .from(IMAGES_BUCKET)
       .upload(objectPath, bytes, {
         cacheControl: "3600",
         contentType,
@@ -124,7 +125,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: uploadError.message || "Upload failed" }, { status: 500 });
     }
 
-    const { data: publicData } = supabaseAdmin.storage.from("images").getPublicUrl(uploadData.path);
+    const { data: publicData } = supabaseAdmin.storage.from(IMAGES_BUCKET).getPublicUrl(uploadData.path);
     const url = publicData?.publicUrl || "";
     if (!url) {
       return NextResponse.json({ error: "Failed to resolve public URL" }, { status: 500 });
@@ -138,4 +139,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

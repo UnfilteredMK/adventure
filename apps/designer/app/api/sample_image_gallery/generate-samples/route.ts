@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { ImageStorage } from '@/storage/image-storage';
 import { getStorageConfigFromEnv } from '@/storage/config';
+import { IMAGE_STORAGE_PREFIXES } from '@/storage/prefixes';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,8 +190,9 @@ export async function POST(request: NextRequest) {
 
           const imageBlob = await imageResponse.blob();
 
+          const storagePath = `${IMAGE_STORAGE_PREFIXES.sampleGallery}/${instanceId}/${Date.now()}-${i}.png`;
           const s3ImageUrl = await imageStorage.uploadImage(imageBlob, {
-            path: `${Date.now()}-${i}.png`,
+            path: storagePath,
             contentType: 'image/png',
             metadata: {
               generated_for: 'sample_gallery',
@@ -234,7 +236,7 @@ export async function POST(request: NextRequest) {
                 prompt_text: prompt,
                 generation_index: i,
                 replicate_url: replicateImageUrl,
-                s3_path: `${Date.now()}-${i}.png`,
+                s3_path: storagePath,
                 ai_model: 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b',
                 model_name: 'Stable Diffusion XL',
                 model_provider: 'Replicate'

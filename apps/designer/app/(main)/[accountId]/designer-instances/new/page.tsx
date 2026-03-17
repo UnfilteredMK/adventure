@@ -470,8 +470,8 @@ export default function NewInstancePage() {
 
         if (allSelectedSubcategoryIds.length > 0) {
           const instanceSubcategories = allSelectedSubcategoryIds.map((subcategoryId: string) => ({
+            category_subcategory_id: subcategoryId,
             instance_id: instance.id,
-            category_subcategory_id: subcategoryId
           }));
 
           const { error: insertError } = await supabase
@@ -479,6 +479,15 @@ export default function NewInstancePage() {
             .insert(instanceSubcategories);
 
           if (insertError) {}
+
+          if (!insertError) {
+            void fetch("/api/subcategory-image-catalog/seed-instance", {
+              body: JSON.stringify({ instanceId: instance.id }),
+              headers: { "content-type": "application/json" },
+              keepalive: true,
+              method: "POST",
+            }).catch(() => undefined);
+          }
 
           // After linking services, recompute lead prices and credit prices in case any newly inserted custom records affect pricing
           let priceRows2: any[] | null = null;

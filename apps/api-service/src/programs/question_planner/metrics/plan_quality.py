@@ -447,6 +447,8 @@ def _is_strict_question_plan_schema_valid(*, planner_context_json: Any, question
             return False
 
         if intended_type in choice_family:
+            if key.strip().lower() == "style_direction":
+                continue
             option_hints = item.get("option_hints")
             if option_hints is None:
                 option_hints = item.get("optionHints")
@@ -524,6 +526,8 @@ def _validate_question_plan_schema(*, planner_context_json: Any, question_plan_j
             return False, "disallowed_type"
 
         if intended_type in choice_family:
+            if key.strip().lower() == "style_direction":
+                continue
             option_hints = item.get("option_hints")
             if option_hints is None:
                 option_hints = item.get("optionHints")

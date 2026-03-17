@@ -24,9 +24,10 @@ class QuestionPlannerSignature(dspy.Signature):
             "- question: string (user-facing)\n"
             "Fields used by the deterministic renderer:\n"
             "- type_hint: string (e.g. multiple_choice, slider)\n"
-            "- option_hints: array of strings OR array of {label, value?, image_prompt?, price_tier?} (REQUIRED for choice steps)\n"
+            "- option_hints: array of strings OR array of {label, value?, image_prompt?, price_tier?} (REQUIRED for choice steps except style_direction)\n"
             "  - price_tier, when present, should be one of: '$', '$$', '$$$', '$$$$' (relative budget cue only)\n"
             "- allow_multiple: boolean (optional; renders `multi_select` for multiple_choice)\n"
+            "- min_selections / max_selections: optional integers for multi-select rules; use these on style_direction\n"
             "- allow_other: boolean (optional; enables 'Other' free-text)\n"
             "- Do not include `budget_range`; budget is collected by a deterministic step outside planner output.\n"
         )

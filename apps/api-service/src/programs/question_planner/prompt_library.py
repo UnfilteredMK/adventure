@@ -142,20 +142,21 @@ def build_planner_prompt() -> str:
                 "  - style_direction (visual direction)\n"
                 "  - project_parts or update_areas or remodel_intensity (scope)\n"
                 "  - Do NOT use: fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
-                "STYLE_GRID (CRITICAL): The first step MUST be style_direction with 10–20 distinct style options.\n"
-                "  - Each option: {label, value, image_prompt}. No fewer than 10 style options (excluding Other).\n"
-                "  - Question: \"Pick 3 or so ideal styles from the grid.\" Set allow_multiple: true.\n"
-                "  - This renders as an image grid; users select ~3 styles. Respect choice_option_min/max from context.",
+                "STYLE_GRID (CRITICAL): The first step MUST be style_direction, but the frontend supplies the actual style/image options from the subcategory catalog.\n"
+                "  - Do NOT generate option_hints/options for style_direction.\n"
+                "  - Only output the user-facing question plus selection rules.\n"
+                "  - Preferred question: \"Pick 3-5 ideal styles from the grid.\"\n"
+                "  - Set allow_multiple: true, min_selections: 3, max_selections: 5.",
             ],
         ),
         _bullets(
             "REQUIRED RENDER HINTS:",
             [
                 "In this service, pre-concept planning questions are rendered as `multiple_choice`.\n"
-                "For `multiple_choice` items, every plan item MUST include `option_hints`.\n"
+                "For `multiple_choice` items, every plan item MUST include `option_hints`, EXCEPT `style_direction`.\n"
                 "  - Format: either a list of strings (labels) OR a list of objects {label, value?, image_prompt?, price_tier?}.\n"
-                "  - For steps that will be shown as image choices (e.g. style_direction, material_preference, shape), include short `image_prompt` per option so each option can be rendered as an image (e.g. \"modern minimalist kitchen cabinets\"). Keep `label` as plain English for overlay.\n"
-                "  - REQUIRED: For style_direction, material_preference, finish_style, product/component choices, and any quality-tiered option set, ALWAYS include `price_tier` on every option.\n"
+                "  - For image-backed choices after the first step (e.g. material_preference, shape), include short `image_prompt` per option so each option can be rendered as an image (e.g. \"modern minimalist kitchen cabinets\"). Keep `label` as plain English for overlay.\n"
+                "  - REQUIRED: For material_preference, finish_style, product/component choices, and any quality-tiered option set, ALWAYS include `price_tier` on every option.\n"
                 "    Use: '$' = budget/builder-grade, '$$' = mid-range, '$$$' = premium, '$$$$' = luxury/custom.\n"
                 "    The `image_prompt` for each option MUST reflect its price tier visually — e.g.:\n"
                 "      '$' option: \"vinyl plank flooring, builder-grade, basic fixtures\" (not luxury materials)\n"
@@ -165,7 +166,7 @@ def build_planner_prompt() -> str:
                 "    The images generated for each option must LOOK different in material quality, not just style.\n"
                 "  - DO NOT include `price_tier` on irrelevant questions (e.g., scheduling, logistics, pure yes/no, or non-cost-sensitive preferences).\n"
                 "  - For `remodel_intensity`, prefer labels like \"Light refresh\" / \"Partial remodel\" / \"Full remodel\".\n"
-                "  - For style_direction (first step): REQUIRED 10–20 options. Each option MUST have `image_prompt`. Renders as image grid; user picks ~3. Set `allow_multiple: true`.",
+                "  - For style_direction (first step): do NOT emit options. Emit only the question and selection constraints. Set `allow_multiple: true`, `min_selections: 3`, `max_selections: 5`.",
                 "  - For other steps: keep to ~3–8 options; include 'Not sure yet' / 'Other' only when it makes sense.",
                 "If a question should allow selecting multiple answers, set `allow_multiple: true`.",
                 "If you want to support an 'Other' free-text option, set `allow_other: true` and optionally `other_label` / `other_placeholder`.",
