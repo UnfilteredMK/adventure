@@ -90,12 +90,15 @@ export function StepLayout({
   return (
     <div
       className={cn(
-        "w-full mx-auto h-full min-h-0 overflow-hidden",
+        "relative w-full mx-auto h-full min-h-0 overflow-hidden",
         useCompactPane ? "max-w-[70rem]" : preferWideLayout ? "max-w-6xl" : "max-w-3xl",
         useCompactPane ? "px-1.5 py-1.5 sm:px-2.5 sm:py-2" : isCompact ? "px-4 py-4" : "px-4 py-6",
         className
       )}
     >
+      {feedbackPrompt ? (
+        <div className="absolute right-2 top-2 z-10 pointer-events-auto">{feedbackPrompt}</div>
+      ) : null}
       {actionsVariant === "icon_only" ? (
         <div
           className={cn(
@@ -127,19 +130,13 @@ export function StepLayout({
               useCompactPane ? "justify-end gap-1.5" : isCompact ? "gap-4" : "gap-6"
             )}
           >
-            <div className={cn("shrink-0", compactHeaderLayoutClass)}>
-              {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
-              <div
-                className={cn(
-                  "min-w-0 flex-1",
-                  useCompactPane ? "w-full max-w-5xl mx-auto text-center" : null
-                )}
-              >
+            <div className={cn("shrink-0 min-w-0", feedbackPrompt ? "pr-14" : null)}>
+              <div className={cn("min-w-0 w-full", compactHeaderLayoutClass, useCompactPane ? "max-w-5xl mx-auto" : null)}>
+                {headerInlineControl ? <div className="shrink-0 mb-1">{headerInlineControl}</div> : null}
                 <h2
                   className={cn(
                     useCompactPane ? "text-[13px] sm:text-sm leading-tight" : isCompact ? "text-xl" : "text-2xl",
-                    "font-semibold min-w-0 break-words",
-                    useCompactPane ? "text-center" : null
+                    "font-semibold min-w-0 break-words"
                   )}
                   style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                 >
@@ -149,7 +146,7 @@ export function StepLayout({
                   <p
                     className={cn(
                       "mt-1 opacity-80",
-                      useCompactPane ? "text-[10px] leading-tight line-clamp-2 text-center" : "text-sm"
+                      useCompactPane ? "text-[10px] leading-tight line-clamp-2" : "text-sm"
                     )}
                     style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                   >
@@ -158,7 +155,6 @@ export function StepLayout({
                 ) : null}
               </div>
             </div>
-            {feedbackPrompt ? <div className={cn("shrink-0", useCompactPane ? "mt-1" : "mt-3")}>{feedbackPrompt}</div> : null}
             <div className={contentViewportClassName}>
               <div
                 className={cn(
@@ -188,33 +184,32 @@ export function StepLayout({
         </div>
       ) : (
           <div className={cn("flex h-full min-h-0 flex-col", useCompactPane ? "gap-2 justify-end" : isCompact ? "gap-4" : "gap-6")}>
-            <div className={cn("shrink-0", compactHeaderLayoutClass, useCompactPane ? "w-full max-w-5xl mx-auto" : null)}>
-              {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
-              <div className={cn("min-w-0 flex-1", useCompactPane ? "w-full text-center" : null)}>
-              <h2
-                className={cn(
-                  useCompactPane ? "text-sm sm:text-base leading-tight" : isCompact ? "text-xl" : "text-2xl",
-                  "font-semibold min-w-0 break-words",
-                  useCompactPane ? "text-center" : null
-                )}
-                style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
-              >
-                {question}
-              </h2>
-              {subtext ? (
-                <p
+            <div className={cn("shrink-0 min-w-0", feedbackPrompt ? "pr-14" : null)}>
+              <div className={cn("min-w-0 w-full", compactHeaderLayoutClass, useCompactPane ? "max-w-5xl mx-auto" : null)}>
+                {headerInlineControl ? <div className="shrink-0 mb-1">{headerInlineControl}</div> : null}
+                <h2
                   className={cn(
-                    "mt-1 opacity-80",
-                    useCompactPane ? "text-[11px] sm:text-xs leading-tight text-center" : "text-sm"
+                    useCompactPane ? "text-sm sm:text-base leading-tight" : isCompact ? "text-xl" : "text-2xl",
+                    "font-semibold min-w-0 break-words",
+                    useCompactPane ? "text-center sm:text-left" : null
                   )}
                   style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                 >
-                  {subtext}
-                </p>
-              ) : null}
+                  {question}
+                </h2>
+                {subtext ? (
+                  <p
+                    className={cn(
+                      "mt-1 opacity-80",
+                      useCompactPane ? "text-[11px] sm:text-xs leading-tight text-center sm:text-left" : "text-sm"
+                    )}
+                    style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+                  >
+                    {subtext}
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </div>
-          {feedbackPrompt ? <div className="shrink-0">{feedbackPrompt}</div> : null}
 
           <div className={contentViewportClassName}>
             <div

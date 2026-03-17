@@ -375,8 +375,8 @@ def generate_option_images_for_step(
 ) -> Tuple[List[Optional[str]], Dict[str, int]]:
     """
     Generate one image per prompt for multiple-choice option images.
-    Uses flux-schnell; runs one Replicate call per prompt in parallel so a 4-option
-    step returns in ~0.5s. Returns list of image URLs in same order as prompts
+    Uses flux-schnell; runs one Replicate call per prompt in parallel (up to 24)
+    so 10-20 option style grids return quickly. Returns list of image URLs in same order as prompts
     (None for failures so caller can leave option without imageUrl).
     """
     if not prompts:
@@ -393,7 +393,7 @@ def generate_option_images_for_step(
         "failed": 0,
     }
 
-    max_conc = max(1, min(16, _env_int("AI_FORM_OPTION_IMAGES_MAX_CONCURRENCY", 4)))
+    max_conc = max(1, min(24, _env_int("AI_FORM_OPTION_IMAGES_MAX_CONCURRENCY", 24)))
     qps = _env_float("AI_FORM_OPTION_IMAGES_QPS", 0.0)
     cache_ttl = max(0, _env_int("AI_FORM_OPTION_IMAGES_CACHE_TTL_SEC", 900))
     log_errors = str(os.getenv("AI_FORM_OPTION_IMAGES_LOG_ERRORS") or "").strip().lower() in {"1", "true", "yes", "y", "on"}

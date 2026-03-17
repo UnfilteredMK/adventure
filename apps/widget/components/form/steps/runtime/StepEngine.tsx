@@ -177,6 +177,8 @@ export function StepEngine({
   const [previewHasImage, setPreviewHasImage] = useState(false);
   const [, setPreviewAdvanceGateOpen] = useState(false);
   const pendingPreviewAdvanceRef = useRef<null | { stepId: string; data: any }>(null);
+  const leadCapturedAdvancedRef = useRef(false);
+  const leadCapturedAdvanceStepIdRef = useRef<string | null>(null);
   const leadGateLocksQuestionAreaRef = useRef(false);
   const [adventureInputMode, setAdventureInputMode] = useState<"questions" | "prompt" | "budget" | "uploads">("questions");
   const [promptDraft, setPromptDraft] = useState("");
@@ -413,8 +415,10 @@ export function StepEngine({
     goToPreviousStep,
     goToStep,
     addSteps,
+    removeStepsByIds,
     updateStepData,
     patchStep,
+    markStepComplete,
   } = useStepEngine({
     instanceId,
     sessionScopeKey: effectiveSessionScopeKey,
@@ -509,18 +513,21 @@ export function StepEngine({
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Refinements ${r.status}`))))
       .then((json: any) => {
         const miniSteps = Array.isArray(json?.miniSteps) ? json.miniSteps : [];
+        // Skip refinement upload when user already went through step-upload-scene-image
+        const alreadyHasSceneUpload = steps.some(
+          (s: any) => String((s as any)?.id || "") === DETERMINISTIC_SCENE_IMAGE_ID
+        );
         const deterministicUploadStep = {
           id: REFINEMENT_UPLOAD_STEP_ID,
           type: "file_upload",
-          question: "", // Rendered in FormQuestionPaneSection to avoid duplicate headers
+          question: "",
           humanism: "Start from your real space for better refinements.",
           required: false,
           allow_skip: true,
           upload_role: "scene",
           blueprint: { presentation: { continue_label: "Continue", allow_skip: true } },
         } as any;
-
-        const incoming = [deterministicUploadStep, ...miniSteps];
+        const incoming = alreadyHasSceneUpload ? miniSteps : [deterministicUploadStep, ...miniSteps];
         const existingIds = new Set(
           steps.map((s: any) => String((s as any)?.id || "")).filter(Boolean)
         );
@@ -762,19 +769,33 @@ export function StepEngine({
   // Do not treat a prefilled/stored email as "captured" by itself.
   const leadCapturedForUI = Boolean(formState?.leadCaptured);
 
+  // When lead is captured: switch to Guided tab so user sees next questions immediately.
+  useEffect(() => {
+    if (leadCapturedForUI) setAdventureInputMode("questions");
+  }, [leadCapturedForUI]);
+
   // If we blocked an auto-advance due to the preview gate, resume once lead is captured.
   useEffect(() => {
     if (!leadCapturedForUI) return;
     const pending = pendingPreviewAdvanceRef.current;
-    if (!pending) return;
-    if (!currentStep || currentStep.id !== pending.stepId) {
+    if (pending) {
+      if (!currentStep || currentStep.id !== pending.stepId) {
+        pendingPreviewAdvanceRef.current = null;
+        return;
+      }
       pendingPreviewAdvanceRef.current = null;
+      setPreviewAdvanceGateOpen(false);
+      void goToNextStep(pending.data);
       return;
     }
-    pendingPreviewAdvanceRef.current = null;
-    setPreviewAdvanceGateOpen(false);
-    void goToNextStep(pending.data);
-  }, [currentStep, goToNextStep, leadCapturedForUI]);
+    // Lead captured via pill: auto-advance to show the next guided question.
+    if (!previewHasImage || !currentStep) return;
+    if (leadCapturedAdvancedRef.current) return;
+    leadCapturedAdvancedRef.current = true;
+    leadCapturedAdvanceStepIdRef.current = currentStep.id;
+    const stepData = (state?.stepData as Record<string, unknown>)?.[currentStep.id] ?? {};
+    void goToNextStep(stepData);
+  }, [currentStep, goToNextStep, leadCapturedForUI, previewHasImage, state?.stepData]);
 
   // --- Pricing estimate (AI) ---
   const pricingEstimateAbortRef = useRef<AbortController | null>(null);
@@ -1061,19 +1082,41 @@ export function StepEngine({
   // If the user has already progressed past the target index, inject immediately after the current step.
   // NOTE: "What's your name?" deterministic step temporarily disabled per request.
 
-  // Insert upload step(s) as the last checkpoint before preview generation.
+  // When first image is generated, remove budget + upload steps — they move to the bottom bar.
+  const stepsRemovedAfterImageRef = useRef(false);
+  const stepsToRemoveAfterImage = useMemo(
+    () =>
+      new Set([
+        DETERMINISTIC_BUDGET_ID,
+        DETERMINISTIC_SCENE_IMAGE_ID,
+        DETERMINISTIC_USER_IMAGE_ID,
+        DETERMINISTIC_PRODUCT_IMAGE_ID,
+      ]),
+    []
+  );
+  useEffect(() => {
+    if (!previewHasImage || !removeStepsByIds || stepsRemovedAfterImageRef.current) return;
+    stepsRemovedAfterImageRef.current = true;
+    removeStepsByIds(stepsToRemoveAfterImage);
+  }, [previewHasImage, removeStepsByIds, stepsToRemoveAfterImage]);
+
+  // Insert deterministic steps (budget, then upload) as the last steps before preview.
+  // Order: all API-generated steps first, then budget, then upload. No API questions after these.
+  // Skip when previewHasImage — budget/upload are in the bottom bar.
   useEffect(() => {
     if (!flowPlan?.sessionId) return;
     if (!state?.steps || state.steps.length === 0) return;
     if (!hasReceivedQuestionsFromGenerateSteps) return;
+    if (previewHasImage) return;
 
-    const desiredIds = new Set(desiredDeterministicUploadSteps.map((s: any) => String(s?.id || "")).filter(Boolean));
+    const desiredDeterministicSteps = [deterministicBudgetStep, ...desiredDeterministicUploadSteps];
+    const desiredIds = new Set(desiredDeterministicSteps.map((s: any) => String(s?.id || "")).filter(Boolean));
     if (desiredIds.size === 0) return;
 
     const previewGateSteps = (state.steps || []).filter((s: any) => isPreviewGateQuestionStep(s));
     if (previewGateSteps.length === 0) return;
 
-    // Place upload immediately after the final preview-gate question.
+    // Place budget + upload immediately after the final API-generated (preview-gate) question.
     let desiredInsertIndex = state.steps.length;
     for (let i = state.steps.length - 1; i >= 0; i -= 1) {
       const s = state.steps[i];
@@ -1085,10 +1128,7 @@ export function StepEngine({
 
     const afterCurrent = Math.max(0, (state.currentStepIndex ?? 0) + 1);
     const insertAtIndex = Math.max(desiredInsertIndex, afterCurrent);
-    const budgetInsertAtIndex = Math.max(afterCurrent, Math.max(0, insertAtIndex - 1));
 
-    // If the upload step already exists but was previously inserted too late (e.g. via preview-unlock fallback),
-    // move it up to the intended position (but never before the user's current step).
     const stepData = state.stepData || {};
     const completed = state.completedSteps;
     const indexById = new Map<string, number>();
@@ -1098,16 +1138,8 @@ export function StepEngine({
     });
     const allPresent = Array.from(desiredIds).every((id) => indexById.has(id));
     const budgetIdx = indexById.get(DETERMINISTIC_BUDGET_ID);
-    const budgetAnswered = hasMeaningfulAnswer((stepData as any)[DETERMINISTIC_BUDGET_ID]);
-    const budgetNeedsReposition =
-      typeof budgetIdx === "number" &&
-      budgetIdx > budgetInsertAtIndex &&
-      !budgetAnswered &&
-      !(completed && typeof (completed as any).has === "function" && (completed as any).has(DETERMINISTIC_BUDGET_ID));
 
-    if (typeof budgetIdx !== "number" || budgetNeedsReposition) {
-      addSteps([deterministicBudgetStep], false, { insertAtIndex: budgetInsertAtIndex, moveExisting: true });
-    }
+    // Patch budget step config if it exists and differs (e.g. API-loaded min/max).
     if (typeof budgetIdx === "number") {
       const currentBudgetStep = (state.steps || [])[budgetIdx] as any;
       const budgetData = (deterministicBudgetStep as any)?.data || {};
@@ -1159,6 +1191,7 @@ export function StepEngine({
       }
     }
 
+    // Reposition if any deterministic step is too late (e.g. after a later-arriving API question).
     const needsReposition =
       allPresent &&
       Array.from(desiredIds).some((id) => {
@@ -1170,9 +1203,8 @@ export function StepEngine({
         return true;
       });
 
-    // `moveExisting: true` is safe: it only affects existing steps that are incomplete/unanswered.
     if (!allPresent || needsReposition) {
-      addSteps(desiredDeterministicUploadSteps, false, { insertAtIndex, moveExisting: true });
+      addSteps(desiredDeterministicSteps, false, { insertAtIndex, moveExisting: true });
     }
   }, [
     addSteps,
@@ -1181,6 +1213,7 @@ export function StepEngine({
     flowPlan?.sessionId,
     hasReceivedQuestionsFromGenerateSteps,
     patchStep,
+    previewHasImage,
     state,
   ]);
 
@@ -2398,6 +2431,9 @@ export function StepEngine({
     });
     
     if (isOnLastStep) {
+      // Mark current step complete so upload skip = same as upload: preview can generate immediately.
+      markStepComplete(currentStep.id);
+
       // User is on last step - need next batch (batch n+1, up to call cap)
       if (batchCurrentlyLoading) {
         // Next batch is already loading - just show loader, wait for it to arrive
@@ -2801,6 +2837,7 @@ export function StepEngine({
     config,
     currentStepId: currentStep?.id,
     desiredDeterministicUploadSteps,
+    desiredDeterministicStepsForInsert: [deterministicBudgetStep, ...desiredDeterministicUploadSteps],
     flowPlanSessionId: flowPlan?.sessionId,
     formStateMetricProgress: formState?.metricProgress ?? null,
     hasReceivedQuestionsFromGenerateSteps,
@@ -2813,10 +2850,38 @@ export function StepEngine({
     updateStepData,
   });
 
-  const leadGateLocksQuestionArea = false;
+  const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
+
+  // Gate question pane + bottom bar (prompt/budget/uploads) until lead capture is completed.
+  const leadGateLocksQuestionArea = Boolean(
+    previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
+  );
   useEffect(() => {
     leadGateLocksQuestionAreaRef.current = leadGateLocksQuestionArea;
   }, [leadGateLocksQuestionArea]);
+
+  const isWaitingForNextBatch = Boolean(isBatchLoading && state && state.currentStepIndex >= state.steps.length - 1);
+  const hasSceneImageInStepData = useMemo(() => {
+    const stepData = state?.stepData as Record<string, unknown> | undefined;
+    if (!stepData) return false;
+    for (const key of ["step-upload-scene-image", "step-refinement-upload-scene-image"]) {
+      const raw = stepData[key];
+      const arr = Array.isArray(raw) ? raw : typeof raw === "string" && raw ? [raw] : [];
+      if (arr.some((v) => typeof v === "string" && v.length > 0)) return true;
+    }
+    return false;
+  }, [state?.stepData]);
+  // After scene upload completes, show ImagePreviewExperience with "generating" immediately instead of "Getting you accurate pricing..."
+  const showPreviewGeneratingEarly = Boolean(
+    hasSceneImageInStepData &&
+      (!effectiveCurrentStep || isWaitingForNextBatch) &&
+      !previewEnabled
+  );
+  // Show preview section as soon as we're eligible and loading the batch that will trigger image gen.
+  // This eliminates the gap where we'd show the generic "Getting you accurate pricing" loader first.
+  const showPreviewSectionEager =
+    frontendPreviewEligible && hasReceivedQuestionsFromGenerateSteps && (isWaitingForNextBatch || isBatchLoading);
+  const showPreviewSection = previewEnabled || showPreviewGeneratingEarly || showPreviewSectionEager;
 
   const {
     isAdventureSurface,
@@ -2834,11 +2899,11 @@ export function StepEngine({
     usePreviewDominantLayout,
   } = usePreviewLayout({
     currentStepId: currentStep?.id,
-    previewEnabled,
+    previewEnabled: showPreviewSection,
     showBrandingHeader,
   });
 
-  const previewRailActive = previewEnabled;
+  const previewRailActive = showPreviewSection;
   const density = previewRailActive ? "compact" : "normal";
   const desktopQuestionMinHeight = "clamp(300px, 36dvh, 520px)";
   const previewSectionBasis = "47%";
@@ -2846,11 +2911,18 @@ export function StepEngine({
   const mobilePreviewSectionBasis = "70%";
   const mobileQuestionSectionBasis = "30%";
   useEffect(() => {
-    if (!previewEnabled) setPreviewVisible(false);
-  }, [previewEnabled]);
+    if (!showPreviewSection) setPreviewVisible(false);
+    else if (showPreviewGeneratingEarly) setPreviewVisible(true);
+  }, [showPreviewSection, showPreviewGeneratingEarly]);
 
-  const isWaitingForNextBatch = Boolean(isBatchLoading && state && state.currentStepIndex >= state.steps.length - 1);
-  const showAccuratePricingLoader = !effectiveCurrentStep || isWaitingForNextBatch;
+  const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
+  // Skip "Getting you accurate pricing" when we're showing the preview section (which has its own loader).
+  // This prevents the generic loader from flashing before ImagePreviewExperience appears.
+  const showAccuratePricingLoader =
+    !showPreviewSection &&
+    (!effectiveCurrentStep || isWaitingForNextBatch) &&
+    !isPreviewGenerationStage &&
+    !showPreviewGeneratingEarly;
 
   const devModeUI = useMemo<DevModeUIState>(
     () => ({
@@ -2895,9 +2967,6 @@ export function StepEngine({
       showEasePrompt,
     ]
   );
-  const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
-  // Hard-hide questions until first preview image exists (prevents flash/show-then-disappear).
-  const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
   const previewGenerationStepIdRef = useRef<string | null>(null);
   const [previewQuestionRevealReady, setPreviewQuestionRevealReady] = useState(false);
   useEffect(() => {
@@ -2919,25 +2988,40 @@ export function StepEngine({
     }
     // When moving forward: hide on the captured step to prevent stale content flash.
     // When backtracking: always show—user explicitly navigated back to see the question.
-    if (!currentId || (currentId === capturedId && !isBacktrackingInForm)) {
+    // When lead captured: always show—unlock to reveal the next guided question.
+    if (!currentId || (currentId === capturedId && !isBacktrackingInForm && !leadCapturedForUI)) {
       setPreviewQuestionRevealReady(false);
       return;
     }
     setPreviewQuestionRevealReady(true);
-  }, [currentStep?.id, previewEnabled, previewHasImage, isBacktrackingInForm]);
+  }, [currentStep?.id, previewEnabled, previewHasImage, isBacktrackingInForm, leadCapturedForUI]);
   const previewLayoutActive = Boolean(
     (usePreviewDominantLayout || useDesktopPreviewLayout) &&
       (previewHasImage || previewVisible || !previewQuestionRevealReady)
   );
-  // Keep the question pane hidden on the active forward path after preview generation,
-  // but allow it when the user explicitly backtracks to already-visited steps.
-  const shouldHideQuestionPaneForLeadGate = Boolean(previewEnabled && previewHasImage && !isBacktrackingInForm);
+  // Keep the question pane hidden while waiting for lead capture; re-show it once lead is captured and pricing is revealed.
+  const shouldHideQuestionPaneForLeadGate = Boolean(
+    previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
+  );
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
     previewQuestionRevealReady &&
     !shouldHideQuestionPaneForLeadGate &&
     (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
-  const hideQuestionPane = Boolean(leadGateLocksQuestionArea || !showQuestionPaneUnderPreview);
+  // Hide while advancing after lead capture (waiting for next step to load)
+  const advancingStepId = leadCapturedAdvanceStepIdRef.current;
+  const isAdvancingAfterLeadCapture = Boolean(
+    advancingStepId && currentStep?.id === advancingStepId
+  );
+  useEffect(() => {
+    const captured = leadCapturedAdvanceStepIdRef.current;
+    if (captured && currentStep?.id && currentStep.id !== captured) {
+      leadCapturedAdvanceStepIdRef.current = null;
+    }
+  }, [currentStep?.id]);
+  const hideQuestionPane = Boolean(
+    leadGateLocksQuestionArea || !showQuestionPaneUnderPreview || isAdvancingAfterLeadCapture
+  );
   useEffect(() => {
     const committedRaw = (state?.stepData as any)?.["step-refinement-upload-scene-image"];
     const committed =
@@ -3062,8 +3146,19 @@ export function StepEngine({
     if (!state?.steps?.length) return [];
     const indexed = state.steps.map((step, index) => ({ step, index }));
     const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
-    if (leadCapturedForUI) return withoutRefinementUpload;
-    return withoutRefinementUpload.filter(({ step }) => {
+    // After first image, budget/upload move to bottom bar — hide from jogger
+    const stepsToHideWhenImage = new Set([
+      DETERMINISTIC_BUDGET_ID,
+      DETERMINISTIC_SCENE_IMAGE_ID,
+      DETERMINISTIC_USER_IMAGE_ID,
+      DETERMINISTIC_PRODUCT_IMAGE_ID,
+    ]);
+    const withoutBudgetUploadWhenImage =
+      previewHasImage
+        ? withoutRefinementUpload.filter(({ step }) => !stepsToHideWhenImage.has(String((step as any)?.id || "")))
+        : withoutRefinementUpload;
+    if (leadCapturedForUI) return withoutBudgetUploadWhenImage;
+    return withoutBudgetUploadWhenImage.filter(({ step }) => {
       const stepId = String((step as any)?.id || "");
       if (!stepId) return true;
       const meta = stepMetaRef.current.get(stepId);
@@ -3181,6 +3276,7 @@ export function StepEngine({
 		        <div className="mx-auto h-full min-h-0 w-full max-w-[92rem] overflow-hidden">
           <motion.div
               ref={previewColumnRef}
+              layout={false}
 				              className={cn(
 				                "relative flex h-full min-h-0 max-h-full flex-col overflow-hidden",
 				                previewLayoutActive
@@ -3191,9 +3287,8 @@ export function StepEngine({
                                   ? "gap-2"
                                   : "gap-0"
 				              )}
-              transition={{ duration: 0.18, ease: "easeOut" }}
 				            >
-                  {previewEnabled ? (
+                  {showPreviewSection ? (
                     <div
                       ref={previewViewportRef}
                       className={cn(
@@ -3226,6 +3321,7 @@ export function StepEngine({
                       />
                     </div>
                   ) : null}
+                  {!hideQuestionPane ? (
                   <div
                     className={cn(
                       previewLayoutActive
@@ -3285,8 +3381,12 @@ export function StepEngine({
                       sessionId={sessionId}
                       setRefinementUploading={setRefinementUploading}
                       showStepTransitionSkeleton={
-                        (isFetchingNext && !showAccuratePricingLoader) || awaitingRefinementAdvance
+                        ((isFetchingNext && !showAccuratePricingLoader) || awaitingRefinementAdvance) &&
+                        !isPreviewGenerationStage &&
+                        !showPreviewGeneratingEarly &&
+                        !showPreviewSectionEager
                       }
+                      previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly || showPreviewSectionEager}
                       showAccuratePricingLoader={showAccuratePricingLoader}
                       showEasePrompt={showEasePrompt}
                       showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
@@ -3302,6 +3402,7 @@ export function StepEngine({
                       usePreviewDominantLayout={previewLayoutActive}
                     />
                   </div>
+                  ) : null}
           </motion.div>
         </div>
       </main>

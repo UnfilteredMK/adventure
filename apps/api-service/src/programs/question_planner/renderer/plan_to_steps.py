@@ -213,10 +213,12 @@ def _enforce_option_count(
     opt_max = _as_int(choice_option_max)
     opt_target = _as_int(choice_option_target)
 
+    # Style grids (10-20 options) need higher cap; other steps stay at 12.
+    _opt_cap = 20
     if opt_min is not None:
-        opt_min = max(1, min(12, opt_min))
+        opt_min = max(1, min(_opt_cap, opt_min))
     if opt_max is not None:
-        opt_max = max(1, min(12, opt_max))
+        opt_max = max(1, min(_opt_cap, opt_max))
     if opt_min is not None and opt_max is not None and opt_max < opt_min:
         opt_max = opt_min
     if opt_target is not None and opt_min is not None and opt_target < opt_min:

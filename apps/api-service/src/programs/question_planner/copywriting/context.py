@@ -64,20 +64,19 @@ DEFAULT_COPY_CONTEXT: Dict[str, Any] = {
     # Question strategy
     # -----------------------------
 
-    # Strategy hints: the planner should implicitly assign each question a "job".
-    # Suggested values per question:
-    # "warmup", "classification", "constraint", "personalization",
-    # "prioritization", "confidence_building", "commitment_lock", "motivation".
-    "question_intent_palette": [
-        "warmup",
-        "classification",
-        "constraint",
-        "personalization",
-        "prioritization",
-        "confidence_building",
-        "commitment_lock",
-        "motivation",
-    ],
+    # Commented out: examples drive form length/structure; this was causing LLM to add
+    # extra steps (e.g. "top priority" with Functionality/Aesthetics/Budget) that
+    # aren't in the demos.
+    # "question_intent_palette": [
+    #     "warmup",
+    #     "classification",
+    #     "constraint",
+    #     "personalization",
+    #     "prioritization",
+    #     "confidence_building",
+    #     "commitment_lock",
+    #     "motivation",
+    # ],
 
     # Answer-effort preference for early questions (tap > short_text > long_text).
     # Suggested values: "tap", "short_text", "long_text", "thinking", "emotional".

@@ -342,10 +342,10 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         normalized: list[dict[str, Any]] = []
         # Hard cap: prevent runaway costs if client sends large option lists.
         try:
-            max_opts = int(os.getenv("AI_FORM_OPTION_IMAGES_MAX_OPTIONS") or "8")
+            max_opts = int(os.getenv("AI_FORM_OPTION_IMAGES_MAX_OPTIONS") or "24")
         except Exception:
-            max_opts = 8
-        max_opts = max(1, min(24, int(max_opts or 8)))
+            max_opts = 24
+        max_opts = max(1, min(24, int(max_opts or 24)))
 
         session_id = ""
         if isinstance(payload.get("sessionId"), str):

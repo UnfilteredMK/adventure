@@ -75,7 +75,8 @@ export function usePreviewLayout({
       const nextPreviewMaxPx = Math.max(0, Math.floor(measuredPreviewHeight - safetyPx));
       setPreviewMaxPx((prev) => {
         if (prev === null) return nextPreviewMaxPx;
-        return Math.abs(prev - nextPreviewMaxPx) < 2 ? prev : nextPreviewMaxPx;
+        // Skip micro-updates; prevents expand→pause→expand stutter during layout settle
+        return Math.abs(prev - nextPreviewMaxPx) < 8 ? prev : nextPreviewMaxPx;
       });
       setQuestionScale(1);
       return;
@@ -90,7 +91,7 @@ export function usePreviewLayout({
     if (!contentEl) {
       const fallbackPreview = Math.max(0, Math.floor(columnHeight * 0.65) - 24);
       setPreviewMaxPx((prev) =>
-        prev === null ? fallbackPreview : Math.abs(prev - fallbackPreview) < 2 ? prev : fallbackPreview
+        prev === null ? fallbackPreview : Math.abs(prev - fallbackPreview) < 8 ? prev : fallbackPreview
       );
       return;
     }
@@ -104,7 +105,7 @@ export function usePreviewLayout({
       const fallbackPreview = Math.min(totalAvailable, 520);
       setPreviewMaxPx((prev) => {
         if (prev === null) return fallbackPreview;
-        return Math.abs(prev - fallbackPreview) < 2 ? prev : fallbackPreview;
+        return Math.abs(prev - fallbackPreview) < 8 ? prev : fallbackPreview;
       });
       setQuestionScale(1);
       return;
@@ -115,7 +116,7 @@ export function usePreviewLayout({
 
     setPreviewMaxPx((prev) => {
       if (prev === null) return roundedPreview;
-      return Math.abs(prev - roundedPreview) < 2 ? prev : roundedPreview;
+      return Math.abs(prev - roundedPreview) < 8 ? prev : roundedPreview;
     });
     setQuestionScale(1);
   }, [previewEnabled, useDesktopPreviewLayout, usePreviewDominantLayout]);
@@ -124,9 +125,9 @@ export function usePreviewLayout({
     computePreviewMaxPx();
   }, [computePreviewMaxPx, currentStepId]);
 
-  // When preview first enables in dominant layout, set initial estimate immediately to avoid
+  // When preview first enables in dominant layout, set initial estimate BEFORE paint to avoid
   // null -> measured two-phase resize (expand, pause, expand) during "Generating..." state.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!previewEnabled || !(usePreviewDominantLayout || useDesktopPreviewLayout)) return;
     setPreviewMaxPx((prev) => {
       if (prev !== null) return prev;
@@ -146,18 +147,24 @@ export function usePreviewLayout({
     const contentEl = questionContentRef.current;
 
     if (columnEl) targets.push(columnEl);
-    // Always observe the preview viewport — its flex-1 height changes whenever
-    // the question pane grows or shrinks, and we need to recompute immediately.
     if (previewViewportEl) targets.push(previewViewportEl);
-    // Always observe the question content so pane height changes are caught.
     if (contentEl) targets.push(contentEl);
 
     if (targets.length === 0) return;
 
     let raf = 0;
+    let debounceTimer = 0;
+    const RESIZE_DEBOUNCE_MS = 100;
     const schedule = () => {
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => computePreviewMaxPx());
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = 0;
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          computePreviewMaxPx();
+        });
+      }, RESIZE_DEBOUNCE_MS);
     };
 
     const ro = new ResizeObserver(schedule);
@@ -165,6 +172,7 @@ export function usePreviewLayout({
     schedule();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
     };

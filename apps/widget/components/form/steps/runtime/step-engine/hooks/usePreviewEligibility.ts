@@ -8,7 +8,10 @@ interface UsePreviewEligibilityParams {
   addSteps: (steps: any[], append?: boolean, options?: { insertAtIndex?: number }) => void;
   completedQuestionCount: number;
   currentStepId?: string | null;
+  /** Upload steps only – used for checking if deterministic uploads are pending. */
   desiredDeterministicUploadSteps: any[];
+  /** Full deterministic steps (budget + upload) in order – used when injecting fallback. */
+  desiredDeterministicStepsForInsert?: any[];
   flowPlanSessionId?: string | null;
   formStateMetricProgress?: number | null;
   hasReceivedQuestionsFromGenerateSteps: boolean;
@@ -27,6 +30,7 @@ export function usePreviewEligibility({
   completedQuestionCount,
   currentStepId,
   desiredDeterministicUploadSteps,
+  desiredDeterministicStepsForInsert,
   flowPlanSessionId,
   formStateMetricProgress,
   hasReceivedQuestionsFromGenerateSteps,
@@ -153,7 +157,10 @@ export function usePreviewEligibility({
     if (!frontendPreviewEligibleWithoutDeterministicUploads) return;
     if (!deterministicUploadsPending) return;
 
-    const desiredIds = desiredDeterministicUploadSteps.map((s: any) => String(s?.id || "")).filter(Boolean);
+    const stepsToAdd = Array.isArray(desiredDeterministicStepsForInsert) && desiredDeterministicStepsForInsert.length > 0
+      ? desiredDeterministicStepsForInsert
+      : desiredDeterministicUploadSteps;
+    const desiredIds = stepsToAdd.map((s: any) => String(s?.id || "")).filter(Boolean);
     if (desiredIds.length === 0) return;
 
     const existing = new Set((state.steps || []).map((s: any) => String((s as any)?.id || "")));
@@ -161,10 +168,11 @@ export function usePreviewEligibility({
     if (missing.length === 0) return;
 
     const afterCurrent = Math.max(0, (state.currentStepIndex ?? 0) + 1);
-    addSteps(desiredDeterministicUploadSteps, false, { insertAtIndex: afterCurrent });
+    addSteps(stepsToAdd, false, { insertAtIndex: afterCurrent });
   }, [
     addSteps,
     desiredDeterministicUploadSteps,
+    desiredDeterministicStepsForInsert,
     deterministicUploadsPending,
     flowPlanSessionId,
     frontendPreviewEligibleWithoutDeterministicUploads,

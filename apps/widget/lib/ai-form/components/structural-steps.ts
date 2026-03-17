@@ -10,7 +10,6 @@ import type {
   ConfirmationUI,
   DesignerUI,
   FileUploadUI,
-  GalleryUI,
   LeadCaptureUI,
   PricingUI,
 } from "@/types/ai-form-ui-contract";
@@ -73,83 +72,6 @@ export function buildDesignerStep(params?: { includePricing?: boolean; previewPr
   if (params?.includePricing) {
     step.data = { ...(step.data || {}), pricing: buildPreviewPricingFromConfig(params.previewPricing, params.seed) };
   }
-  return step;
-}
-
-/**
- * Build an involved gallery step (image gen experience)
- *
- * This step is rendered by the frontend `GalleryStep` and is intended to:
- * - show AI-generated images
- * - allow drilldown edits
- * - optionally gate via lead capture (A/B)
- */
-export function buildInvolvedGalleryStep(params?: {
-  headline?: string;
-  subtext?: string;
-  galleryMaxImages?: number;
-  showPrompt?: boolean;
-  layoutVariant?: "default" | "endcap_preview";
-  leadGateExperiment?: {
-    seed?: string;
-    variants?: Array<{ id: "blur_image" | "download_gate"; weight: number }>;
-  };
-  quoteStub?: {
-    currency?: string;
-    items?: Array<{ id: string; label: string; labor: number; material: number }>;
-    totalMin?: number;
-    totalMax?: number;
-  };
-  previewPricing?: any;
-  seed?: string | null;
-}): GalleryUI {
-  const {
-    headline = "Design ideas (AI gallery)",
-    subtext = "Flip through concepts, refine details, and unlock your download when you're ready.",
-    galleryMaxImages = 6,
-    showPrompt = false,
-    layoutVariant = "default",
-    leadGateExperiment,
-    quoteStub,
-    previewPricing,
-    seed,
-  } = params || {};
-
-  const previewRange = buildPreviewPricingFromConfig(previewPricing ?? quoteStub, seed);
-
-  const step: GalleryUI = {
-    id: "step-involved-gallery",
-    type: "gallery",
-    question: headline,
-    subtext,
-    required: false,
-    blueprint: {
-      presentation: { continue_label: layoutVariant === "endcap_preview" ? "Finish" : "Continue" },
-      validation: {
-        gallery_max_images: galleryMaxImages,
-        show_prompt: showPrompt,
-        layout_variant: layoutVariant,
-        lead_gate_experiment: leadGateExperiment ?? {
-          variants: [
-            { id: "blur_image", weight: 0.5 },
-            { id: "download_gate", weight: 0.5 },
-          ],
-        },
-        quote_stub: ({
-          currency: quoteStub?.currency ?? previewRange.currency ?? "USD",
-          totalMin: typeof quoteStub?.totalMin === "number" ? quoteStub.totalMin : previewRange.totalMin,
-          totalMax: typeof quoteStub?.totalMax === "number" ? quoteStub.totalMax : previewRange.totalMax,
-          items:
-            quoteStub?.items ??
-            [
-              { id: "labor", label: "Labor", labor: 450, material: 0 },
-              { id: "materials", label: "Materials", labor: 0, material: 350 },
-              { id: "permits", label: "Permits", labor: 0, material: 75 },
-            ],
-        } as any),
-      },
-    },
-  };
   return step;
 }
 

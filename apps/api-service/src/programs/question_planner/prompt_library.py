@@ -142,6 +142,10 @@ def build_planner_prompt() -> str:
                 "  - style_direction (visual direction)\n"
                 "  - project_parts or update_areas or remodel_intensity (scope)\n"
                 "  - Do NOT use: fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
+                "STYLE_GRID (CRITICAL): The first step MUST be style_direction with 10–20 distinct style options.\n"
+                "  - Each option: {label, value, image_prompt}. No fewer than 10 style options (excluding Other).\n"
+                "  - Question: \"Pick 3 or so ideal styles from the grid.\" Set allow_multiple: true.\n"
+                "  - This renders as an image grid; users select ~3 styles. Respect choice_option_min/max from context.",
             ],
         ),
         _bullets(
@@ -161,7 +165,8 @@ def build_planner_prompt() -> str:
                 "    The images generated for each option must LOOK different in material quality, not just style.\n"
                 "  - DO NOT include `price_tier` on irrelevant questions (e.g., scheduling, logistics, pure yes/no, or non-cost-sensitive preferences).\n"
                 "  - For `remodel_intensity`, prefer labels like \"Light refresh\" / \"Partial remodel\" / \"Full remodel\".\n"
-                "  - Keep to ~3–8 options; include an 'Not sure yet' / 'Other' only when it makes sense.",
+                "  - For style_direction (first step): REQUIRED 10–20 options. Each option MUST have `image_prompt`. Renders as image grid; user picks ~3. Set `allow_multiple: true`.",
+                "  - For other steps: keep to ~3–8 options; include 'Not sure yet' / 'Other' only when it makes sense.",
                 "If a question should allow selecting multiple answers, set `allow_multiple: true`.",
                 "If you want to support an 'Other' free-text option, set `allow_other: true` and optionally `other_label` / `other_placeholder`.",
                 "These are hints only: do NOT output full UI step schemas (no `id`, no `options` array, no frontend-only fields).",

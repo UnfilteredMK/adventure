@@ -80,7 +80,15 @@ export function FileUploadStep({
       continueLabel={resolvedContinueLabel}
       compactInPreview={compactInPreview}
     >
-      <div className={compactInPreview ? "h-full min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-2" : "space-y-3"}>
+      <div
+        className={
+          compactInPreview && !required && allowSkip && !hasUpload
+            ? "flex items-stretch gap-3 min-h-0"
+            : compactInPreview
+              ? "h-full min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-2"
+              : "space-y-3"
+        }
+      >
         {showUploader ? (
           <FilePicker
             value={value}
@@ -93,21 +101,34 @@ export function FileUploadStep({
             uploadRole={uploadRole}
             cameraEnabled={cameraEnabled}
             instanceId={instanceId}
+            compactDock={compactInPreview && !required && allowSkip && !hasUpload}
           />
         ) : null}
 
         {!required && allowSkip && !hasUpload ? (
-          <div className="pt-1 text-center">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Or</div>
+          compactInPreview ? (
             <button
               type="button"
               onClick={() => onComplete(null)}
               disabled={isLoading || isUploading}
-              className="mt-1 text-sm underline underline-offset-4 transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 h-12 px-4 rounded-xl text-sm font-semibold border-2 transition-colors border-[color:var(--form-surface-border-color)] hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ fontFamily: "inherit", color: "var(--form-text-color, inherit)" }}
             >
-              Skip and generate concepts
+              Skip and generate
             </button>
-          </div>
+          ) : (
+            <div className="pt-1 text-center">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Or</div>
+              <button
+                type="button"
+                onClick={() => onComplete(null)}
+                disabled={isLoading || isUploading}
+                className="mt-1 text-sm underline underline-offset-4 transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Skip and generate concepts
+              </button>
+            </div>
+          )
         ) : null}
       </div>
     </StepLayout>

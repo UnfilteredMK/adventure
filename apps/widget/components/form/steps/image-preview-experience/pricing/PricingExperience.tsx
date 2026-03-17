@@ -138,7 +138,9 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   void allowToggle;
   void autoReveal;
 
-  const pillLabel = (label && String(label).trim()) ? String(label).trim() : 'Show pricing';
+  const rawLabel = (label && String(label).trim()) ? String(label).trim() : 'Show pricing';
+  const pillLabel = rawLabel === 'Show pricing' ? 'Pricing' : rawLabel;
+  const pricingFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
   const base = accent || '#0f172a';
   const tagBg = withAlpha(accent || base, 1);
   const transparentUsesFullWidth = Boolean(
@@ -200,12 +202,6 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         {...props}
       >
         <div className="flex h-full w-full items-stretch">
-          <div className="relative shrink-0 w-[clamp(0.5rem,5cqi,1.2rem)] flex items-center justify-center">
-            <span
-              className="pointer-events-none h-[clamp(0.35rem,3cqi,0.6rem)] w-[clamp(0.35rem,3cqi,0.6rem)] shrink-0 rounded-full bg-[rgba(55,65,81,0.9)]"
-              aria-hidden
-            />
-          </div>
           {!revealed ? (
             <div
               data-pricing-label-reveal
@@ -215,10 +211,10 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 data-pricing-label
                 className={cn(
                   labelWidthClass,
-                  "w-full min-w-0",
+                  "w-full min-w-0 inline-flex items-center justify-center gap-[0.35em]",
                   "text-[clamp(0.72rem,5.5cqi,1.9rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
                 )}
-                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+                style={{ fontFamily: pricingFont }}
               >
                 {pillLabel}
               </div>
@@ -227,7 +223,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 className={cn(
                   "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] w-full min-w-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
-                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+                style={{ fontFamily: pricingFont }}
               >
                 <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
                   <span className="text-white/95 leading-none">{lockedMask.prefix}</span>
@@ -247,9 +243,9 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 className={cn(
                   labelWidthClass,
                   "w-full min-w-0",
-                  "text-[clamp(0.72rem,5.5cqi,1.9rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
+                  "text-[clamp(0.7rem,5cqi,1.1rem)] font-normal tracking-[0.02em] leading-[1.2] text-white/95"
                 )}
-                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+                style={{ fontFamily: pricingFont }}
               >
                 {pillLabel}
               </div>
@@ -259,7 +255,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                   revealedPriceClass,
                   "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] min-w-0 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
-                style={{ fontFamily: "'Courier Prime', 'IBM Plex Mono', 'Courier New', monospace" }}
+                style={{ fontFamily: pricingFont }}
               >
                 {loading ? (
                   <span className="text-white/90 min-w-0">Calculating…</span>

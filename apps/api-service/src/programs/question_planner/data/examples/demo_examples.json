@@ -13,9 +13,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 8,
-      "choice_option_target": 6,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 4,
         "maxStepsTotal": 6
@@ -37,31 +37,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 guest-bath looks to aim for first.",
+          "question": "Pick 3 or so ideal styles from the grid.",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Bright white + black accents",
-              "value": "bright_white_black",
-              "image_prompt": "modern bathroom with bright white tiles and black fixtures"
-            },
-            {
-              "label": "Warm neutrals + brass",
-              "value": "warm_neutrals_brass",
-              "image_prompt": "bathroom with warm neutrals and brass"
-            },
-            {
-              "label": "Moody dark",
-              "value": "moody_dark",
-              "image_prompt": "moody bathroom with dark tile"
-            },
-            {
-              "label": "Soft spa",
-              "value": "soft_spa",
-              "image_prompt": "spa-like bathroom"
-            },
-            {
-              "label": "Other",
+            {"label": "Bright white + black accents", "value": "bright_white_black", "image_prompt": "modern bathroom with bright white tiles and black fixtures"},
+            {"label": "Warm neutrals + brass", "value": "warm_neutrals_brass", "image_prompt": "bathroom with warm neutrals and brass"},
+            {"label": "Moody dark", "value": "moody_dark", "image_prompt": "moody bathroom with dark tile"},
+            {"label": "Soft spa", "value": "soft_spa", "image_prompt": "spa-like bathroom with soft lighting"},
+            {"label": "Coastal tile", "value": "coastal_tile", "image_prompt": "bathroom with coastal blue and white tile"},
+            {"label": "Modern minimal", "value": "modern_minimal", "image_prompt": "minimal modern bathroom clean lines"},
+            {"label": "Traditional classic", "value": "traditional_classic", "image_prompt": "traditional bathroom with classic fixtures"},
+            {"label": "Industrial concrete", "value": "industrial_concrete", "image_prompt": "industrial bathroom with concrete and metal"},
+            {"label": "Japandi calm", "value": "japandi_calm", "image_prompt": "japandi bathroom calm minimal warm wood"},
+            {"label": "Mediterranean terracotta", "value": "mediterranean_terracotta", "image_prompt": "mediterranean bathroom terracotta and warm tones"},
+            {"label": "Scandi light wood", "value": "scandi_light_wood", "image_prompt": "scandinavian bathroom light wood airy"},
+            {"label": "Luxe marble", "value": "luxe_marble", "image_prompt": "luxury bathroom with marble and gold accents"},
+            {"label": "Other",
               "value": "other"
             }
           ]
@@ -119,21 +110,14 @@
           "answer": [
             "kitchen-refresh"
           ]
-        },
-        {
-          "stepId": "step-style-direction",
-          "answer": [
-            "modern_minimal"
-          ]
         }
       ],
       "asked_step_ids": [
-        "step-service-primary",
-        "step-style-direction"
+        "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 8,
-      "choice_option_target": 6,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 4,
         "maxStepsTotal": 6
@@ -153,45 +137,39 @@
     "question_plan_json": {
       "plan": [
         {
+          "key": "style_direction",
+          "allow_multiple": true,
+          "question": "Pick 3 or so ideal styles from the grid.",
+          "type_hint": "multiple_choice",
+          "option_hints": [
+            {"label": "Modern minimal", "value": "modern_minimal", "image_prompt": "modern minimal kitchen clean lines"},
+            {"label": "Warm contemporary", "value": "warm_contemporary", "image_prompt": "warm contemporary kitchen wood and neutrals"},
+            {"label": "Traditional classic", "value": "traditional_classic", "image_prompt": "traditional kitchen classic cabinets"},
+            {"label": "Industrial", "value": "industrial", "image_prompt": "industrial kitchen metal and reclaimed wood"},
+            {"label": "Scandi light", "value": "scandi_light", "image_prompt": "scandinavian kitchen light wood airy"},
+            {"label": "Coastal bright", "value": "coastal_bright", "image_prompt": "coastal kitchen white and blue"},
+            {"label": "Farmhouse", "value": "farmhouse", "image_prompt": "farmhouse kitchen shaker cabinets"},
+            {"label": "Mid-century", "value": "mid_century", "image_prompt": "mid-century modern kitchen warm wood"},
+            {"label": "Luxe marble", "value": "luxe_marble", "image_prompt": "luxury kitchen marble and gold"},
+            {"label": "Japandi", "value": "japandi", "image_prompt": "japandi kitchen calm minimal"},
+            {"label": "Moody dark", "value": "moody_dark", "image_prompt": "moody dark kitchen dramatic"},
+            {"label": "Transitional", "value": "transitional", "image_prompt": "transitional kitchen blend modern traditional"},
+            {"label": "Other", "value": "other"}
+          ]
+        },
+        {
           "key": "update_areas",
           "question": "What are you looking to update?",
           "type_hint": "multiple_choice",
           "allow_multiple": true,
           "option_hints": [
-            {
-              "label": "Cabinets",
-              "value": "cabinets",
-              "image_prompt": "kitchen cabinets"
-            },
-            {
-              "label": "Countertops",
-              "value": "countertops",
-              "image_prompt": "kitchen countertops"
-            },
-            {
-              "label": "Backsplash",
-              "value": "backsplash",
-              "image_prompt": "kitchen backsplash"
-            },
-            {
-              "label": "Appliances",
-              "value": "appliances",
-              "image_prompt": "kitchen appliances"
-            },
-            {
-              "label": "Layout",
-              "value": "layout",
-              "image_prompt": "kitchen layout"
-            },
-            {
-              "label": "Full remodel",
-              "value": "full_remodel",
-              "image_prompt": "complete kitchen remodel"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Cabinets", "value": "cabinets", "image_prompt": "kitchen cabinets"},
+            {"label": "Countertops", "value": "countertops", "image_prompt": "kitchen countertops"},
+            {"label": "Backsplash", "value": "backsplash", "image_prompt": "kitchen backsplash"},
+            {"label": "Appliances", "value": "appliances", "image_prompt": "kitchen appliances"},
+            {"label": "Layout", "value": "layout", "image_prompt": "kitchen layout"},
+            {"label": "Full remodel", "value": "full_remodel", "image_prompt": "complete kitchen remodel"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -215,21 +193,14 @@
           "answer": [
             "patio-design"
           ]
-        },
-        {
-          "stepId": "step-style-direction",
-          "answer": [
-            "modern_outdoor"
-          ]
         }
       ],
       "asked_step_ids": [
-        "step-service-primary",
-        "step-style-direction"
+        "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 8,
-      "choice_option_target": 6,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 4,
         "maxStepsTotal": 6
@@ -249,40 +220,38 @@
     "question_plan_json": {
       "plan": [
         {
+          "key": "style_direction",
+          "allow_multiple": true,
+          "question": "Pick 3 or so ideal styles from the grid.",
+          "type_hint": "multiple_choice",
+          "option_hints": [
+            {"label": "Modern outdoor", "value": "modern_outdoor", "image_prompt": "modern outdoor landscape clean lines"},
+            {"label": "Tropical lush", "value": "tropical_lush", "image_prompt": "tropical lush landscape palms"},
+            {"label": "Desert xeriscape", "value": "desert_xeriscape", "image_prompt": "desert xeriscape drought-tolerant"},
+            {"label": "Cottage garden", "value": "cottage_garden", "image_prompt": "cottage garden romantic flowers"},
+            {"label": "Japanese zen", "value": "japanese_zen", "image_prompt": "japanese zen garden minimal"},
+            {"label": "Mediterranean", "value": "mediterranean", "image_prompt": "mediterranean landscape olive trees"},
+            {"label": "Native prairie", "value": "native_prairie", "image_prompt": "native prairie landscape grasses"},
+            {"label": "Formal structured", "value": "formal_structured", "image_prompt": "formal structured landscape hedges"},
+            {"label": "Coastal dunes", "value": "coastal_dunes", "image_prompt": "coastal dunes landscape beach"},
+            {"label": "Woodland natural", "value": "woodland_natural", "image_prompt": "woodland natural landscape shade"},
+            {"label": "Modern minimal", "value": "modern_minimal", "image_prompt": "minimal modern landscape"},
+            {"label": "Rustic ranch", "value": "rustic_ranch", "image_prompt": "rustic ranch landscape"},
+            {"label": "Other", "value": "other"}
+          ]
+        },
+        {
           "key": "update_areas",
           "question": "What areas are you focusing on?",
           "type_hint": "multiple_choice",
           "allow_multiple": true,
           "option_hints": [
-            {
-              "label": "Patio/hardscape",
-              "value": "patio_hardscape",
-              "image_prompt": "patio and hardscape design"
-            },
-            {
-              "label": "Planting beds",
-              "value": "planting_beds",
-              "image_prompt": "landscape planting beds"
-            },
-            {
-              "label": "Lawn",
-              "value": "lawn",
-              "image_prompt": "lawn and grass"
-            },
-            {
-              "label": "Lighting",
-              "value": "lighting",
-              "image_prompt": "outdoor lighting"
-            },
-            {
-              "label": "Full redesign",
-              "value": "full_redesign",
-              "image_prompt": "complete landscape redesign"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Patio/hardscape", "value": "patio_hardscape", "image_prompt": "patio and hardscape design"},
+            {"label": "Planting beds", "value": "planting_beds", "image_prompt": "landscape planting beds"},
+            {"label": "Lawn", "value": "lawn", "image_prompt": "lawn and grass"},
+            {"label": "Lighting", "value": "lighting", "image_prompt": "outdoor lighting"},
+            {"label": "Full redesign", "value": "full_redesign", "image_prompt": "complete landscape redesign"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -312,9 +281,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -356,38 +325,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 living room looks to aim for. 🛋️",
+          "question": "Pick 3 or so ideal styles from the grid. 🛋️",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Light & airy (linen + light wood)",
-              "value": "light_airy_linen",
-              "image_prompt": "living room with linen sofa, light oak wood, bright natural light, airy minimal decor"
-            },
-            {
-              "label": "Warm & cozy (earth tones + walnut)",
-              "value": "warm_cozy_earthy",
-              "image_prompt": "living room with warm earth tones, walnut wood furniture, cozy layered textiles"
-            },
-            {
-              "label": "Moody modern (dark + contrast)",
-              "value": "moody_modern_contrast",
-              "image_prompt": "modern living room with dark walls, high contrast accents, dramatic lighting, sleek furniture"
-            },
-            {
-              "label": "Coastal bright (sand + white + blue)",
-              "value": "coastal_bright",
-              "image_prompt": "coastal living room with white sofa, sandy neutrals, soft blue accents, breezy natural textures"
-            },
-            {
-              "label": "Mid-century (warm wood + clean lines)",
-              "value": "mid_century_warm_wood",
-              "image_prompt": "mid-century modern living room with warm wood, clean lines, vintage-inspired furniture silhouettes"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Light & airy (linen + light wood)", "value": "light_airy_linen", "image_prompt": "living room with linen sofa, light oak wood, bright natural light, airy minimal decor"},
+            {"label": "Warm & cozy (earth tones + walnut)", "value": "warm_cozy_earthy", "image_prompt": "living room with warm earth tones, walnut wood furniture, cozy layered textiles"},
+            {"label": "Moody modern (dark + contrast)", "value": "moody_modern_contrast", "image_prompt": "modern living room with dark walls, high contrast accents, dramatic lighting, sleek furniture"},
+            {"label": "Coastal bright (sand + white + blue)", "value": "coastal_bright", "image_prompt": "coastal living room with white sofa, sandy neutrals, soft blue accents, breezy natural textures"},
+            {"label": "Mid-century (warm wood + clean lines)", "value": "mid_century_warm_wood", "image_prompt": "mid-century modern living room with warm wood, clean lines, vintage-inspired furniture silhouettes"},
+            {"label": "Scandi minimal", "value": "scandi_minimal", "image_prompt": "scandinavian living room minimal light wood"},
+            {"label": "Japandi calm", "value": "japandi_calm", "image_prompt": "japandi living room calm minimal warm"},
+            {"label": "Industrial loft", "value": "industrial_loft", "image_prompt": "industrial loft living room exposed brick metal"},
+            {"label": "Traditional classic", "value": "traditional_classic", "image_prompt": "traditional living room classic furniture"},
+            {"label": "Boho layered", "value": "boho_layered", "image_prompt": "boho living room layered textiles plants"},
+            {"label": "Modern sleek", "value": "modern_sleek", "image_prompt": "modern sleek living room black and white"},
+            {"label": "Rustic cabin", "value": "rustic_cabin", "image_prompt": "rustic cabin living room wood stone"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -672,9 +625,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -716,33 +669,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 pool-area looks to aim for. 🏊",
+          "question": "Pick 3 or so ideal styles from the grid. 🏊",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Modern resort (light stone + glass)",
-              "value": "modern_resort"
-            },
-            {
-              "label": "Coastal bright (white + teak) 🌊",
-              "value": "coastal"
-            },
-            {
-              "label": "Mediterranean (blue tile + terracotta) 🏺",
-              "value": "mediterranean"
-            },
-            {
-              "label": "Minimal (clean lines + limestone)",
-              "value": "minimal_clean"
-            },
-            {
-              "label": "Tropical oasis (lush + lagoon)",
-              "value": "tropical_oasis"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Modern resort (light stone + glass)", "value": "modern_resort", "image_prompt": "modern resort pool light stone glass"},
+            {"label": "Coastal bright (white + teak) 🌊", "value": "coastal", "image_prompt": "coastal pool white teak bright"},
+            {"label": "Mediterranean (blue tile + terracotta) 🏺", "value": "mediterranean", "image_prompt": "mediterranean pool blue tile terracotta"},
+            {"label": "Minimal (clean lines + limestone)", "value": "minimal_clean", "image_prompt": "minimal pool clean lines limestone"},
+            {"label": "Tropical oasis (lush + lagoon)", "value": "tropical_oasis", "image_prompt": "tropical oasis pool lush lagoon"},
+            {"label": "Desert modern", "value": "desert_modern", "image_prompt": "desert modern pool sleek"},
+            {"label": "Rustic natural", "value": "rustic_natural", "image_prompt": "rustic natural pool stone wood"},
+            {"label": "Luxe infinity", "value": "luxe_infinity", "image_prompt": "luxury infinity pool dramatic"},
+            {"label": "Japanese zen", "value": "japanese_zen", "image_prompt": "japanese zen pool minimal"},
+            {"label": "Hamptons classic", "value": "hamptons_classic", "image_prompt": "hamptons classic pool shingle"},
+            {"label": "Contemporary geometric", "value": "contemporary_geometric", "image_prompt": "contemporary geometric pool"},
+            {"label": "Lagoon natural", "value": "lagoon_natural", "image_prompt": "natural lagoon pool green water"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -995,9 +937,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -1039,38 +981,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 ring designs to explore first. 💍",
+          "question": "Pick 3 or so ideal styles from the grid. 💍",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Solitaire (clean + classic)",
-              "value": "solitaire_classic",
-              "image_prompt": "close-up product photo of a classic solitaire engagement ring on a neutral background"
-            },
-            {
-              "label": "Halo (extra sparkle)",
-              "value": "halo_sparkle",
-              "image_prompt": "close-up product photo of a halo engagement ring with extra sparkle on a neutral background"
-            },
-            {
-              "label": "Bezel (modern + sleek) ✨",
-              "value": "bezel_modern",
-              "image_prompt": "close-up product photo of a modern bezel-set ring, sleek minimal style, neutral background"
-            },
-            {
-              "label": "Three-stone (balanced)",
-              "value": "three_stone",
-              "image_prompt": "close-up product photo of a three-stone ring design, balanced proportions, neutral background"
-            },
-            {
-              "label": "Vintage details (milgrain/filigree)",
-              "value": "vintage_details",
-              "image_prompt": "close-up product photo of a vintage-inspired ring with milgrain and filigree details"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Solitaire (clean + classic)", "value": "solitaire_classic", "image_prompt": "close-up product photo of a classic solitaire engagement ring on a neutral background"},
+            {"label": "Halo (extra sparkle)", "value": "halo_sparkle", "image_prompt": "close-up product photo of a halo engagement ring with extra sparkle on a neutral background"},
+            {"label": "Bezel (modern + sleek) ✨", "value": "bezel_modern", "image_prompt": "close-up product photo of a modern bezel-set ring, sleek minimal style, neutral background"},
+            {"label": "Three-stone (balanced)", "value": "three_stone", "image_prompt": "close-up product photo of a three-stone ring design, balanced proportions, neutral background"},
+            {"label": "Vintage details (milgrain/filigree)", "value": "vintage_details", "image_prompt": "close-up product photo of a vintage-inspired ring with milgrain and filigree details"},
+            {"label": "Pavé band", "value": "pave_band", "image_prompt": "close-up product photo of engagement ring with pavé band sparkle"},
+            {"label": "Art deco", "value": "art_deco", "image_prompt": "close-up product photo of art deco engagement ring geometric"},
+            {"label": "East-west setting", "value": "east_west", "image_prompt": "close-up product photo of east-west oval engagement ring"},
+            {"label": "Hidden halo", "value": "hidden_halo", "image_prompt": "close-up product photo of engagement ring with hidden halo detail"},
+            {"label": "Split shank", "value": "split_shank", "image_prompt": "close-up product photo of split shank engagement ring"},
+            {"label": "Twist band", "value": "twist_band", "image_prompt": "close-up product photo of twist band engagement ring"},
+            {"label": "Toi et moi", "value": "toi_et_moi", "image_prompt": "close-up product photo of toi et moi two-stone ring"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -1336,9 +1262,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -1380,33 +1306,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 tiny-home interior looks to aim for. 🏡",
+          "question": "Pick 3 or so ideal styles from the grid. 🏡",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Scandi (light woods + airy) ❄️",
-              "value": "minimal_scandinavian"
-            },
-            {
-              "label": "Modern cozy (soft neutrals + texture)",
-              "value": "modern_cozy"
-            },
-            {
-              "label": "Rustic cabin (wood + warmth)",
-              "value": "rustic_cabin"
-            },
-            {
-              "label": "Japandi (calm + minimal + warm)",
-              "value": "japandi"
-            },
-            {
-              "label": "Industrial (metal + contrast) 🧱",
-              "value": "industrial"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Scandi (light woods + airy) ❄️", "value": "minimal_scandinavian", "image_prompt": "tiny home scandinavian light wood airy"},
+            {"label": "Modern cozy (soft neutrals + texture)", "value": "modern_cozy", "image_prompt": "tiny home modern cozy soft neutrals"},
+            {"label": "Rustic cabin (wood + warmth)", "value": "rustic_cabin", "image_prompt": "tiny home rustic cabin wood warmth"},
+            {"label": "Japandi (calm + minimal + warm)", "value": "japandi", "image_prompt": "tiny home japandi calm minimal warm"},
+            {"label": "Industrial (metal + contrast) 🧱", "value": "industrial", "image_prompt": "tiny home industrial metal contrast"},
+            {"label": "Bohemian", "value": "bohemian", "image_prompt": "tiny home bohemian layered textiles"},
+            {"label": "Coastal", "value": "coastal", "image_prompt": "tiny home coastal white blue"},
+            {"label": "Farmhouse", "value": "farmhouse", "image_prompt": "tiny home farmhouse shaker"},
+            {"label": "Mid-century", "value": "mid_century", "image_prompt": "tiny home mid-century warm wood"},
+            {"label": "Minimal white", "value": "minimal_white", "image_prompt": "tiny home minimal white clean"},
+            {"label": "Cottage", "value": "cottage", "image_prompt": "tiny home cottage cozy"},
+            {"label": "A-frame cabin", "value": "a_frame_cabin", "image_prompt": "tiny home a-frame cabin wood"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -1658,9 +1573,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -1702,38 +1617,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 patio looks to aim for. 🌞",
+          "question": "Pick 3 or so ideal styles from the grid. 🌞",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Modern (concrete + black) ✨",
-              "value": "modern_concrete_black",
-              "image_prompt": "modern patio with concrete, black accents, minimal outdoor furniture"
-            },
-            {
-              "label": "Coastal (white + teak) 🌊",
-              "value": "coastal_white_teak",
-              "image_prompt": "coastal patio with white cushions, teak furniture, breezy light palette"
-            },
-            {
-              "label": "Rustic natural (stone + wood)",
-              "value": "rustic_stone_wood",
-              "image_prompt": "rustic patio with natural stone and warm wood elements, cozy outdoor setting"
-            },
-            {
-              "label": "Mediterranean (terracotta + greenery) 🏺",
-              "value": "mediterranean_terracotta",
-              "image_prompt": "mediterranean patio with terracotta tones, greenery, warm sunlit ambiance"
-            },
-            {
-              "label": "Minimal (clean lines + neutral)",
-              "value": "minimal_neutral",
-              "image_prompt": "minimal patio with clean lines, neutral tones, modern outdoor furniture"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Modern (concrete + black) ✨", "value": "modern_concrete_black", "image_prompt": "modern patio with concrete, black accents, minimal outdoor furniture"},
+            {"label": "Coastal (white + teak) 🌊", "value": "coastal_white_teak", "image_prompt": "coastal patio with white cushions, teak furniture, breezy light palette"},
+            {"label": "Rustic natural (stone + wood)", "value": "rustic_stone_wood", "image_prompt": "rustic patio with natural stone and warm wood elements, cozy outdoor setting"},
+            {"label": "Mediterranean (terracotta + greenery) 🏺", "value": "mediterranean_terracotta", "image_prompt": "mediterranean patio with terracotta tones, greenery, warm sunlit ambiance"},
+            {"label": "Minimal (clean lines + neutral)", "value": "minimal_neutral", "image_prompt": "minimal patio with clean lines, neutral tones, modern outdoor furniture"},
+            {"label": "Desert modern", "value": "desert_modern", "image_prompt": "desert modern patio sleek"},
+            {"label": "Tropical lush", "value": "tropical_lush", "image_prompt": "tropical patio lush plants"},
+            {"label": "Farmhouse", "value": "farmhouse", "image_prompt": "farmhouse patio warm wood"},
+            {"label": "Japanese zen", "value": "japanese_zen", "image_prompt": "japanese zen patio minimal"},
+            {"label": "Hamptons", "value": "hamptons", "image_prompt": "hamptons patio classic"},
+            {"label": "Industrial", "value": "industrial", "image_prompt": "industrial patio metal concrete"},
+            {"label": "Boho", "value": "boho", "image_prompt": "boho patio rattan plants"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -1966,9 +1865,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -2010,33 +1909,22 @@
         {
           "key": "style_direction",
           "allow_multiple": true,
-          "question": "Pick 1–2 home office looks to aim for. 🧑‍💻",
+          "question": "Pick 3 or so ideal styles from the grid. 🧑‍💻",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Modern sleek (black + clean lines)",
-              "value": "modern_sleek"
-            },
-            {
-              "label": "Warm contemporary (wood + soft neutrals)",
-              "value": "warm_contemporary"
-            },
-            {
-              "label": "Traditional classic (rich wood + trim)",
-              "value": "traditional_classic"
-            },
-            {
-              "label": "Industrial (metal + reclaimed wood) 🧱",
-              "value": "industrial"
-            },
-            {
-              "label": "Scandi (light + minimal) ❄️",
-              "value": "minimal_scandinavian"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Modern sleek (black + clean lines)", "value": "modern_sleek", "image_prompt": "home office modern sleek black clean lines"},
+            {"label": "Warm contemporary (wood + soft neutrals)", "value": "warm_contemporary", "image_prompt": "home office warm contemporary wood neutrals"},
+            {"label": "Traditional classic (rich wood + trim)", "value": "traditional_classic", "image_prompt": "home office traditional classic wood trim"},
+            {"label": "Industrial (metal + reclaimed wood) 🧱", "value": "industrial", "image_prompt": "home office industrial metal reclaimed wood"},
+            {"label": "Scandi (light + minimal) ❄️", "value": "minimal_scandinavian", "image_prompt": "home office scandinavian light minimal"},
+            {"label": "Japandi", "value": "japandi", "image_prompt": "home office japandi calm minimal"},
+            {"label": "Mid-century", "value": "mid_century", "image_prompt": "home office mid-century warm wood"},
+            {"label": "Coastal bright", "value": "coastal_bright", "image_prompt": "home office coastal bright white blue"},
+            {"label": "Moody dark", "value": "moody_dark", "image_prompt": "home office moody dark dramatic"},
+            {"label": "Boho creative", "value": "boho_creative", "image_prompt": "home office boho creative plants"},
+            {"label": "Luxe executive", "value": "luxe_executive", "image_prompt": "home office luxe executive leather"},
+            {"label": "Minimal white", "value": "minimal_white", "image_prompt": "home office minimal white clean"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {
@@ -2265,9 +2153,9 @@
       "asked_step_ids": [
         "step-service-primary"
       ],
-      "choice_option_min": 4,
-      "choice_option_max": 10,
-      "choice_option_target": 7,
+      "choice_option_min": 10,
+      "choice_option_max": 20,
+      "choice_option_target": 15,
       "batch_constraints": {
         "minStepsTotal": 7,
         "maxStepsTotal": 12
@@ -2307,66 +2195,37 @@
     "question_plan_json": {
       "plan": [
         {
+          "key": "style_direction",
+          "allow_multiple": true,
+          "question": "Pick 3 or so ideal styles from the grid. 💡",
+          "type_hint": "multiple_choice",
+          "option_hints": [
+            {"label": "Modern minimal (clean lines)", "value": "modern_minimal", "image_prompt": "exterior lighting modern minimal clean lines"},
+            {"label": "Classic lanterns (traditional)", "value": "classic_lantern", "image_prompt": "exterior lighting classic lanterns traditional"},
+            {"label": "Warm cozy glow (inviting)", "value": "warm_cozy", "image_prompt": "exterior lighting warm cozy glow inviting"},
+            {"label": "Dramatic statement (highlight features)", "value": "dramatic_statement", "image_prompt": "exterior lighting dramatic statement highlight"},
+            {"label": "Hidden architectural (subtle + sleek)", "value": "hidden_architectural", "image_prompt": "exterior lighting hidden architectural subtle"},
+            {"label": "Pathway bollards", "value": "pathway_bollards", "image_prompt": "exterior pathway bollard lighting"},
+            {"label": "Uplighting trees", "value": "uplighting_trees", "image_prompt": "exterior uplighting trees dramatic"},
+            {"label": "String lights festive", "value": "string_lights_festive", "image_prompt": "exterior string lights festive patio"},
+            {"label": "Coastal nautical", "value": "coastal_nautical", "image_prompt": "exterior coastal nautical lighting"},
+            {"label": "Rustic farmhouse", "value": "rustic_farmhouse", "image_prompt": "exterior rustic farmhouse lighting"},
+            {"label": "Contemporary geometric", "value": "contemporary_geometric", "image_prompt": "exterior contemporary geometric lighting"},
+            {"label": "Mediterranean warm", "value": "mediterranean_warm", "image_prompt": "exterior mediterranean warm lighting"},
+            {"label": "Other", "value": "other"}
+          ]
+        },
+        {
           "key": "lighting_focus",
           "question": "Which area should be the focus of the exterior lighting concept? 💡",
           "type_hint": "multiple_choice",
           "option_hints": [
-            {
-              "label": "Front entry / facade",
-              "value": "front_entry_facade"
-            },
-            {
-              "label": "Pathways / safety",
-              "value": "pathways_safety"
-            },
-            {
-              "label": "Patio / seating",
-              "value": "patio_seating"
-            },
-            {
-              "label": "Landscaping highlights",
-              "value": "landscaping_highlights"
-            },
-            {
-              "label": "Whole property vibe",
-              "value": "whole_property"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
-          ]
-        },
-        {
-          "key": "style_direction",
-          "allow_multiple": true,
-          "question": "Pick 1–2 exterior lighting looks to aim for. 💡",
-          "type_hint": "multiple_choice",
-          "option_hints": [
-            {
-              "label": "Modern minimal (clean lines)",
-              "value": "modern_minimal"
-            },
-            {
-              "label": "Classic lanterns (traditional)",
-              "value": "classic_lantern"
-            },
-            {
-              "label": "Warm cozy glow (inviting)",
-              "value": "warm_cozy"
-            },
-            {
-              "label": "Dramatic statement (highlight features)",
-              "value": "dramatic_statement"
-            },
-            {
-              "label": "Hidden architectural (subtle + sleek)",
-              "value": "hidden_architectural"
-            },
-            {
-              "label": "Other",
-              "value": "other"
-            }
+            {"label": "Front entry / facade", "value": "front_entry_facade"},
+            {"label": "Pathways / safety", "value": "pathways_safety"},
+            {"label": "Patio / seating", "value": "patio_seating"},
+            {"label": "Landscaping highlights", "value": "landscaping_highlights"},
+            {"label": "Whole property vibe", "value": "whole_property"},
+            {"label": "Other", "value": "other"}
           ]
         },
         {

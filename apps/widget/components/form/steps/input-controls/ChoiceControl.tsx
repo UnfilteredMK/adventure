@@ -218,11 +218,68 @@ export function Choice({
 
     return (
       <div className={cn(isCompact ? "mx-auto w-full max-w-3xl space-y-1.5 text-center" : "space-y-2.5")}>
-        <div className={cn("flex flex-wrap justify-center", isCompact ? "gap-1.5" : "gap-1.5 sm:gap-2")}>
+        <div className={cn("flex flex-wrap justify-center items-center", isCompact ? "gap-1.5" : "gap-1.5 sm:gap-2")}>
           {options.map((option: string | UIOption, index: number) => {
             const picked = isSelected(option);
             const label = labelOf(option);
             const key = keyOf(option);
+            const isOther = key === "other";
+
+            // When "Other" is selected, render inline input instead of pill + pop-out
+            if (isOther && picked && allowOther) {
+              return (
+                <input
+                  key={`other-input-${index}`}
+                  type="text"
+                  value={otherText}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setOtherText(next);
+                    if (multiple) {
+                      const current = Array.isArray(selected) ? selected : [];
+                      const normalized = current.map((v: any) => v === "other" && allowOther && next ? next : v);
+                      onChange(normalized);
+                    } else {
+                      const normalized = selected === "other" && allowOther ? (next ? next : "other") : selected;
+                      onChange(normalized);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      handleSelect({ value: "other" }); // Toggle off
+                      return;
+                    }
+                    if (!onAutoSubmit) return;
+                    if (multiple) return;
+                    if (e.key !== "Enter") return;
+                    if (otherRequiresText && !otherText.trim()) return;
+                    const normalized = otherText ? otherText : "other";
+                    onAutoSubmit(normalized);
+                  }}
+                  onBlur={() => {
+                    // Optional: deselect other if empty and user clicks away
+                  }}
+                  placeholder={otherPlaceholder}
+                  autoFocus
+                  className={cn(
+                    "inline-flex min-w-[120px] max-w-[200px] rounded-full border-2 px-3 py-1.5 text-sm font-semibold transition-all",
+                    "focus:outline-none focus:ring-2 focus:ring-offset-1",
+                    isCompact
+                      ? "min-h-[30px] text-[11px] sm:min-h-[34px] sm:text-[12px]"
+                      : "min-h-9 text-[12px] sm:min-h-10 sm:text-[13px]"
+                  )}
+                  style={{
+                    fontFamily: theme.fontFamily,
+                    borderRadius: `${Math.max(theme.borderRadius || 10, 9999)}px`,
+                    backgroundColor: "var(--form-surface-color, #fff)",
+                    borderColor: primary,
+                    color: theme.textColor || "var(--form-text-color)",
+                  }}
+                />
+              );
+            }
+
             return (
               <button
                 key={`${key}-${index}`}
@@ -244,7 +301,6 @@ export function Choice({
                   backgroundColor: picked ? primary : unpickedBg,
                   borderColor: picked ? primary : unpickedBorder,
                   color: picked ? "#ffffff" : (theme.textColor || "var(--form-text-color)"),
-                  // Hover (works on most modern browsers; otherwise falls back gracefully)
                   ...(picked
                     ? {}
                     : ({
@@ -265,61 +321,12 @@ export function Choice({
                   } catch {}
                 }}
               >
-                {picked && <Check className={cn(isCompact ? "w-3 h-3" : "w-3.5 h-3.5")} strokeWidth={2.5} />}
+                {picked && !isOther && <Check className={cn(isCompact ? "w-3 h-3" : "w-3.5 h-3.5")} strokeWidth={2.5} />}
                 <span>{label}</span>
               </button>
             );
           })}
         </div>
-
-        {allowOther && isSelected({ value: "other" }) && (
-          <div
-            className="mx-auto w-full max-w-xl rounded-xl border p-3 text-left"
-            style={{
-              backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.80))",
-              borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
-              borderRadius: `${Math.max(theme.borderRadius || 8, 12)}px`,
-            }}
-          >
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <label className="block text-xs font-semibold" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
-                {otherLabel}
-              </label>
-            </div>
-            <input
-              type="text"
-              value={otherText}
-              onChange={(e) => {
-                const next = e.target.value;
-                setOtherText(next);
-                if (multiple) {
-                  const current = Array.isArray(selected) ? selected : [];
-                  const normalized = current.map((v: any) => v === "other" && allowOther && next ? next : v);
-                  onChange(normalized);
-                } else {
-                  const normalized = selected === "other" && allowOther ? (next ? next : "other") : selected;
-                  onChange(normalized);
-                }
-              }}
-              onKeyDown={(e) => {
-                if (!onAutoSubmit) return;
-                if (multiple) return;
-                if (e.key !== "Enter") return;
-                if (otherRequiresText && !otherText.trim()) return;
-                const normalized = otherText ? otherText : "other";
-                onAutoSubmit(normalized);
-              }}
-              placeholder={otherPlaceholder}
-              className="w-full h-10 rounded-lg border px-3 text-sm"
-              style={{
-                backgroundColor: "transparent",
-                borderColor: withAlpha(primary, 0.22),
-                color: theme.textColor,
-                fontFamily: theme.fontFamily,
-              }}
-            />
-          </div>
-        )}
       </div>
     );
   }

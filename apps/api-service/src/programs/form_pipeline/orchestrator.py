@@ -343,7 +343,7 @@ def _convert_option_images_for_steps(
         except Exception as exc:
             return {**work, "urls": [], "stats": {}, "error": exc}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(step_work), 4)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(step_work), 16)) as pool:
         results = list(pool.map(_generate_for_step, step_work))
 
     for result in results:
@@ -596,10 +596,10 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
     services_hash = short_hash(services_key_material, n=10)
     cache_key = _planner_cache_key(session_id=session_id, services_fingerprint=services_hash)
     # IMPORTANT:
-    # - noCache should mainly affect renderer output caching (debugging).
-    # - planner plan determinism must be preserved per-session; otherwise the user sees duplicates/reshuffles.
+    # - noCache bypasses both planner and renderer caches (for fresh generation with updated prompts).
+    # - planner plan determinism must be preserved per-session when cache is used.
     disable_render_cache = bool(payload.get("noCache") is True or str(payload.get("noCache") or "").lower() == "true")
-    disable_planner_cache = False
+    disable_planner_cache = disable_render_cache
     if os.getenv("AI_FORM_DEBUG") == "true":
         print(f"[FormPipeline] requestId={request_id} plannerCacheKey={cache_key}", flush=True)
 

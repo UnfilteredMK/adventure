@@ -36,6 +36,14 @@ function getMetricGain(step: any): number {
   return clamp01(Number.isFinite(n) ? n : 0.12);
 }
 
+/** Deterministic step IDs (budget, upload) – new API questions must insert before these. Keep in sync with step-engine constants. */
+const DETERMINISTIC_BOUNDARY_IDS = new Set([
+  "step-budget-range",
+  "step-upload-scene-image",
+  "step-upload-user-image",
+  "step-upload-product-image",
+]);
+
 interface UseStepEngineOptions {
   instanceId: string;
   /**
@@ -135,16 +143,21 @@ export function useStepEngine({
           newStepIds: newSteps.map(s => s.id),
         });
         
-        // Use addSteps logic: insert new steps before structural steps
+        // Use addSteps logic: insert new steps before structural OR deterministic (budget/upload) steps
         const structuralTypes = ['upload', 'designer', 'lead_capture', 'pricing', 'confirmation'];
         const mergedSteps = [...savedState.steps];
         let mergedCurrentStepIndex = savedState.currentStepIndex;
         
-        // Find insertion point (before first structural step)
+        // Find insertion point (before first structural or deterministic boundary step)
         let insertIndex = mergedSteps.length;
         for (let i = 0; i < mergedSteps.length; i++) {
           const step = mergedSteps[i];
-        const componentType = ('componentType' in step) ? step.componentType : (step.type === 'file_upload' || step.type === 'upload' ? 'upload' : 'text');
+          const stepId = String((step as any)?.id || "");
+          if (DETERMINISTIC_BOUNDARY_IDS.has(stepId)) {
+            insertIndex = i;
+            break;
+          }
+          const componentType = ('componentType' in step) ? step.componentType : (step.type === 'file_upload' || step.type === 'upload' ? 'upload' : 'text');
           if (structuralTypes.includes(componentType)) {
             insertIndex = i;
             break;
@@ -797,10 +810,15 @@ export function useStepEngine({
       if (typeof requestedInsertAtIndex === "number") {
         insertIndex = requestedInsertAtIndex;
       } else {
-        // Find the first structural step that comes AFTER the current step.
-        // This ensures we don't insert before the user's current position unless explicitly requested.
+        // Find the first structural OR deterministic (budget/upload) step after the current step.
+        // New API questions must go before budget + upload so order stays: API questions -> budget -> upload.
         for (let i = prev.currentStepIndex + 1; i < prev.steps.length; i++) {
           const step = prev.steps[i];
+          const stepId = String((step as any)?.id || "");
+          if (DETERMINISTIC_BOUNDARY_IDS.has(stepId)) {
+            insertIndex = i;
+            break;
+          }
           const stepType = ('type' in step) ? (step as any).type : undefined;
           const componentType = ('componentType' in step) ? step.componentType : 
             (stepType === 'file_upload' || stepType === 'upload' ? 'upload' : 
@@ -1056,6 +1074,50 @@ export function useStepEngine({
     saveStepState(instanceId, newState);
   }, [state, contextState, instanceId, extra?.useCase, extra?.subcategoryName]);
 
+  const markStepComplete = useCallback((stepId: string) => {
+    if (!stepId) return;
+    setState((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev.completedSteps);
+      if (next.has(stepId)) return prev;
+      next.add(stepId);
+      const newState = { ...prev, completedSteps: next };
+      saveStepState(instanceId, newState);
+      return newState;
+    });
+  }, [instanceId]);
+
+  /** Remove steps by ID (e.g. budget/upload after first image — they move to the bottom bar). */
+  const removeStepsByIds = useCallback((stepIds: Set<string>) => {
+    if (!stepIds || stepIds.size === 0) return;
+    setState((prev) => {
+      if (!prev?.steps?.length) return prev;
+      const kept: (StepDefinition | UIStep)[] = [];
+      const oldIdxToNewIdx: number[] = [];
+      prev.steps.forEach((s: any, oldIdx: number) => {
+        if (!stepIds.has(String((s as any)?.id || ""))) {
+          oldIdxToNewIdx[oldIdx] = kept.length;
+          kept.push(s);
+        }
+      });
+      if (kept.length === prev.steps.length) return prev;
+      const currentIdx = prev.currentStepIndex ?? 0;
+      const currentStep = prev.steps[currentIdx];
+      const currentId = currentStep ? String((currentStep as any)?.id || "") : "";
+      let newIndex: number;
+      if (stepIds.has(currentId)) {
+        const nextKeptIdx = prev.steps.findIndex((s: any, i: number) => i > currentIdx && !stepIds.has(String((s as any)?.id || "")));
+        newIndex = nextKeptIdx >= 0 ? (oldIdxToNewIdx[nextKeptIdx] ?? kept.length - 1) : kept.length - 1;
+      } else {
+        newIndex = oldIdxToNewIdx[currentIdx] ?? kept.length - 1;
+      }
+      newIndex = Math.max(0, Math.min(newIndex, kept.length - 1));
+      const newState = { ...prev, steps: kept, currentStepIndex: newIndex };
+      saveStepState(instanceId, newState);
+      return newState;
+    });
+  }, [instanceId]);
+
   return {
     state,
     isLoading,
@@ -1069,6 +1131,7 @@ export function useStepEngine({
     goToStep,
     updateStepData,
     patchStep,
+    markStepComplete,
     editContextEntry,
     removeContextEntry,
     isStepCompleted,
@@ -1076,5 +1139,6 @@ export function useStepEngine({
     canGoForward,
     stepStartTimeRef,
     addSteps, // JIT batching: Add new steps to the state
+    removeStepsByIds,
   };
 }

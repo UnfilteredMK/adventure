@@ -111,6 +111,8 @@ class NewBatchRequest(BaseModel):
     service_summary: Optional[str] = Field(default=None, alias="serviceSummary")
     company_summary: Optional[str] = Field(default=None, alias="companySummary")
     no_cache: Optional[bool] = Field(default=None, alias="noCache")
+    # Generate option thumbnails for image_choice_grid steps (style_direction, etc.)
+    option_images: Optional[bool] = Field(default=None, alias="optionImages")
 
     @model_validator(mode="before")
     @classmethod

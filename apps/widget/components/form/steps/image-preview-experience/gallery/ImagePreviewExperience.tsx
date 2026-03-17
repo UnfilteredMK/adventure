@@ -22,7 +22,7 @@ import {
 import { buildImagePromptViaDSPy } from "@/lib/ai-form/utils/image-prompt-builder";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { FormLoader } from "@/components/form/FormLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
@@ -1938,10 +1938,7 @@ export function ImagePreviewExperience(props: {
 	          <CardContent className={cn(previewMaxPx ? "p-0" : transparentChrome ? "p-0" : "p-3", stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden")}>
 	            {previewMaxPx && chromePx > 0 ? <div style={{ height: chromePx }} /> : null}
             <div className={cn("flex justify-center", stackedPreviewLayers.length > 0 && "pl-14")}>
-	            <motion.div
-	              initial={{ opacity: 0 }}
-	              animate={{ opacity: 1 }}
-	              transition={{ duration: 0.18, ease: "easeOut" }}
+	            <div
 				              className="relative mx-auto overflow-visible"
 				              style={{
 				                width: effectivePreviewSize,
@@ -2013,7 +2010,6 @@ export function ImagePreviewExperience(props: {
 				                  "absolute inset-0 z-20 overflow-hidden rounded-xl",
 				                  transparentChrome ? "bg-transparent" : "bg-muted/30"
 				                )}
-				                style={{ willChange: "transform" }}
 				              >
 	            <input
               ref={uploadInputRef}
@@ -2184,34 +2180,13 @@ export function ImagePreviewExperience(props: {
                 </div>
               ) : null}
 
-	            <AnimatePresence initial={false} mode="wait">
+	            <div className="h-full w-full">
 	              {hero ? (
-	                <motion.div
-	                  key="hero"
-	                  layoutId={lightboxLayoutId}
-	                  layout={false}
+	                <div
 	                  className="h-full w-full cursor-zoom-in"
 	                  role="button"
 	                  tabIndex={0}
 	                  aria-label="Open larger preview"
-	                  initial={{ opacity: 0 }}
-	                  animate={
-	                    activeNavigationTransition
-	                      ? {
-	                          x: [activeNavigationTransition.direction * 28, 0],
-	                          opacity: [0.8, 1],
-	                        }
-	                      : {
-	                          x: 0,
-	                          opacity: 1,
-	                        }
-	                  }
-	                  exit={{ opacity: 0 }}
-	                  transition={
-	                    activeNavigationTransition
-	                      ? { type: "spring", stiffness: 400, damping: 35 }
-	                      : { duration: 0.12, ease: "easeOut" }
-	                  }
 	                  onClick={openLightbox}
 	                  onKeyDown={(e) => {
 	                    if (e.key === "Enter" || e.key === " ") {
@@ -2226,20 +2201,11 @@ export function ImagePreviewExperience(props: {
 	                    alt="Preview"
 	                    className="h-full w-full object-cover"
 	                  />
-	                </motion.div>
+	                </div>
 	              ) : (
-	                <motion.div
-	                  key="placeholder"
-	                  className="h-full w-full bg-gray-100"
-	                  initial={{ opacity: 0 }}
-	                  animate={{ opacity: 1 }}
-	                  exit={{ opacity: 0 }}
-	                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-	                >
-	                  <div className="h-full w-full animate-pulse" />
-	                </motion.div>
+	                <div className="h-full w-full bg-muted/40" />
 	              )}
-	            </AnimatePresence>
+	            </div>
 
             {/* Top-left: form-step upload thumbnail OR "upload your own image" button.
                 Hidden when: (a) dedicated upload CTA step is showing below, or (b) image is generating and no thumbnail yet. */}
@@ -2434,12 +2400,12 @@ export function ImagePreviewExperience(props: {
 	              ) : null}
 
               {!lightboxOpen && shouldShowCenteredPricingPill ? (
-                <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 z-30 flex items-end justify-end pb-4 pr-4 pointer-events-none">
                   <div
                     className={cn(
                       "pointer-events-auto overflow-visible backdrop-blur-xl",
-                      "w-[min(19.2rem,calc(100vw-1.5rem))] rounded-2xl shadow-[0_10px_28px_rgba(15,23,42,0.24)]",
-                      showCenteredPricingForm ? "min-h-[clamp(7rem,16dvh,8.75rem)]" : "h-auto"
+                      "w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl shadow-[0_10px_28px_rgba(15,23,42,0.24)]",
+                      showCenteredPricingForm ? "min-h-0" : "h-auto"
                     )}
                     style={{
                       backgroundColor: pillBg,
@@ -2447,48 +2413,45 @@ export function ImagePreviewExperience(props: {
                     }}
                   >
                     {showCenteredPricingForm ? (
-                      <div className="flex w-full items-center justify-center px-3 py-2">
-                        <div className="box-border flex min-h-[clamp(6.25rem,14dvh,7.5rem)] w-full flex-col justify-center space-y-1.5 px-2 py-1.5" style={{ fontFamily: theme.fontFamily, ...pricingPillVars }}>
-                          <div className="space-y-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="text-[0.72rem] font-semibold leading-snug text-[var(--sif-lead-gen-fg)]">
-                                {centeredPricingStep === "email"
-                                  ? "Where should we send the pricing to?"
-                                  : centeredPricingStep === "name"
-                                    ? "What's your name?"
-                                    : "Best phone number?"}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCenteredPricingError(null);
-                                  if (centeredPricingStep === "phone") {
-                                    setCenteredPricingStep("name");
-                                    return;
-                                  }
-                                  if (centeredPricingStep === "name") {
-                                    setCenteredPricingStep("email");
-                                    return;
-                                  }
-                                  setShowCenteredPricingForm(false);
-                                }}
-                                className="shrink-0 text-[0.66rem] font-medium leading-none text-[var(--sif-lead-gen-muted)] hover:text-[var(--sif-lead-gen-fg)]"
-                              >
-                                Back
-                              </button>
-                            </div>
+                      <div className="relative flex w-full px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCenteredPricingError(null);
+                            if (centeredPricingStep === "phone") {
+                              setCenteredPricingStep("name");
+                              return;
+                            }
+                            if (centeredPricingStep === "name") {
+                              setCenteredPricingStep("email");
+                              return;
+                            }
+                            setShowCenteredPricingForm(false);
+                          }}
+                          className="absolute top-2 right-2 z-10 flex size-8 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+                          aria-label="Back"
+                        >
+                          <ArrowLeft className="size-4" strokeWidth={2.5} />
+                        </button>
+                        <div className="box-border flex w-full flex-col gap-3" style={{ fontFamily: theme.fontFamily, ...pricingPillVars }}>
+                          <div className="text-[0.8125rem] font-semibold leading-snug text-[var(--sif-lead-gen-fg)]">
+                            {centeredPricingStep === "email"
+                              ? "Where should we send the pricing to?"
+                              : centeredPricingStep === "name"
+                                ? "What's your name?"
+                                : "Best phone number?"}
                           </div>
 
                           {centeredPricingStep === "email" ? (
                             <div className="relative">
-                              <Mail className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
+                              <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
                               <Input
                                 autoFocus
                                 value={centeredPricingEmail}
                                 onChange={(e) => setCenteredPricingEmail(e.target.value)}
                                 placeholder="you@company.com"
                                 inputMode="email"
-                                className="h-7 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-8 pr-[34%] text-[0.75rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-9 pr-[36%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingEmailSubmit();
@@ -2499,7 +2462,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidEmail(centeredPricingEmail)}
                                 onClick={() => void handleCenteredPricingEmailSubmit()}
-                                className="absolute right-0.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-2.5 text-[0.6875rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 Continue
@@ -2513,7 +2476,7 @@ export function ImagePreviewExperience(props: {
                                 onChange={(e) => setCenteredPricingName(e.target.value)}
                                 placeholder="Jane Appleseed"
                                 autoComplete="name"
-                                className="h-7 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-3 pr-[34%] text-[0.75rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 pr-[36%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingNameSubmit();
@@ -2524,7 +2487,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidFullName(centeredPricingName)}
                                 onClick={() => void handleCenteredPricingNameSubmit()}
-                                className="absolute right-0.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-2.5 text-[0.6875rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 Continue
@@ -2532,14 +2495,14 @@ export function ImagePreviewExperience(props: {
                             </div>
                           ) : (
                             <div className="relative">
-                              <Phone className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
+                              <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
                               <Input
                                 autoFocus
                                 value={centeredPricingPhone}
                                 onChange={(e) => setCenteredPricingPhone(formatPhoneInput(e.target.value).display)}
                                 placeholder="(555) 123-4567"
                                 inputMode="tel"
-                                className="h-7 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-8 pr-[41%] text-[0.75rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-9 pr-[42%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingPhoneSubmit();
@@ -2550,7 +2513,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead}
                                 onClick={() => void handleCenteredPricingPhoneSubmit()}
-                                className="absolute right-0.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-2.5 text-[0.6875rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 {isSubmittingCenteredPricingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : "Show pricing"}
@@ -2559,9 +2522,9 @@ export function ImagePreviewExperience(props: {
                           )}
 
                           {centeredPricingError ? (
-                            <div className="text-[0.66rem] text-red-200">{centeredPricingError}</div>
+                            <div className="text-[0.75rem] leading-relaxed text-red-200">{centeredPricingError}</div>
                           ) : (
-                            <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[var(--sif-lead-gen-muted)]">
+                            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 text-[0.7rem] leading-relaxed text-[var(--sif-lead-gen-muted)]">
                               <span>
                                 {centeredPricingStep === "email"
                                   ? "Instant reveal after sending."
@@ -2608,8 +2571,8 @@ export function ImagePreviewExperience(props: {
                               return;
                             }
                           }}
-                          instanceId={undefined}
-                          sessionId={undefined}
+                          instanceId={instanceId}
+                          sessionId={sessionId}
                           gateContext="design_and_estimate"
                           submissionData={{ surface: "inline_pricing" }}
                           requirePhone
@@ -2765,7 +2728,7 @@ export function ImagePreviewExperience(props: {
 	                  ))}
 	                </div>
 	              )}
-	            </motion.div>{/* end outer stack wrapper */}
+	            </div>{/* end outer stack wrapper */}
 
               {/* Upload section below image — folds in smoothly once image is ready (no jarring layout push) */}
               <AnimatePresence initial={false}>
@@ -2829,16 +2792,17 @@ export function ImagePreviewExperience(props: {
             />
 
             <motion.div
-              layoutId={lightboxLayoutId}
-              layout
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              onAnimationComplete={() => setLightboxContain(true)}
               className="relative w-full aspect-square overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/10"
               style={{
                 // Keep the expanded square fully inside the viewport, even on very wide screens.
                 maxWidth: "min(80rem, calc(100dvh - clamp(2rem, 8vw, 4rem)))",
                 maxHeight: "calc(100dvh - clamp(2rem, 8vw, 4rem))",
               }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              onLayoutAnimationComplete={() => setLightboxContain(true)}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 via-black/35 to-transparent px-3 py-3 sm:px-4">

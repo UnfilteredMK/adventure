@@ -50,6 +50,7 @@ interface FormQuestionSectionProps {
   sessionId: string;
   setRefinementUploading: React.Dispatch<React.SetStateAction<boolean>>;
   showStepTransitionSkeleton: boolean;
+  previewGeneratingFocused?: boolean;
   showAccuratePricingLoader: boolean;
   showEasePrompt: boolean;
   showQuestionPaneUnderPreview: boolean;
@@ -105,6 +106,7 @@ export function FormQuestionSection({
   sessionId,
   setRefinementUploading,
   showStepTransitionSkeleton,
+  previewGeneratingFocused = false,
   showAccuratePricingLoader,
   showEasePrompt,
   showQuestionPaneUnderPreview,
@@ -115,7 +117,10 @@ export function FormQuestionSection({
   guidedThumbnailMode,
 }: FormQuestionSectionProps) {
   const uploadsInputRef = useRef<HTMLInputElement>(null);
-  const showPromptControls = Boolean(previewEnabled && previewHasImage && !isRefinementUploadStep);
+  // Only show prompt/budget/uploads bar AFTER lead capture (pricing opt-in) is completed.
+  const showPromptControls = Boolean(
+    previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI
+  );
   const usePreviewPaneLayout = Boolean(previewEnabled && previewHasImage && usePreviewDominantLayout);
   const useBottomDockLayout = Boolean(usePreviewPaneLayout && showQuestionPaneUnderPreview && isMobileViewport);
   const useCompactNav = useBottomDockLayout;
@@ -318,8 +323,8 @@ export function FormQuestionSection({
           key="question-pane"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 8 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.08, ease: "easeOut" }}
           className={cn(
             "relative flex w-full min-h-0 flex-col overflow-hidden",
             usePreviewPaneLayout
@@ -366,7 +371,7 @@ export function FormQuestionSection({
 	              >
 	                <AnimatePresence mode="wait">
 	                  {!showAccuratePricingLoader ? (
-	                    leadGateLocksQuestionArea ? null : isRefinementUploadStep ? (
+	                    leadGateLocksQuestionArea ? null : previewGeneratingFocused ? null : isRefinementUploadStep ? (
 	                      <motion.div
 	                        key="refinement-upload"
 	                        initial={{ opacity: 0, y: 8 }}

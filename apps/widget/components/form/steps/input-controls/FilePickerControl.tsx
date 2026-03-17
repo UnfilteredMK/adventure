@@ -31,6 +31,8 @@ interface FilePickerProps {
   instanceId?: string;
   className?: string;
   layoutVariant?: "default" | "choice_compact";
+  /** When true (e.g. bottom dock), use slim horizontal layout for upload + skip side-by-side */
+  compactDock?: boolean;
 }
 
 async function readAsDataUrl(blob: Blob): Promise<string> {
@@ -217,6 +219,7 @@ export function FilePicker({
   instanceId,
   className,
   layoutVariant = "default",
+  compactDock = false,
 }: FilePickerProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
@@ -432,6 +435,77 @@ export function FilePicker({
     ["--fp-muted-text" as string]: mutedText,
     ["--fp-border-idle" as string]: hexToRgba(theme.textColor || "#374151", 0.22),
   } as React.CSSProperties;
+
+  // ── Compact dock: slim horizontal dropzone for bottom-strip layout (upload + skip side-by-side) ──
+  if (compactDock) {
+    return (
+      <div className={cn("flex-1 min-w-0 flex items-stretch", className)} style={dropzoneVars}>
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept={accept}
+          capture="environment"
+          className="hidden"
+          multiple={maxFiles > 1}
+          onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = "";
+            if (files.length > 0) onDrop(files);
+          }}
+        />
+        <div
+          {...getRootProps()}
+          data-upload-role={uploadRole || undefined}
+          className={cn(
+            "group relative min-w-0 flex-1 border-2 border-dashed cursor-pointer transition-colors duration-200 ease-out flex items-center px-3 overflow-hidden min-h-[48px]",
+            isDragActive
+              ? "border-[color:var(--fp-primary)] bg-[color:var(--fp-primary-tint-active)]"
+              : "border-[color:var(--fp-border-idle)] hover:border-[color:var(--fp-primary)] hover:bg-[color:var(--fp-primary-tint)] bg-background/60"
+          )}
+          style={{ borderRadius: `${baseRadius}px` }}
+        >
+          <input {...getInputProps({ className: "hidden" })} />
+          <div className="flex items-center gap-2.5 w-full min-w-0">
+            <div
+              className={cn(
+                "p-1.5 rounded-full shrink-0 transition-colors duration-200",
+                isDragActive ? "bg-[color:var(--fp-primary-tint-active)]" : "bg-[color:var(--fp-primary-tint)] group-hover:bg-[color:var(--fp-primary-tint-hover)]"
+              )}
+            >
+              <UploadIcon
+                className={cn("w-4 h-4 transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")}
+              />
+            </div>
+            <div className="min-w-0 text-left">
+              <p className="text-sm font-semibold tracking-tight leading-tight truncate" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
+                {isDragActive ? "Drop here" : dropzoneHeadline}
+              </p>
+              <p className="text-[10px] font-medium truncate" style={{ color: mutedText }}>
+                {isDragActive ? "Release to upload" : dropzoneSubhead}
+              </p>
+            </div>
+          </div>
+        </div>
+        {shouldShowCamera ? (
+          <Button
+            type="button"
+            size="icon"
+            className="h-12 w-12 shrink-0"
+            style={{ borderRadius: `${baseRadius}px`, backgroundColor: primaryTint, color: primary, borderColor: hexToRgba(primary, 0.3) }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              cameraInputRef.current?.click();
+            }}
+            aria-label="Use camera"
+            title="Use camera"
+          >
+            <Camera className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div

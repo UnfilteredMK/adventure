@@ -207,17 +207,21 @@ def build_context(payload: Dict[str, Any]) -> Dict[str, Any]:
     batch_constraints = build_batch_constraints(payload=payload, batch_state=batch_state, max_batches=backend_max_calls)
 
     # Choice option bounds (UI-only hinting)
-    choice_option_min = 4
-    choice_option_max = 10
+    # Scene/design flows: style grid needs 10-20 options; default to that when useCase is scene.
+    use_case = str(payload.get("useCase") or payload.get("use_case") or "").strip().lower()
+    is_scene_flow = "scene" in use_case or not use_case
+    _default_min, _default_max = (10, 20) if is_scene_flow else (4, 10)
+    choice_option_min = _default_min
+    choice_option_max = _default_max
     try:
         raw_min = payload.get("choiceOptionMin") or payload.get("choice_option_min")
         raw_max = payload.get("choiceOptionMax") or payload.get("choice_option_max")
         if raw_min is not None:
-            choice_option_min = max(2, min(12, int(raw_min)))
+            choice_option_min = max(2, min(20, int(raw_min)))
         if raw_max is not None:
-            choice_option_max = max(choice_option_min, min(12, int(raw_max)))
+            choice_option_max = max(choice_option_min, min(20, int(raw_max)))
     except Exception:
-        choice_option_min, choice_option_max = 4, 10
+        choice_option_min, choice_option_max = _default_min, _default_max
 
     choice_option_target = None
     try:
