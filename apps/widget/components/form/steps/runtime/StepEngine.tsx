@@ -180,6 +180,8 @@ export function StepEngine({
   const leadCapturedAdvancedRef = useRef(false);
   const leadCapturedAdvanceStepIdRef = useRef<string | null>(null);
   const leadGateLocksQuestionAreaRef = useRef(false);
+  /** When true, we just completed a scene upload step and are fetching the next batch; prefer preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders. */
+  const sceneUploadJustCompletedRef = useRef(false);
   const [adventureInputMode, setAdventureInputMode] = useState<"questions" | "prompt" | "budget" | "uploads">("questions");
   const [promptDraft, setPromptDraft] = useState("");
   const [promptSubmitCount, setPromptSubmitCount] = useState(0);
@@ -2123,6 +2125,7 @@ export function StepEngine({
       } finally {
         setIsBatchLoading(false);
         batchingRef.current = false;
+        sceneUploadJustCompletedRef.current = false;
         if (typeof requestedBatchIndex === "number") {
           inFlightBatchIndexesRef.current.delete(requestedBatchIndex);
         }
@@ -2433,6 +2436,15 @@ export function StepEngine({
     if (isOnLastStep) {
       // Mark current step complete so upload skip = same as upload: preview can generate immediately.
       markStepComplete(currentStep.id);
+
+      // If completing a scene upload step, prefer the preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders
+      const hasValidSceneData =
+        isSceneUploadStep &&
+        !isSceneUploadSkipped &&
+        (typeof data === "string" ? data.startsWith("http") || data.startsWith("data:image") : Array.isArray(data) && data.some((v) => typeof v === "string" && (v.startsWith("http") || v.startsWith("data:image"))));
+      if (hasValidSceneData) {
+        sceneUploadJustCompletedRef.current = true;
+      }
 
       // User is on last step - need next batch (batch n+1, up to call cap)
       if (batchCurrentlyLoading) {
@@ -2872,16 +2884,13 @@ export function StepEngine({
     return false;
   }, [state?.stepData]);
   // After scene upload completes, show ImagePreviewExperience with "generating" immediately instead of "Getting you accurate pricing..."
+  // Use ref when state hasn't updated yet (avoids overlapping "Getting you accurate pricing..." and "Generating your design + pricing..." loaders)
   const showPreviewGeneratingEarly = Boolean(
-    hasSceneImageInStepData &&
+    (hasSceneImageInStepData || sceneUploadJustCompletedRef.current) &&
       (!effectiveCurrentStep || isWaitingForNextBatch) &&
       !previewEnabled
   );
-  // Show preview section as soon as we're eligible and loading the batch that will trigger image gen.
-  // This eliminates the gap where we'd show the generic "Getting you accurate pricing" loader first.
-  const showPreviewSectionEager =
-    frontendPreviewEligible && hasReceivedQuestionsFromGenerateSteps && (isWaitingForNextBatch || isBatchLoading);
-  const showPreviewSection = previewEnabled || showPreviewGeneratingEarly || showPreviewSectionEager;
+  const showPreviewSection = previewEnabled || showPreviewGeneratingEarly || isInitialLoading;
 
   const {
     isAdventureSurface,
@@ -2916,8 +2925,6 @@ export function StepEngine({
   }, [showPreviewSection, showPreviewGeneratingEarly]);
 
   const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
-  // Skip "Getting you accurate pricing" when we're showing the preview section (which has its own loader).
-  // This prevents the generic loader from flashing before ImagePreviewExperience appears.
   const showAccuratePricingLoader =
     !showPreviewSection &&
     (!effectiveCurrentStep || isWaitingForNextBatch) &&
@@ -3020,7 +3027,10 @@ export function StepEngine({
     }
   }, [currentStep?.id]);
   const hideQuestionPane = Boolean(
-    leadGateLocksQuestionArea || !showQuestionPaneUnderPreview || isAdvancingAfterLeadCapture
+    isInitialLoading ||
+    leadGateLocksQuestionArea ||
+    !showQuestionPaneUnderPreview ||
+    isAdvancingAfterLeadCapture
   );
   useEffect(() => {
     const committedRaw = (state?.stepData as any)?.["step-refinement-upload-scene-image"];
@@ -3072,17 +3082,6 @@ export function StepEngine({
 
   const refinementUploadInputRef = useRef<HTMLInputElement>(null);
   const [refinementUploading, setRefinementUploading] = useState(false);
-
-  if (isInitialLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen px-6">
-        <FormLoader
-          message="Preparing your quote…"
-          className="min-h-0 py-8"
-        />
-      </div>
-    );
-  }
 
   const effectiveError = engineError || batchError;
 
@@ -3303,6 +3302,7 @@ export function StepEngine({
                         hasPreviewSubsections={hasPreviewSubsections}
                         instanceId={instanceId}
                         isAdventureSurface={isAdventureSurface}
+                        isInitialLoading={isInitialLoading}
                         isRefinementUploadStep={isRefinementUploadStep}
                         previewMaxPx={previewMaxPx}
                         previewHasImage={previewHasImage}
@@ -3383,10 +3383,9 @@ export function StepEngine({
                       showStepTransitionSkeleton={
                         ((isFetchingNext && !showAccuratePricingLoader) || awaitingRefinementAdvance) &&
                         !isPreviewGenerationStage &&
-                        !showPreviewGeneratingEarly &&
-                        !showPreviewSectionEager
+                        !showPreviewGeneratingEarly
                       }
-                      previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly || showPreviewSectionEager}
+                      previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly}
                       showAccuratePricingLoader={showAccuratePricingLoader}
                       showEasePrompt={showEasePrompt}
                       showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
