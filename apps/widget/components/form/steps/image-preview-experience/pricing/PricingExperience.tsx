@@ -5,7 +5,7 @@ import { useFormTheme } from '../../../demo/FormThemeProvider';
 import { detectCurrencyFromLocale, formatCurrency } from '@/lib/ai-form/utils/currency';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { Info } from 'lucide-react';
+import { BadgeDollarSign, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LeadGenPopover } from '@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover';
 
@@ -87,8 +87,8 @@ function withAlpha(color: string | undefined, alpha: number): string {
 }
 
 function maskedLockedParts(): { prefix: string; masked: string } {
-  // Intentional, consistent mask: "$1" + "XXXXX" (only X's are blurred in UI)
-  return { prefix: '$1', masked: 'XXXXX' };
+  // Only XXXXX is blurred; no $1 teaser
+  return { prefix: '', masked: 'XXXXX' };
 }
 
 export interface PricingPillProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
@@ -139,7 +139,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   void autoReveal;
 
   const rawLabel = (label && String(label).trim()) ? String(label).trim() : 'Show pricing';
-  const pillLabel = rawLabel === 'Show pricing' ? 'Pricing' : rawLabel;
+  const pillLabel = rawLabel === 'Show pricing' ? 'SHOW PRICING' : rawLabel;
   const pricingFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
   const base = accent || '#0f172a';
   const tagBg = withAlpha(accent || base, 1);
@@ -205,29 +205,36 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
           {!revealed ? (
             <div
               data-pricing-label-reveal
-              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.1rem,1cqi,0.22rem)] text-center pl-[clamp(0.35rem,3cqi,0.75rem)] pr-0 py-[clamp(0.15rem,1.5cqi,0.3rem)] min-h-[clamp(2.5rem,15cqi,4rem)]")}
+              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.08rem,0.8cqi,0.18rem)] text-center px-[clamp(0.28rem,2.5cqi,0.6rem)] py-[clamp(0.12rem,1.2cqi,0.25rem)] min-h-[clamp(2rem,12cqi,3rem)]")}
             >
               <div
                 data-pricing-label
                 className={cn(
                   labelWidthClass,
-                  "w-full min-w-0 inline-flex items-center justify-center gap-[0.35em]",
-                  "text-[clamp(0.72rem,5.5cqi,1.9rem)] font-medium tracking-[0.03em] leading-[1.05] text-white uppercase"
+                  "w-full min-w-0 inline-flex items-center justify-center gap-[0.4em] whitespace-nowrap",
+                  "text-[clamp(0.5rem,3.5cqi,1rem)] font-medium tracking-[0.02em] leading-[1.05] text-white uppercase"
                 )}
                 style={{ fontFamily: pricingFont }}
               >
-                {pillLabel}
+                {pillLabel === 'SHOW PRICING' ? (
+                  <>
+                    <BadgeDollarSign className="size-[0.9em] shrink-0 text-white/90" strokeWidth={2.25} />
+                    {pillLabel}
+                  </>
+                ) : (
+                  pillLabel
+                )}
               </div>
               <div
                 data-pricing-reveal
                 className={cn(
-                  "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] w-full min-w-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
+                  "box-border inline-flex min-h-[clamp(1.4rem,10cqi,2.4rem)] w-full min-w-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.2rem,2cqi,0.5rem)] py-[1.5%] text-[clamp(0.5rem,6cqi,1.6rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
                 style={{ fontFamily: pricingFont }}
               >
                 <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
-                  <span className="text-white/95 leading-none">{lockedMask.prefix}</span>
-                  <span className="inline-flex items-center leading-none -ml-[0.02em]">
+                  {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
+                  <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
                     <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
                   </span>
                 </span>
@@ -236,14 +243,14 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
           ) : (
             <div
               data-pricing-label-reveal
-              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.1rem,1cqi,0.22rem)] text-center pl-[clamp(0.35rem,3cqi,0.75rem)] pr-0 py-[clamp(0.15rem,1.5cqi,0.3rem)] min-h-[clamp(2.5rem,15cqi,4rem)]")}
+              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.12rem,1.2cqi,0.28rem)] text-center px-[clamp(0.4rem,3cqi,0.85rem)] py-[clamp(0.18rem,1.5cqi,0.35rem)] min-h-[clamp(2.5rem,14cqi,3.5rem)]")}
             >
               <div
                 data-pricing-label
                 className={cn(
                   labelWidthClass,
-                  "w-full min-w-0",
-                  "text-[clamp(0.7rem,5cqi,1.1rem)] font-normal tracking-[0.02em] leading-[1.2] text-white/95"
+                  "w-full min-w-0 whitespace-nowrap",
+                  "text-[clamp(0.65rem,4.5cqi,1.15rem)] font-normal tracking-[0.02em] leading-[1.2] text-white/95"
                 )}
                 style={{ fontFamily: pricingFont }}
               >
@@ -253,7 +260,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 data-pricing-reveal
                 className={cn(
                   revealedPriceClass,
-                  "box-border inline-flex min-h-[clamp(1.75rem,12cqi,3rem)] min-w-0 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-[clamp(0.25rem,2.5cqi,0.6rem)] py-[1.5%] text-[clamp(0.55rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
+                  "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] min-w-0 w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
                 )}
                 style={{ fontFamily: pricingFont }}
               >

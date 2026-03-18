@@ -35,10 +35,10 @@ def main(argv: List[str]) -> int:
         default="src/programs/question_planner/data/examples/demo_examples.json",
         help="Path to demo examples JSON file.",
     )
-    ap.add_argument("--min-steps", type=int, default=8, help="Minimum plan length per example.")
-    ap.add_argument("--min-steps-total", type=int, default=7, help="Expected batch_constraints.minStepsTotal.")
-    ap.add_argument("--max-steps-total", type=int, default=12, help="Expected batch_constraints.maxStepsTotal.")
-    ap.add_argument("--max-steps", type=int, default=12, help="Expected max_steps value.")
+    ap.add_argument("--min-steps", type=int, default=1, help="Minimum plan length per example (1 for scope-only skeleton).")
+    ap.add_argument("--min-steps-total", type=int, default=1, help="Expected batch_constraints.minStepsTotal.")
+    ap.add_argument("--max-steps-total", type=int, default=1, help="Expected batch_constraints.maxStepsTotal.")
+    ap.add_argument("--max-steps", type=int, default=1, help="Expected max_steps value (scope-only skeleton).")
     args = ap.parse_args(argv)
 
     path = Path(str(args.path))
@@ -72,8 +72,10 @@ def main(argv: List[str]) -> int:
             problems.append(f"[{i}] max_steps expected {int(args.max_steps)} got {rec.get('max_steps')}")
 
         asked = ctx.get("asked_step_ids")
-        if asked != ["step-service-primary"]:
-            problems.append(f"[{i}] asked_step_ids expected ['step-service-primary'] got {asked}")
+        if not isinstance(asked, list) or not asked:
+            problems.append(f"[{i}] asked_step_ids missing/empty")
+        elif "step-service-primary" not in asked:
+            problems.append(f"[{i}] asked_step_ids must include step-service-primary, got {asked}")
 
         answered = ctx.get("answered_qa")
         if not isinstance(answered, list) or not answered:

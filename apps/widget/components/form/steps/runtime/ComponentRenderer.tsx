@@ -110,8 +110,8 @@ export function ComponentRenderer(props: ComponentRendererProps) {
           />
         );
       case "image_choice_grid":
-        return <ImageChoiceGridStep {...common} />;
-      default:
+      return <ImageChoiceGridStep {...common} />;
+    default:
         return (
           <div className="p-6 text-sm opacity-70">
             Unsupported UIStep type: {(s as any).type}
@@ -161,7 +161,6 @@ export function ComponentRenderer(props: ComponentRendererProps) {
       return <FileUploadStep {...common} />;
     case "image_choice_grid":
       return <ImageChoiceGridStep {...common} />;
-
     default:
       return (
         <div className="p-6 text-sm opacity-70">

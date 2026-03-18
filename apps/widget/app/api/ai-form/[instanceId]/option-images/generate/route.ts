@@ -58,6 +58,22 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     return NextResponse.json({ ok: false, error: "sessionId is required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 
+  // Server-side kill switch: when disabled, return options without images to avoid upstream 500s.
+  const optionImagesEnabled =
+    String(process.env.OPTION_IMAGES_ENABLED || process.env.AI_FORM_OPTION_IMAGES || "")
+      .trim()
+      .toLowerCase() === "true";
+  if (!optionImagesEnabled) {
+    const stepIdEarly = typeof body?.stepId === "string" ? body.stepId.trim() : "";
+    const questionEarly = typeof body?.question === "string" ? body.question.trim() : "Choose an option.";
+    const optsFromBody = Array.isArray(body?.options) ? body.options : (body?.step && typeof body.step === "object" ? (body.step as any)?.options : null);
+    const optionsEarly = Array.isArray(optsFromBody) ? optsFromBody : [];
+    return NextResponse.json(
+      { ok: true, stepId: stepIdEarly || null, question: questionEarly, options: optionsEarly },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   const stepId = typeof body?.stepId === "string" ? body.stepId.trim() : "";
   const question = typeof body?.question === "string" ? body.question.trim() : undefined;
   const serviceSummary = typeof body?.serviceSummary === "string" ? body.serviceSummary.trim() : undefined;
@@ -121,18 +137,22 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
       const json = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
       if (!resp.ok) {
         lastErr = { status: resp.status, details: json ?? text.slice(0, 2000) };
+        logger.warn("[option-images] upstream_error", { instanceId, endpoint, status: resp.status, details: lastErr.details });
         continue;
       }
       return NextResponse.json(json ?? { ok: false, error: "Invalid JSON from upstream" }, { headers: { "Cache-Control": "no-store" } });
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
-      logger.error("[option-images] upstream_fetch_failed", { instanceId, endpoint, error: lastErr });
+      logger.warn("[option-images] upstream_fetch_failed", { instanceId, endpoint, error: lastErr });
       continue;
     }
   }
 
+  // Graceful degradation: return 200 with empty options so the form continues to work.
+  // Option images are enhancement; do not fail the flow when upstream is unreachable.
+  logger.warn("[option-images] falling_back_to_empty", { instanceId, stepId: stepId || null, error: lastErr });
   return NextResponse.json(
-    { ok: false, error: "Upstream option-images service unreachable", details: lastErr },
-    { status: 502, headers: { "Cache-Control": "no-store" } }
+    { ok: true, stepId: stepId || null, question: question || "Choose an option.", options: [] },
+    { headers: { "Cache-Control": "no-store" } }
   );
 }

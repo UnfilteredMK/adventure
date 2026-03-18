@@ -668,6 +668,7 @@ def generate_images(
             inp["output_format"] = fmt
     elif _is_flux_1_1_pro_model(model):
         inp = {"prompt": prompt}
+        inp["num_outputs"] = max(1, min(4, n))
         if ratio:
             inp["aspect_ratio"] = ratio
         if ratio == "custom":

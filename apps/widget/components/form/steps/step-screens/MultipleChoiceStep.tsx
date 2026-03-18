@@ -80,8 +80,8 @@ export function MultipleChoiceStep({
       <div
         className={
           compactInPreview
-            ? "flex h-full min-h-0 w-full flex-col justify-end overflow-y-auto overflow-x-hidden pr-1 [&>div]:mx-auto [&>div]:max-w-5xl [&>div]:w-full [&>div]:text-center [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:justify-center"
-            : "w-full [&>div]:w-full [&>div]:text-left [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:justify-start"
+            ? "flex h-full min-h-0 min-w-0 w-full flex-col justify-end overflow-y-auto overflow-x-hidden pr-1 [&>div]:mx-auto [&>div]:max-w-5xl [&>div]:w-full [&>div]:min-w-0 [&>div]:text-center [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:min-w-0 [&>div>div:first-child]:justify-center"
+            : "w-full min-w-0 [&>div]:w-full [&>div]:text-left [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:justify-start"
         }
       >
         <Choice

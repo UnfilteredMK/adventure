@@ -170,6 +170,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             "referenceImages",
             "sceneImage",
             "productImage",
+            "generationIntent",
+            "originalReferenceImage",
+            "generationIndex",
         ):
             if k in payload and payload.get(k) is not None:
                 adapted[k] = payload.get(k)
@@ -211,6 +214,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             "referenceImages",
             "sceneImage",
             "productImage",
+            "generationIntent",
+            "originalReferenceImage",
+            "generationIndex",
         ):
             if k in payload and payload.get(k) is not None:
                 adapted[k] = payload.get(k)
@@ -667,6 +673,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         adapted["sceneImage"] = scene_image
         if product_image:
             adapted["productImage"] = product_image
+        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+            if k in payload and payload.get(k) is not None:
+                adapted[k] = payload.get(k)
         routing_policy = _apply_replicate_routing_defaults(
             payload=payload,
             adapted=adapted,
@@ -732,6 +741,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or (4.0 if is_edit else 6.0))
         adapted["referenceImages"] = [primary_image] if primary_image else []
         adapted["sceneImage"] = primary_image or None
+        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+            if k in payload and payload.get(k) is not None:
+                adapted[k] = payload.get(k)
         routing_policy = _apply_replicate_routing_defaults(
             payload=payload,
             adapted=adapted,

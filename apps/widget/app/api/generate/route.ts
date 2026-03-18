@@ -130,18 +130,28 @@ function resolveModelDefaults(
 	useCase: UseCase,
 	hasInputImage: boolean,
 	numImages: number,
+	numOutputs: number,
 	body: any,
 	intent: GenerationIntent
 ): ModelDefaults {
 	if (body.modelRecommendation && typeof body.modelRecommendation === 'object') {
 		const rec = body.modelRecommendation;
+		// Flux 1.1 Pro doesn't support num_outputs > 1; override to Schnell for multi-image concept gallery
+		const needsMultiOutput = useCase === 'scene' && !hasInputImage && numOutputs > 1;
+		const baseModelId = body.modelId || rec.modelId || 'black-forest-labs/flux-1.1-pro';
+		const modelId = needsMultiOutput && baseModelId?.includes('flux-1.1-pro')
+			? 'black-forest-labs/flux-schnell'
+			: baseModelId;
+		const guidanceScale = modelId.includes('flux-schnell') ? 3.5 : (body.guidanceScale ?? rec.guidanceScale ?? 6.0);
+		const numInferenceSteps = modelId.includes('flux-schnell') ? 4 : (body.numInferenceSteps ?? rec.numInferenceSteps ?? 20);
+		const outputFormat = modelId.includes('flux-schnell') ? 'webp' : (body.outputFormat || rec.outputFormat || undefined);
 		return {
-			modelId: body.modelId || rec.modelId || 'black-forest-labs/flux-1.1-pro',
-			guidanceScale: body.guidanceScale ?? rec.guidanceScale ?? 6.0,
-			numInferenceSteps: body.numInferenceSteps ?? rec.numInferenceSteps ?? 20,
+			modelId,
+			guidanceScale,
+			numInferenceSteps,
 			promptUpsampling: body.promptUpsampling ?? rec.promptUpsampling ?? undefined,
 			aspectRatio: body.aspectRatio || rec.aspectRatio || (hasInputImage ? 'match_input_image' : '1:1'),
-			outputFormat: body.outputFormat || rec.outputFormat || undefined,
+			outputFormat,
 		};
 	}
 
@@ -209,13 +219,23 @@ function resolveModelDefaults(
 			outputFormat: body.outputFormat || 'png',
 		};
 	}
+	// Flux 1.1 Pro does not support num_outputs > 1; use Schnell for multi-image concept gallery
+	const sceneModelId =
+		!hasInputImage && numOutputs > 1
+			? 'black-forest-labs/flux-schnell'
+			: hasInputImage
+				? 'black-forest-labs/flux-kontext-pro'
+				: 'black-forest-labs/flux-1.1-pro';
+	const sceneGuidance = sceneModelId.includes('flux-schnell') ? 3.5 : (hasInputImage ? 5.5 : 6.0);
+	const sceneSteps = sceneModelId.includes('flux-schnell') ? 4 : (hasInputImage ? 25 : 18);
+	const sceneFormat = sceneModelId.includes('flux-schnell') ? 'webp' : 'png';
 	return {
-		modelId: body.modelId || (hasInputImage ? 'black-forest-labs/flux-kontext-pro' : 'black-forest-labs/flux-1.1-pro'),
-		guidanceScale: body.guidanceScale ?? (hasInputImage ? 5.5 : 6.0),
-		numInferenceSteps: body.numInferenceSteps ?? (hasInputImage ? 25 : 18),
+		modelId: body.modelId || sceneModelId,
+		guidanceScale: body.guidanceScale ?? sceneGuidance,
+		numInferenceSteps: body.numInferenceSteps ?? sceneSteps,
 		promptUpsampling: body.promptUpsampling ?? (hasInputImage ? true : undefined),
 		aspectRatio: body.aspectRatio || (hasInputImage ? 'match_input_image' : '1:1'),
-		outputFormat: body.outputFormat || 'png',
+		outputFormat: body.outputFormat || sceneFormat,
 	};
 }
 
@@ -254,9 +274,8 @@ export async function POST(request: NextRequest) {
 		});
 		const totalInputImages = hasInputImage ? referenceImages.length + 1 : 0;
 		const generationIntent = resolveGenerationIntent(body, hasInputImage);
-		const defaults = resolveModelDefaults(useCase, hasInputImage, totalInputImages, body, generationIntent);
-
 		const numOutputs = body.numOutputs || body.gallery_max_images || (useCase === 'drilldown' ? 1 : 4);
+		const defaults = resolveModelDefaults(useCase, hasInputImage, totalInputImages, numOutputs, body, generationIntent);
 
 		// Supabase + instance lookup
 		const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -326,6 +345,13 @@ export async function POST(request: NextRequest) {
 			guidanceScale: defaults.guidanceScale,
 			numInferenceSteps: defaults.numInferenceSteps,
 		});
+		const originalReferenceImage =
+			typeof body.originalReferenceImage === "string" ? body.originalReferenceImage.trim() || undefined : undefined;
+		const generationIndex =
+			typeof body.generationIndex === "number" && Number.isFinite(body.generationIndex)
+				? body.generationIndex
+				: undefined;
+
 		const upstreamPayload = {
 			...body,
 			instanceId: body.instanceId,
@@ -345,6 +371,8 @@ export async function POST(request: NextRequest) {
 			selectedImage: body.selectedImage || (useCase === 'drilldown' ? targetImage : undefined),
 			budgetRange: body.budgetRange,
 			generationIntent,
+			...(originalReferenceImage ? { originalReferenceImage } : {}),
+			...(generationIndex !== undefined ? { generationIndex } : {}),
 		};
 
 		const baseUrls = resolveFormServiceBaseUrls();
@@ -383,6 +411,13 @@ export async function POST(request: NextRequest) {
 		const upstreamImages = Array.isArray(upstream?.images)
 			? upstream.images.filter((img: any) => typeof img === "string" && img.trim())
 			: [];
+		logger.info("[GENERATE] Upstream response", {
+			instanceId: body.instanceId,
+			useCase,
+			imageCount: upstreamImages.length,
+			requestedNumOutputs: numOutputs,
+			modelId: upstream?.modelId || defaults.modelId,
+		});
 		const inputImages = hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : [];
 		const inputSignatures = new Set<string>(inputImages.flatMap((img) => imageRefSignatures(img)));
 		const filteredImages = upstreamImages.filter((img: string) =>

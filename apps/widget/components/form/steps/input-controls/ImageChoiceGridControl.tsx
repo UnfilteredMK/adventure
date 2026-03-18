@@ -280,11 +280,6 @@ export function ImageChoiceGrid({
               >
                 SKIP
               </div>
-              {normalizePriceTier(active.priceTier) && (
-                <div className="absolute top-3 left-3 rounded-md bg-black/70 px-2 py-1 text-xs font-semibold text-white shadow">
-                  {normalizePriceTier(active.priceTier)}
-                </div>
-              )}
               {activePicked && (
                 <div className="absolute top-3 right-3 bg-primary text-white p-1 rounded-full shadow-lg">
                   <Check className="w-4 h-4" strokeWidth={3} />
@@ -458,11 +453,6 @@ export function ImageChoiceGrid({
                   <div className="h-full w-full animate-pulse bg-muted/40" />
                 )}
               </div>
-              {normalizePriceTier(opt.priceTier) && (
-                <div className="absolute top-2 left-2 rounded-md bg-black/70 px-2 py-1 text-xs font-semibold text-white shadow">
-                  {normalizePriceTier(opt.priceTier)}
-                </div>
-              )}
               <div className={cn(thumbnailMode ? "shrink-0 p-1" : isCompact ? "p-2.5" : "p-3", "text-left")}>
               <div className={cn(thumbnailMode ? "text-[9px] sm:text-[10px]" : isCompact ? "text-[13px] sm:text-sm" : null, "font-bold leading-tight line-clamp-1")}>
                   {opt.label}

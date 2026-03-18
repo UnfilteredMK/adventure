@@ -67,6 +67,15 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
   const negativePrompt = typeof body?.negativePrompt === "string" ? body.negativePrompt.trim() : undefined;
   const noCache = Boolean(body?.noCache);
 
+  const generationIntent =
+    typeof body?.generationIntent === "string" ? body.generationIntent.trim() : undefined;
+  const originalReferenceImage =
+    typeof body?.originalReferenceImage === "string" ? body.originalReferenceImage.trim() : undefined;
+  const generationIndex =
+    typeof body?.generationIndex === "number" && Number.isFinite(body.generationIndex)
+      ? body.generationIndex
+      : undefined;
+
   const payload = {
     instanceId,
     session: { sessionId, instanceId },
@@ -80,6 +89,9 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     ...(modelId ? { modelId } : {}),
     ...(negativePrompt ? { negativePrompt } : {}),
     ...(noCache ? { noCache: true } : {}),
+    ...(generationIntent ? { generationIntent } : {}),
+    ...(originalReferenceImage ? { originalReferenceImage } : {}),
+    ...(generationIndex !== undefined ? { generationIndex } : {}),
   };
 
   logger.info("[image-prompt] normalized_reference_images", {

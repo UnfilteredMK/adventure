@@ -70,7 +70,7 @@ export function StepLayout({
   const actionButtonClass = "h-9 min-w-[88px] px-3 text-xs font-medium shrink-0";
   const iconButtonClass = "h-8 w-10 p-0 rounded-full";
   const sideNavButtonClass = useCompactPane
-    ? "h-[52%] min-h-[68px] max-h-[120px] w-12 sm:w-14 rounded-xl p-0"
+    ? "h-[48%] min-h-[52px] max-h-[100px] w-10 sm:w-12 rounded-xl p-0"
     : "h-[50%] min-h-[56px] max-h-[100px] w-11 sm:w-12 rounded-lg p-0";
   const compactActionButtonClass = "h-8 min-w-[80px] px-2.5 text-[11px]";
   const compactHeaderLayoutClass = useCompactPane
@@ -79,10 +79,10 @@ export function StepLayout({
       ? "flex items-start justify-between gap-2"
       : undefined;
   const contentViewportClassName = cn(
-    "flex-1 min-h-0 w-full",
+    "flex-1 min-h-0 w-full min-w-0",
     actionsVariant !== "icon_only"
       ? "overflow-y-auto overflow-x-hidden"
-      : "overflow-hidden",
+      : "overflow-y-auto overflow-x-hidden",
     useCompactPane ? "rounded-lg [scrollbar-gutter:stable]" : "pr-0.5 sm:pr-1",
     useCompactPane ? "flex flex-col items-center" : null
   );
@@ -103,7 +103,7 @@ export function StepLayout({
         <div
           className={cn(
             "grid h-full min-h-0",
-            useCompactPane ? "grid-cols-[auto,minmax(0,1fr),auto] items-stretch gap-2.5" : "grid-cols-[auto,minmax(0,1fr),auto] items-stretch gap-3"
+            useCompactPane ? "grid-cols-[auto,minmax(0,1fr),auto] items-stretch gap-1.5 sm:gap-2" : "grid-cols-[auto,minmax(0,1fr),auto] items-stretch gap-3"
           )}
         >
           {canGoBack && onBack ? (
@@ -127,12 +127,12 @@ export function StepLayout({
           <div
             className={cn(
               "min-w-0 min-h-0 flex flex-col overflow-hidden",
-              useCompactPane ? "justify-end gap-1.5" : isCompact ? "gap-4" : "gap-6"
+              useCompactPane ? "justify-end gap-1" : isCompact ? "gap-4" : "gap-6"
             )}
           >
             <div className={cn("shrink-0 min-w-0", feedbackPrompt ? "pr-14" : null)}>
               <div className={cn("min-w-0 w-full", compactHeaderLayoutClass, useCompactPane ? "max-w-5xl mx-auto" : null)}>
-                {headerInlineControl ? <div className="shrink-0 mb-1">{headerInlineControl}</div> : null}
+                {headerInlineControl ? <div className="shrink-0 mb-0.5">{headerInlineControl}</div> : null}
                 <h2
                   className={cn(
                     useCompactPane ? "text-[13px] sm:text-sm leading-tight" : isCompact ? "text-xl" : "text-2xl",

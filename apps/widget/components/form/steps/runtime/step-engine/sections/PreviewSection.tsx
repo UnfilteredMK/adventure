@@ -2,8 +2,6 @@
 
 import React from "react";
 import { ImagePreviewExperience } from "../../../image-preview-experience/ImagePreviewExperience";
-import { FormLoader } from "@/components/form/FormLoader";
-import { useFormTheme } from "@/components/form/demo/FormThemeProvider";
 import { cn } from "@/lib/utils";
 
 interface PreviewSectionProps {
@@ -13,7 +11,6 @@ interface PreviewSectionProps {
   hasPreviewSubsections: boolean;
   instanceId: string;
   isAdventureSurface: boolean;
-  isInitialLoading?: boolean;
   isRefinementUploadStep: boolean;
   previewMaxPx: number | null;
   previewHasImage: boolean;
@@ -38,7 +35,6 @@ export function PreviewSection({
   hasPreviewSubsections,
   instanceId,
   isAdventureSurface,
-  isInitialLoading = false,
   isRefinementUploadStep,
   previewMaxPx,
   previewRefreshNonce,
@@ -55,39 +51,6 @@ export function PreviewSection({
   usePreviewDominantLayout,
 }: PreviewSectionProps) {
   void _showQuestionPaneUnderPreview;
-  const { theme } = useFormTheme();
-  const overlayVars = {
-    fontFamily: theme.fontFamily,
-  } as React.CSSProperties;
-
-  if (isInitialLoading) {
-    return (
-      <div
-        className={cn(
-          "flex min-h-0 flex-col overflow-hidden",
-          usePreviewDominantLayout ? "flex-1 min-h-0" : "flex-1 shrink-0"
-        )}
-      >
-        <div
-          className={cn(
-            "flex h-full min-h-0 w-full flex-col items-center justify-center",
-            useDesktopPreviewLayout ? "max-w-5xl px-4" : "max-w-4xl px-4",
-            usePreviewDominantLayout ? "py-2" : "py-1 sm:py-2"
-          )}
-        >
-          <FormLoader
-            variant="pill"
-            size="sm"
-            tone="overlay"
-            message="Preparing your form…"
-            className="bg-slate-900/75 px-4 py-3 shadow-lg"
-            style={overlayVars}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className={cn(
@@ -144,7 +107,7 @@ export function PreviewSection({
             previewMaxPx={previewMaxPx ?? undefined}
             previewChromePx={8}
             suppressUploadOverlay={isRefinementUploadStep}
-            hideBudgetInOverlay={true}
+            hideBudgetInOverlay={usePreviewDominantLayout}
           />
         </div>
       </div>

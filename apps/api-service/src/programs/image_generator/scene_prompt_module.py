@@ -33,6 +33,10 @@ class ScenePromptSignature(dspy.Signature):
       be changed by this service (e.g. background environment, camera angle, unchanged parts of
       the subject). Replace or transform everything the service covers. Treat the upload as source context only,
       not as one half of a comparison graphic.
+    - When generation_intent=initial: This is the FIRST transformation. Demand a COMPLETE, DRAMATIC overhaul.
+      Fully renovate, replace all finishes/fixtures, make every service-touched element look brand-new.
+      De-emphasize preservation; preserve only layout, camera, structure. REPLACE everything else.
+    - When generation_intent=refinement: Apply focused changes per user preferences; preserve more of the current design.
     - For generation mode (is_edit=false): use descriptive language painting the final result.
       Use service_summary to understand the scope of work and ensure the scene reflects a
       fully-completed professional project rendered as one coherent final scene.
@@ -57,14 +61,16 @@ class ScenePromptSignature(dspy.Signature):
         )
     )
     is_edit: bool = dspy.InputField(desc="True if editing an uploaded image, False for text-to-image")
+    generation_intent: str = dspy.InputField(
+        desc="'initial' = first large overhaul, demand complete transformation; 'refinement' = focused changes, preserve more"
+    )
     user_preferences: str = dspy.InputField(
         desc="Structured user preferences as key-value pairs (style, materials, colors, etc.)"
     )
     reference_adherence: str = dspy.InputField(
         desc=(
-            "HARD reference-image constraint for edit mode. Treat uploaded image as anchor: "
-            "preserve camera/framing, room geometry, perspective, lighting direction, and unchanged objects. "
-            "Only edit requested scope."
+            "Reference-image constraint for edit mode. For initial overhaul: preserve only layout/camera, replace all else. "
+            "For refinement: preserve more, apply focused edits."
         )
     )
     style_tags: str = dspy.InputField(desc="Comma-separated style keywords (e.g. 'modern, coastal')")
@@ -102,6 +108,7 @@ class ScenePromptModule(dspy.Module):
         service_name: str = "",
         service_summary: str = "",
         is_edit: bool = False,
+        generation_intent: str = "refinement",
         user_preferences: str = "",
         reference_adherence: str = "",
         style_tags: str = "",
@@ -112,6 +119,7 @@ class ScenePromptModule(dspy.Module):
             service_name=service_name or "Home improvement",
             service_summary=service_summary or "",
             is_edit=is_edit,
+            generation_intent=generation_intent or "refinement",
             user_preferences=user_preferences,
             reference_adherence=reference_adherence or "",
             style_tags=style_tags,

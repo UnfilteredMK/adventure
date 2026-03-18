@@ -78,7 +78,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
     const maxZ = activeThumb === "max" ? 3 : orderedHigh <= mid ? 3 : 2;
 
     return (
-      <div className={cn("relative w-full h-8 flex items-center", className)}>
+      <div className={cn("relative w-full min-w-0 h-8 flex items-center", className)}>
         {/* Track */}
         <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[6px] rounded-full bg-black/10" />
 

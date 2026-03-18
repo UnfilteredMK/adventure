@@ -29,8 +29,7 @@ class QuestionPlannerSignature(dspy.Signature):
             "- allow_multiple: boolean (optional; renders `multi_select` for multiple_choice)\n"
             "- min_selections / max_selections: optional integers for multi-select rules when a question genuinely needs bounded multi-select\n"
             "- allow_other: boolean (optional; enables 'Other' free-text)\n"
-            "- Do not include `style_direction`; the frontend owns that deterministic image-grid step.\n"
-            "- Do not include `budget_range`; budget is collected by a deterministic step outside planner output.\n"
+            "- Pre-concept: output only ONE scope step (project_parts / update_areas / remodel_intensity). Service, style, budget, upload are deterministic.\n"
         )
     )
 

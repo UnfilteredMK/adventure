@@ -210,17 +210,34 @@ def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     inputs = _extract_dspy_inputs(payload)
     out = {k: v for k, v in inputs.items() if k != "use_case"}
     reference_images, scene_image, _ = extract_reference_images(payload)
+    generation_intent_raw = str(
+        payload.get("generationIntent") or payload.get("generation_intent") or ""
+    ).strip().lower().replace("-", "_")
+    if generation_intent_raw == "initial":
+        out["generation_intent"] = "initial"
+    elif generation_intent_raw in ("small_improvement", "refine", "refinement", "regenerate"):
+        out["generation_intent"] = "refinement"
+    else:
+        out["generation_intent"] = "initial" if not bool(inputs.get("is_edit")) else "refinement"
     if bool(inputs.get("is_edit")):
-        anchor_hint = "uploaded reference image"
-        if isinstance(scene_image, str) and scene_image.strip():
-            anchor_hint = "scene image"
-        elif reference_images:
-            anchor_hint = "primary reference image"
-        out["reference_adherence"] = (
-            f"Hard constraint: treat the {anchor_hint} as immutable anchor. Preserve camera/framing, geometry, perspective, "
-            "lighting direction, depth relationships, and all unchanged structures/objects. Only apply edits requested by "
-            "service scope and user preferences."
-        )
+        if out["generation_intent"] == "initial":
+            out["reference_adherence"] = (
+                "INITIAL LARGE OVERHAUL: The uploaded photo is the BEFORE state. Generate the fully-completed AFTER state. "
+                "Preserve ONLY: room layout, camera angle, structural walls, perspective. REPLACE everything else the service touches — "
+                "all finishes, fixtures, materials, surfaces. Every service-touched element must look brand-new and professionally done. "
+                "Nothing old, worn, or original should remain in the renovated scope."
+            )
+        else:
+            anchor_hint = "uploaded reference image"
+            if isinstance(scene_image, str) and scene_image.strip():
+                anchor_hint = "scene image"
+            elif reference_images:
+                anchor_hint = "primary reference image"
+            out["reference_adherence"] = (
+                f"Hard constraint: treat the {anchor_hint} as immutable anchor. Preserve camera/framing, geometry, perspective, "
+                "lighting direction, depth relationships, and all unchanged structures/objects. Only apply edits requested by "
+                "service scope and user preferences."
+            )
     else:
         out["reference_adherence"] = ""
     return out

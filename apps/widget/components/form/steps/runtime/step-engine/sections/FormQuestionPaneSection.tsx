@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { hexToRgba } from "@/types/design";
 import { Button } from "@/components/ui/button";
 import { Slider as SliderPrimitive } from "@/components/ui/slider";
-import { FormLoader } from "@/components/form/FormLoader";
+import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt, ReflectionFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
 import { ArrowLeft, ArrowRight, ArrowUp, ImagePlus } from "lucide-react";
@@ -24,12 +24,10 @@ interface FormQuestionSectionProps {
   instanceId: string;
   isBatchLoading: boolean;
   isFetchingNext: boolean;
-  loadingMessageIndex: number;
   isMobileViewport: boolean;
   isRefinementUploadStep: boolean;
   leadCapturedForUI: boolean;
   leadGateLocksQuestionArea: boolean;
-  loadingMessages: string[];
   adventureInputMode: "questions" | "prompt" | "budget" | "uploads";
   setAdventureInputMode: (mode: "questions" | "prompt" | "budget" | "uploads") => void;
   budgetSliderConfig: { min: number; max: number; step: number; currency: string };
@@ -80,12 +78,10 @@ export function FormQuestionSection({
   instanceId,
   isBatchLoading,
   isFetchingNext,
-  loadingMessageIndex,
   isMobileViewport,
   isRefinementUploadStep,
   leadCapturedForUI,
   leadGateLocksQuestionArea,
-  loadingMessages,
   adventureInputMode,
   setAdventureInputMode,
   budgetSliderConfig,
@@ -249,12 +245,16 @@ export function FormQuestionSection({
   }, [currentUploadedReferenceUrl, handlePromptSubmit, promptText]);
 
   const inputModeToggle = showPromptControls ? (
-      <div className="inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5">
+      <div className={cn(
+        "inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5 shrink-0 max-w-full",
+        useCompactNav && "h-7"
+      )}>
 	        <button
 	          type="button"
 	          onClick={() => setAdventureInputMode("questions")}
 	          className={cn(
-	            "inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium transition-colors",
+	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
+	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
 	            adventureInputMode === "questions" ? "bg-primary/10 text-foreground" : ""
 	          )}
           style={
@@ -269,7 +269,8 @@ export function FormQuestionSection({
 	          type="button"
 	          onClick={() => setAdventureInputMode("prompt")}
 	          className={cn(
-	            "inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium transition-colors",
+	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
+	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
 	            adventureInputMode === "prompt" ? "bg-primary/10 text-foreground" : ""
 	          )}
           style={
@@ -285,7 +286,8 @@ export function FormQuestionSection({
 	          disabled={!canUseBudgetMode}
 	          onClick={() => setAdventureInputMode("budget")}
 	          className={cn(
-	            "inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium transition-colors",
+	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
+	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
 	            adventureInputMode === "budget" ? "bg-primary/10 text-foreground" : "",
 	            !canUseBudgetMode ? "opacity-50 cursor-not-allowed" : ""
 	          )}
@@ -297,21 +299,22 @@ export function FormQuestionSection({
 	        >
 	          Budget
 	        </button>
-          <button
-            type="button"
-            onClick={() => setAdventureInputMode("uploads")}
-            className={cn(
-              "inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium transition-colors",
-              adventureInputMode === "uploads" ? "bg-primary/10 text-foreground" : ""
-            )}
-            style={
-              adventureInputMode !== "uploads"
-                ? { color: textMuted || "var(--form-text-color)" }
-                : undefined
-            }
-          >
-            Uploads
-          </button>
+	        <button
+	          type="button"
+	          onClick={() => setAdventureInputMode("uploads")}
+	          className={cn(
+	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
+	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
+	            adventureInputMode === "uploads" ? "bg-primary/10 text-foreground" : ""
+	          )}
+	          style={
+	            adventureInputMode !== "uploads"
+	              ? { color: textMuted || "var(--form-text-color)" }
+	              : undefined
+	          }
+	        >
+	          Uploads
+	        </button>
 	      </div>
 	  ) : undefined;
 
@@ -330,8 +333,8 @@ export function FormQuestionSection({
             usePreviewPaneLayout
               ? (
                   useBottomDockLayout
-                    ? "h-full shrink-0 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
-                    : "h-full shrink-0"
+                    ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
+                    : "min-h-0 flex-1"
                 )
               : "flex-1"
           )}
@@ -355,7 +358,7 @@ export function FormQuestionSection({
             >
               <div
                 className={cn(
-                  "flex min-h-0 flex-1 flex-col overflow-hidden",
+                  "flex min-h-0 flex-1 flex-col overflow-auto",
                   useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null,
                   usePreviewPaneLayout ? "px-4" : null
                 )}
@@ -378,7 +381,7 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, y: 0 }}
 	                        exit={{ opacity: 0, y: 8 }}
 	                        transition={{ duration: 0.2, ease: "easeOut" }}
-	                        className="w-full min-h-0 flex flex-col items-center justify-center gap-4 px-4 py-4 sm:py-5"
+	                        className="w-full min-h-0 flex flex-1 flex-col items-center justify-center gap-4 px-4 py-4 sm:py-5"
 	                      >
 	                        <p
 	                          className="max-w-3xl text-center text-base sm:text-lg font-semibold leading-tight"
@@ -445,7 +448,7 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.14, ease: "easeOut" }}
-                        className="flex h-full min-h-0 w-full flex-col justify-center px-4 py-4 sm:px-6"
+                        className="flex min-h-0 flex-1 w-full flex-col justify-center px-4 py-4 sm:px-6"
                       >
                         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
                           <div
@@ -471,21 +474,21 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -16 }}
                         transition={{ duration: 0.18, ease: "easeOut" }}
-                        className="w-full min-h-0 flex flex-col"
+                        className="w-full min-h-0 flex flex-1 flex-col"
                       >
-                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5">
-                          {inputModeToggle ? <div className="mb-2 flex justify-center">{inputModeToggle}</div> : null}
+                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5 flex min-h-0 flex-1 flex-col">
+                          {inputModeToggle ? <div className="mb-1.5 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
                           {useCompactNav ? (
-                            <div className="min-w-0">
+                            <div className="min-w-0 min-h-0 flex flex-1 flex-col">
                               <div
-                                className="rounded-xl border p-2"
+                                className="rounded-xl border p-2 min-h-0 flex-1 flex flex-col min-w-0"
                                 style={{
                                   backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
                                   borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
                                   borderRadius: `${theme.borderRadius ?? 12}px`,
                                 }}
                               >
-                                <div className="flex items-end gap-2 min-w-0">
+                                <div className="flex items-end gap-2 min-w-0 min-h-0 flex-1">
                                   <textarea
                                     value={promptDraft}
                                     onChange={(e) => setPromptDraft(e.target.value)}
@@ -495,9 +498,8 @@ export function FormQuestionSection({
                                         submitPrompt();
                                       }
                                     }}
-                                    rows={2}
                                     placeholder="Add a prompt to refine this image..."
-                                    className="min-h-14 flex-1 resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                    className="min-h-[2.5rem] max-h-[6rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                                   />
                                   <Button
                                     type="button"
@@ -518,16 +520,16 @@ export function FormQuestionSection({
                               </div>
                             </div>
                           ) : (
-                            <>
+                            <div className="min-w-0 min-h-0 flex flex-1 flex-col">
                               <div
-                                className="rounded-xl border p-2"
+                                className="rounded-xl border p-2 min-h-0 flex-1 flex flex-col min-w-0"
                                 style={{
                                   backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
                                   borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
                                   borderRadius: `${theme.borderRadius ?? 12}px`,
                                 }}
                               >
-                                <div className="flex items-end gap-2 min-w-0">
+                                <div className="flex items-end gap-2 min-w-0 min-h-0 flex-1">
                                   <textarea
                                     value={promptDraft}
                                     onChange={(e) => setPromptDraft(e.target.value)}
@@ -537,9 +539,8 @@ export function FormQuestionSection({
                                         submitPrompt();
                                       }
                                     }}
-                                    rows={3}
                                     placeholder="Add a prompt to refine this image..."
-                                    className="min-h-20 flex-1 resize-none rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                    className="min-h-[4rem] max-h-[8rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                                   />
                                   <Button
                                     type="button"
@@ -558,7 +559,7 @@ export function FormQuestionSection({
                                   </Button>
                                 </div>
                               </div>
-                            </>
+                            </div>
                           )}
 	                        </div>
 	                      </motion.div>
@@ -569,34 +570,16 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, x: 0 }}
 	                        exit={{ opacity: 0, x: -16 }}
 	                        transition={{ duration: 0.18, ease: "easeOut" }}
-	                        className="w-full min-h-0 flex flex-col"
+	                        className="w-full min-h-0 flex flex-1 flex-col"
 	                      >
-	                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5">
-	                          {inputModeToggle ? <div className="mb-2 flex justify-center">{inputModeToggle}</div> : null}
+	                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5 flex min-h-0 flex-1 flex-col">
+	                          {inputModeToggle ? <div className="mb-1.5 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
 	                          {useCompactNav ? (
-	                            <div className="flex items-center gap-3 min-w-0">
-	                              {canGoBack ? (
-	                                <Button
-	                                  type="button"
-	                                  onClick={handleBack}
-	                                  variant="outline"
-	                                  className="h-8 w-10 shrink-0 rounded-full p-0"
-	                                  style={{
-	                                    borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.14))",
-	                                    color: theme.textColor,
-	                                    fontFamily: theme.fontFamily,
-	                                  }}
-	                                  aria-label="Go back"
-	                                >
-	                                  <ArrowLeft className="h-3 w-3" />
-	                                </Button>
-	                              ) : (
-	                                <div className="h-8 w-10 shrink-0" aria-hidden="true" />
-	                              )}
+	                            <div className="flex items-center min-w-0 min-h-0 flex-1">
 	                              <div className="flex-1 min-w-0">
-	                                <div className="px-1">
+	                                <div className="px-1 min-w-0 py-0.5">
                                   <div
-                                    className="pb-0.5 text-center text-xl font-black leading-tight tabular-nums"
+                                    className="pb-0.5 text-center text-lg sm:text-xl font-black leading-tight tabular-nums"
                                     style={{ color: primary, fontFamily: theme.fontFamily }}
                                   >
                                     {formatCurrency(localBudget, { locale: pricingLocale, currency: budgetCurrency, compact: true })}
@@ -607,7 +590,7 @@ export function FormQuestionSection({
                                     step={budgetSliderConfig.step}
                                     value={[localBudget]}
                                     onValueChange={(v) => handleBudgetInputChange(v[0] ?? localBudget)}
-                                    className="w-full"
+                                    className="w-full min-w-0"
                                     aria-label="Adjust budget and regenerate preview"
                                     disabled={!canUseBudgetMode}
                                   />
@@ -621,40 +604,32 @@ export function FormQuestionSection({
                                   </div>
                                 </div>
                               </div>
-	                              <Button
-	                                type="button"
-	                                onClick={() => setAdventureInputMode("questions")}
-	                                className="h-8 w-10 shrink-0 rounded-full p-0"
-	                                style={{
-	                                  backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-	                                  color: "#fff",
-	                                  fontFamily: theme.fontFamily,
-	                                }}
-	                                aria-label="Continue to guided questions"
-	                              >
-	                                <ArrowRight className="h-3 w-3" />
-	                              </Button>
 	                            </div>
 	                          ) : (
-	                            <>
-	                              <div className="px-1 py-1">
+	                            <div className="flex min-h-0 flex-1 flex-col min-w-0">
+	                              <div className="px-1 py-1 min-h-0 flex-1 flex flex-col justify-center min-w-0">
                                 <div
-                                  className="pb-0.5 pt-0.5 text-center text-2xl font-black leading-tight tabular-nums"
+                                  className={cn(
+                                    "pb-0.5 pt-0.5 text-center font-black leading-tight tabular-nums",
+                                    usePreviewPaneLayout ? "text-xl" : "text-2xl"
+                                  )}
                                   style={{ color: primary, fontFamily: theme.fontFamily }}
                                 >
                                   {formatCurrency(localBudget, { locale: pricingLocale, currency: budgetCurrency, compact: true })}
                                 </div>
-                                <SliderPrimitive
-                                  min={budgetSliderConfig.min}
-                                  max={budgetSliderConfig.max}
-                                  step={budgetSliderConfig.step}
-                                  value={[localBudget]}
-                                  onValueChange={(v) => handleBudgetInputChange(v[0] ?? localBudget)}
-                                  className="w-full"
-                                  aria-label="Adjust budget and regenerate preview"
-                                  disabled={!canUseBudgetMode}
-                                />
-                                <div className="mt-1 flex items-center justify-between px-1 text-[11px] font-medium">
+                                <div className="w-full min-w-0">
+                                  <SliderPrimitive
+                                    min={budgetSliderConfig.min}
+                                    max={budgetSliderConfig.max}
+                                    step={budgetSliderConfig.step}
+                                    value={[localBudget]}
+                                    onValueChange={(v) => handleBudgetInputChange(v[0] ?? localBudget)}
+                                    className="w-full min-w-0"
+                                    aria-label="Adjust budget and regenerate preview"
+                                    disabled={!canUseBudgetMode}
+                                  />
+                                </div>
+                                <div className="mt-1 flex shrink-0 items-center justify-between px-1 text-[11px] font-medium">
                                   <span style={{ color: textMuted || theme.textColor, fontFamily: theme.fontFamily }}>
                                     {budgetMinLabel}
                                   </span>
@@ -663,38 +638,7 @@ export function FormQuestionSection({
                                   </span>
                                 </div>
 	                              </div>
-	                              <div className="flex min-w-0 justify-center gap-2 pt-2.5">
-	                                {canGoBack ? (
-	                                  <Button
-	                                    type="button"
-	                                    onClick={handleBack}
-	                                    variant="outline"
-	                                    className="h-9 min-w-[88px] px-3 text-xs font-medium shrink-0"
-	                                    style={{
-	                                      borderColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-	                                      color: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-	                                      fontFamily: theme.fontFamily,
-	                                      borderRadius: `${theme.borderRadius ?? 12}px`,
-	                                    }}
-	                                  >
-	                                    Back
-	                                  </Button>
-	                                ) : null}
-	                                <Button
-	                                  type="button"
-	                                  onClick={() => setAdventureInputMode("questions")}
-	                                  className="h-9 min-w-[96px] px-3 text-xs font-medium shrink-0"
-	                                  style={{
-	                                    backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
-	                                    color: "#fff",
-	                                    fontFamily: theme.fontFamily,
-	                                    borderRadius: `${theme.borderRadius ?? 12}px`,
-	                                  }}
-	                                >
-	                                  Continue
-	                                </Button>
-	                              </div>
-	                            </>
+	                            </div>
 	                          )}
 	                        </div>
 	                      </motion.div>
@@ -705,7 +649,7 @@ export function FormQuestionSection({
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: -16 }}
                           transition={{ duration: 0.18, ease: "easeOut" }}
-                          className="w-full min-h-0 flex flex-col"
+                          className="w-full min-w-0 min-h-0 flex flex-1 flex-col overflow-hidden"
                         >
                           <input
                             ref={uploadsInputRef}
@@ -719,46 +663,73 @@ export function FormQuestionSection({
                               await handleUploadAndRegenerate(file);
                             }}
                           />
-                          <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5">
-                            {inputModeToggle ? <div className="mb-2 flex justify-center">{inputModeToggle}</div> : null}
-                            <div className="mx-auto w-full max-w-xl rounded-2xl border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-4">
-                              <div className="text-center">
-                                <div className="text-sm font-semibold" style={{ fontFamily: theme.fontFamily, color: theme.textColor }}>
-                                  Update your reference image
-                                </div>
-                                <div className="mt-1 text-xs" style={{ fontFamily: theme.fontFamily, color: textMuted || theme.textColor }}>
-                                  Upload a new photo and we will regenerate the preview.
-                                </div>
-                              </div>
-                              <div className="mt-3 flex items-center justify-center gap-2">
-                                {currentUploadedReferenceUrl ? (
+                          <div className={cn(
+                            "flex w-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden",
+                            useCompactNav ? "px-2 py-1" : "px-2 py-1.5 sm:px-3 sm:py-2 md:px-4 md:py-2.5"
+                          )}>
+                            {inputModeToggle ? <div className="mb-1 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
+                            <div className="flex min-w-0 min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden">
+                              <div className={cn(
+                                "flex w-full min-w-0 max-w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]",
+                                usePreviewPaneLayout ? "p-2 max-w-full" : "p-2 sm:p-3 md:p-4 max-w-[280px] sm:max-w-sm md:max-w-md"
+                              )}>
+                                <div className="w-full min-w-0 shrink-0 text-center">
                                   <div
-                                    className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-[color:var(--form-surface-border-color)] bg-black/5"
-                                    role="img"
-                                    aria-label="Current uploaded reference image"
-                                    title="Current image"
+                                    className={cn(
+                                      "font-semibold leading-tight",
+                                      usePreviewPaneLayout ? "text-[11px]" : "text-[11px] sm:text-xs md:text-sm"
+                                    )}
+                                    style={{ fontFamily: theme.fontFamily, color: theme.textColor }}
                                   >
-                                    <div
-                                      className="h-full w-full bg-cover bg-center bg-no-repeat"
-                                      style={{ backgroundImage: `url("${currentUploadedReferenceUrl}")` }}
-                                    />
+                                    Update your reference image
                                   </div>
-                                ) : null}
-                                <Button
-                                  type="button"
-                                  disabled={refinementUploading}
-                                  onClick={() => uploadsInputRef.current?.click()}
-                                  className="h-9 px-4 text-xs font-medium"
-                                  style={{
-                                    backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor || primary,
-                                    color: theme.buttonStyle?.textColor || "#ffffff",
-                                    fontFamily: theme.fontFamily,
-                                    borderRadius: `${theme.borderRadius ?? 12}px`,
-                                  }}
-                                >
-                                  <ImagePlus className="mr-1.5 h-4 w-4 shrink-0" aria-hidden />
-                                  {refinementUploading ? "Uploading..." : currentUploadedReferenceUrl ? "Replace image" : "Choose image"}
-                                </Button>
+                                  <div
+                                    className={cn(
+                                      "leading-tight",
+                                      usePreviewPaneLayout ? "mt-0.5 text-[10px]" : "mt-0.5 text-[10px] sm:text-[11px] md:text-xs"
+                                    )}
+                                    style={{ fontFamily: theme.fontFamily, color: textMuted || theme.textColor }}
+                                  >
+                                    Upload a new photo and we will regenerate the preview.
+                                  </div>
+                                </div>
+                                <div className="flex w-full min-w-0 flex-shrink-0 flex-wrap items-center justify-center gap-2">
+                                  {currentUploadedReferenceUrl ? (
+                                    <div
+                                      className={cn(
+                                        "shrink-0 overflow-hidden rounded border border-[color:var(--form-surface-border-color)] bg-black/5",
+                                        usePreviewPaneLayout ? "h-7 w-7" : "h-7 w-7 sm:h-8 sm:w-8 md:h-9 md:w-9"
+                                      )}
+                                      role="img"
+                                      aria-label="Current uploaded reference image"
+                                      title="Current image"
+                                    >
+                                      <div
+                                        className="h-full w-full bg-cover bg-center bg-no-repeat"
+                                        style={{ backgroundImage: `url("${currentUploadedReferenceUrl}")` }}
+                                      />
+                                    </div>
+                                  ) : null}
+                                  <Button
+                                    type="button"
+                                    disabled={refinementUploading}
+                                    onClick={() => uploadsInputRef.current?.click()}
+                                    className={cn(
+                                      "shrink-0 font-medium",
+                                      usePreviewPaneLayout ? "h-7 px-2.5 text-[10px]" : "h-7 px-2.5 text-[10px] sm:h-8 sm:px-3 sm:text-[11px] md:h-9 md:px-4 md:text-xs"
+                                    )}
+                                    style={{
+                                      backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor || primary,
+                                      color: theme.buttonStyle?.textColor || "#ffffff",
+                                      fontFamily: theme.fontFamily,
+                                      borderRadius: `${theme.borderRadius ?? 12}px`,
+                                    }}
+                                    title={refinementUploading ? "Uploading…" : currentUploadedReferenceUrl ? "Replace image" : "Choose image"}
+                                  >
+                                    <ImagePlus className={cn("shrink-0", usePreviewPaneLayout ? "h-3.5 w-3.5" : "h-3.5 w-3.5 sm:mr-1.5 sm:h-4 sm:w-4")} aria-hidden />
+                                    <span className="min-w-0 truncate">{refinementUploading ? "Uploading…" : currentUploadedReferenceUrl ? "Replace image" : "Choose image"}</span>
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -770,7 +741,7 @@ export function FormQuestionSection({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -20 }}
                         transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="w-full h-full min-h-0 flex flex-col"
+                        className="w-full min-h-0 flex flex-1 flex-col"
                       >
                         <div className="flex-1 min-h-0 overflow-hidden">
                           <ComponentRenderer
@@ -797,9 +768,9 @@ export function FormQuestionSection({
                     )
                   ) : (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-                      <FormLoader
-                        message="Getting you accurate pricing..."
-                        subMessage={isBatchLoading ? loadingMessages[loadingMessageIndex] : undefined}
+                      <AdventureLoader
+                        phase="batch_pricing"
+                        active={isBatchLoading}
                       />
                     </motion.div>
                   )}

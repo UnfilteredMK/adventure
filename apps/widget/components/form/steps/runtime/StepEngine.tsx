@@ -14,7 +14,7 @@ import { saveUIPlan } from '@/lib/ai-form/state/ui-plan-storage';
 import { saveFormPlan } from '@/lib/ai-form/state/form-plan-storage';
 import { loadServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
 import { cn } from "@/lib/utils";
-import { FormLoader } from "../../FormLoader";
+import { AdventureLoader } from "../../AdventureLoader";
 import { Button } from "@/components/ui/button";
 import { collectReferenceImagesFromStepData } from "@/lib/ai-form/utils/reference-images";
 import { useExperienceState } from "@/components/form/state/ExperienceState";
@@ -189,7 +189,6 @@ export function StepEngine({
   const initialAutofetchRef = useRef(false);
   const inFlightBatchIndexesRef = useRef<Set<number>>(new Set());
   const completedBatchIndexesRef = useRef<Set<number>>(new Set());
-  const [loadingMessage, setLoadingMessage] = useState(0);
   const [maxVisitedIndex, setMaxVisitedIndex] = useState(0);
   const [formState, setFormState] = useState<FormState | null>(null);
   // Backend-owned call cap for this session. Not persisted; not hard-coded.
@@ -645,10 +644,15 @@ export function StepEngine({
   const optionImageInFlightRef = useRef<Set<string>>(new Set());
 
   const shouldProgressivelyGenerateOptionImages = useCallback((step: any): boolean => {
+    // Option images disabled for now; keep capability for future use.
+    if (true) return false;
     if (!step || typeof step !== "object") return false;
     if ((step as any)?.functionCall) return false;
     const type = String((step as any)?.type || "").toLowerCase();
     if (type !== "multiple_choice") return false;
+    // Skip when step has no options (e.g. refinement steps before options are loaded)
+    const opts = (step as any)?.options;
+    if (!Array.isArray(opts) || opts.length === 0) return false;
     const id = String((step as any)?.id || "");
     if (!id) return false;
     const options = Array.isArray((step as any)?.options) ? (step as any).options : [];
@@ -817,8 +821,28 @@ export function StepEngine({
   }, [currentStep?.id]);
 
   // Lead-gate should unlock only after an explicit capture in this session.
-  // Do not treat a prefilled/stored email as "captured" by itself.
   const leadCapturedForUI = Boolean(formState?.leadCaptured);
+
+  // When lead modal is completed, budget/upload are hidden visually — auto-advance past them
+  // so the user never stops on a hidden step. Steps stay in state for pricing/API data.
+  const hiddenStepIdsWhenLeadCaptured = useMemo(
+    () =>
+      new Set([
+        DETERMINISTIC_BUDGET_ID,
+        DETERMINISTIC_SCENE_IMAGE_ID,
+        DETERMINISTIC_USER_IMAGE_ID,
+        DETERMINISTIC_PRODUCT_IMAGE_ID,
+      ]),
+    []
+  );
+  useEffect(() => {
+    if (!currentStep) return;
+    if (!leadCapturedForUI) return;
+    if (!hiddenStepIdsWhenLeadCaptured.has(currentStep.id)) return;
+    const existingValue = state?.stepData?.[currentStep.id];
+    const data = existingValue ?? (currentStep.id === DETERMINISTIC_BUDGET_ID ? budgetValue : undefined);
+    void goToNextStep(data ?? {});
+  }, [budgetValue, currentStep, goToNextStep, hiddenStepIdsWhenLeadCaptured, leadCapturedForUI, state?.stepData]);
 
   // When lead is captured: switch to Guided tab so user sees next questions immediately.
   useEffect(() => {
@@ -1133,23 +1157,8 @@ export function StepEngine({
   // If the user has already progressed past the target index, inject immediately after the current step.
   // NOTE: "What's your name?" deterministic step temporarily disabled per request.
 
-  // When first image is generated, remove budget + upload steps — they move to the bottom bar.
-  const stepsRemovedAfterImageRef = useRef(false);
-  const stepsToRemoveAfterImage = useMemo(
-    () =>
-      new Set([
-        DETERMINISTIC_BUDGET_ID,
-        DETERMINISTIC_SCENE_IMAGE_ID,
-        DETERMINISTIC_USER_IMAGE_ID,
-        DETERMINISTIC_PRODUCT_IMAGE_ID,
-      ]),
-    []
-  );
-  useEffect(() => {
-    if (!previewHasImage || !removeStepsByIds || stepsRemovedAfterImageRef.current) return;
-    stepsRemovedAfterImageRef.current = true;
-    removeStepsByIds(stepsToRemoveAfterImage);
-  }, [previewHasImage, removeStepsByIds, stepsToRemoveAfterImage]);
+  // When image is generated + lead captured, hide budget + upload from UI only — keep them in state
+  // so pricing, uploads, and API requests still have the data. Just filter from jogger (below).
 
   // Insert deterministic steps (budget, then upload) as the last steps before preview.
   // Order: all API-generated steps first, then budget, then upload. No API questions after these.
@@ -1165,7 +1174,11 @@ export function StepEngine({
     if (desiredIds.size === 0) return;
 
     const previewGateSteps = (state.steps || []).filter((s: any) => isPreviewGateQuestionStep(s));
-    if (previewGateSteps.length === 0) return;
+    // Fallback: also allow insert when we have any non-bootstrap question (e.g. scope steps like project-type)
+    const hasApiGeneratedSteps = state.steps.some(
+      (s: any) => s?.id && !isBootstrapStepIdValue(String(s.id)) && isQuestionStepForAskedIds(s)
+    );
+    if (previewGateSteps.length === 0 && !hasApiGeneratedSteps) return;
 
     // Place budget + upload immediately after the final API-generated (preview-gate) question.
     let desiredInsertIndex = state.steps.length;
@@ -1174,6 +1187,16 @@ export function StepEngine({
       if (isPreviewGateQuestionStep(s)) {
         desiredInsertIndex = i + 1;
         break;
+      }
+    }
+    // Fallback: if no preview gate found but we have API steps, insert after the last non-bootstrap question
+    if (previewGateSteps.length === 0 && desiredInsertIndex === state.steps.length) {
+      for (let i = state.steps.length - 1; i >= 0; i -= 1) {
+        const s = state.steps[i];
+        if (s?.id && !isBootstrapStepIdValue(String(s.id)) && isQuestionStepForAskedIds(s)) {
+          desiredInsertIndex = i + 1;
+          break;
+        }
       }
     }
 
@@ -1638,29 +1661,6 @@ export function StepEngine({
     prevIndexRef.current = nextIndex;
   }, [formState?.batchIndex, instanceId, sessionId, state?.currentStepIndex, state?.steps]);
 
-  // Rotating loading messages for better UX
-  const loadingMessages = [
-    'Pulling a clearer price range...',
-    'Tightening the estimate...',
-    'Building your quote questions...',
-    'Almost there — just enough to price accurately...',
-    'Dialing in the details...',
-    'One moment — refining your estimate...',
-  ];
-
-  useEffect(() => {
-    if (!isBatchLoading) {
-      setLoadingMessage(0);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setLoadingMessage((prev) => (prev + 1) % loadingMessages.length);
-    }, 2000); // Change message every 2 seconds
-
-    return () => clearInterval(interval);
-  }, [isBatchLoading, loadingMessages.length]);
-
   const isInitialLoading = Boolean(engineLoading || !flowPlan);
 
   const fetchAndAppendBatch = useCallback(
@@ -1869,12 +1869,44 @@ export function StepEngine({
             const n = Number(maxBatches);
             if (Number.isFinite(n)) backendMaxCalls = Math.max(1, Math.floor(n));
           }
+	        const directDeterministicCopy =
+	          (json && typeof json === "object" && (json as any).deterministicCopy && typeof (json as any).deterministicCopy === "object" && !Array.isArray((json as any).deterministicCopy))
+	            ? (json as any).deterministicCopy
+	            : null;
 	        if (directMiniSteps.length > 0) {
 	          newSteps.push(...directMiniSteps);
             didCallDspy = true;
 	        }
           if (directStructuralSteps.length > 0) {
             newSteps.push(...directStructuralSteps);
+          }
+          if (directDeterministicCopy && Object.keys(directDeterministicCopy).length > 0) {
+            didCallDspy = true;
+            for (const [stepId, copyPatch] of Object.entries(directDeterministicCopy)) {
+              if (!stepId || !copyPatch || typeof copyPatch !== "object") continue;
+              const patch: Record<string, any> = {};
+              if (typeof (copyPatch as any).question === "string") {
+                patch.question = (copyPatch as any).question;
+              }
+              if (stepId === DETERMINISTIC_STYLE_ID) {
+                if (typeof (copyPatch as any).min_selections === "number") patch.min_selections = (copyPatch as any).min_selections;
+                if (typeof (copyPatch as any).max_selections === "number") patch.max_selections = (copyPatch as any).max_selections;
+              }
+              if (stepId === DETERMINISTIC_BUDGET_ID) {
+                const headline = (copyPatch as any).headline ?? (copyPatch as any).question;
+                const subtext = (copyPatch as any).subtext;
+                if (typeof headline === "string" || typeof subtext === "string") {
+                  patch.copy = {
+                    ...((state?.steps || []).find((s: any) => String((s as any)?.id) === stepId) as any)?.copy,
+                    ...(typeof headline === "string" ? { headline } : {}),
+                    ...(typeof subtext === "string" ? { subtext } : {}),
+                  };
+                }
+              }
+              if (Object.keys(patch).length > 0) {
+                patchStep(stepId, patch);
+              }
+            }
           }
           if (typeof directReadyForImageGen === "boolean") {
             updateStepData("__readyForImageGen", directReadyForImageGen);
@@ -2178,7 +2210,7 @@ export function StepEngine({
         }
       }
     },
-    [addSteps, flowPlan, formState, initialQuestionCountSnapshot, instanceId, state?.steps, state?.stepData, updateStepData, config?.useCase, onMeta]
+    [addSteps, patchStep, flowPlan, formState, initialQuestionCountSnapshot, instanceId, state?.steps, state?.stepData, updateStepData, config?.useCase, onMeta]
   );
 
   const requestNextBatch = useCallback(
@@ -2513,6 +2545,12 @@ export function StepEngine({
         addSteps([nextDeterministicStyleStep as any], true, {
           insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
           moveExisting: true,
+        });
+        // Fetch AI-generated style copy; when response arrives, patchStep will apply it
+        requestNextBatch(updatedStepDataSoFar, {
+          showLoading: false,
+          wasOnLastStep: false,
+          reason: "style-copy",
         });
         return;
       }
@@ -3226,6 +3264,14 @@ export function StepEngine({
     );
   }
 
+  if (isInitialLoading && !engineError && !batchError) {
+    return (
+      <div className="flex items-center justify-center min-h-screen px-6">
+        <AdventureLoader phase="initial" active={true} className="min-h-0 py-8" />
+      </div>
+    );
+  }
+
   // Satiety is now calculated from state.steps directly in ConfidenceHUD
   const currentStepMeta = currentStep
     ? {
@@ -3263,19 +3309,19 @@ export function StepEngine({
     if (!state?.steps?.length) return [];
     const indexed = state.steps.map((step, index) => ({ step, index }));
     const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
-    // After first image, budget/upload move to bottom bar — hide from jogger
-    const stepsToHideWhenImage = new Set([
+    // After lead modal is completed, budget/upload are hidden visually — hide from jogger only then.
+    const stepsToHideWhenLeadCaptured = new Set([
       DETERMINISTIC_BUDGET_ID,
       DETERMINISTIC_SCENE_IMAGE_ID,
       DETERMINISTIC_USER_IMAGE_ID,
       DETERMINISTIC_PRODUCT_IMAGE_ID,
     ]);
-    const withoutBudgetUploadWhenImage =
-      previewHasImage
-        ? withoutRefinementUpload.filter(({ step }) => !stepsToHideWhenImage.has(String((step as any)?.id || "")))
+    const withoutBudgetUploadWhenLeadCaptured =
+      leadCapturedForUI
+        ? withoutRefinementUpload.filter(({ step }) => !stepsToHideWhenLeadCaptured.has(String((step as any)?.id || "")))
         : withoutRefinementUpload;
-    if (leadCapturedForUI) return withoutBudgetUploadWhenImage;
-    return withoutBudgetUploadWhenImage.filter(({ step }) => {
+    if (leadCapturedForUI) return withoutBudgetUploadWhenLeadCaptured;
+    return withoutBudgetUploadWhenLeadCaptured.filter(({ step }) => {
       const stepId = String((step as any)?.id || "");
       if (!stepId) return true;
       const meta = stepMetaRef.current.get(stepId);
@@ -3421,7 +3467,6 @@ export function StepEngine({
                         hasPreviewSubsections={hasPreviewSubsections}
                         instanceId={instanceId}
                         isAdventureSurface={isAdventureSurface}
-                        isInitialLoading={isInitialLoading}
                         isRefinementUploadStep={isRefinementUploadStep}
                         previewMaxPx={previewMaxPx}
                         previewHasImage={previewHasImage}
@@ -3445,8 +3490,8 @@ export function StepEngine({
                     className={cn(
                       previewLayoutActive
                         ? isMobileViewport
-                          ? "shrink-0 pb-[max(env(safe-area-inset-bottom),8px)]"
-                          : "shrink-0 pb-0.5 sm:pb-1"
+                          ? "flex h-[19vh] shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden"
+                          : "flex h-[17vh] shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden"
                         : "flex flex-col flex-1 min-h-0"
                     )}
                   >
@@ -3463,12 +3508,10 @@ export function StepEngine({
                       instanceId={instanceId}
                       isBatchLoading={isBatchLoading}
                       isFetchingNext={isFetchingNext}
-                      loadingMessageIndex={loadingMessage}
                       isMobileViewport={isMobileViewport}
                       isRefinementUploadStep={isRefinementUploadStep}
                       leadCapturedForUI={leadCapturedForUI}
                       leadGateLocksQuestionArea={leadGateLocksQuestionArea}
-	                      loadingMessages={loadingMessages}
 	                      adventureInputMode={adventureInputMode}
 	                      setAdventureInputMode={setAdventureInputMode}
 	                      budgetSliderConfig={budgetSliderConfig}

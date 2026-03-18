@@ -22,8 +22,8 @@ import {
 import { buildImagePromptViaDSPy } from "@/lib/ai-form/utils/image-prompt-builder";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
-import { FormLoader } from "@/components/form/FormLoader";
+import { ArrowLeft, Download, ImageIcon, LayoutGrid, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
@@ -91,6 +91,15 @@ type PreviewCacheV2 = {
   generatedForContextSignature?: string | null;
 };
 
+/** Per-image pricing stored in cache so we don't refetch when toggling between images. */
+type CachedPricing = {
+  totalMin: number;
+  totalMax: number;
+  currency: string;
+  imagePriceRange?: { low: number; high: number };
+  servicePriceRange?: { low: number; high: number };
+};
+
 type PreviewRun = {
   id: string;
   createdAt: number;
@@ -98,13 +107,24 @@ type PreviewRun = {
   answeredQuestionCount?: number | null;
   images: string[];
   message?: string | null;
+  /** Per-image pricing: imagePricing[i] corresponds to images[i]. Fetched once, fixed to the image. */
+  imagePricing?: (CachedPricing | undefined)[];
 };
+
+const CONCEPT_GALLERY_COUNT = 4;
+
+/** "gallery" = show 4-image grid; "single" = show chosen hero with option to go back */
+type PreviewViewMode = "gallery" | "single";
 
 type PreviewCacheV3 = {
   schemaVersion: 3;
   status: "idle" | "running" | "complete" | "error";
   runs: PreviewRun[];
   activeRunId?: string | null;
+  /** When null and active run has multiple images, show concept picker. When set, hero = activeRun.images[selectedConceptIndex]. */
+  selectedConceptIndex?: number | null;
+  /** "gallery" = grid of 4 concepts; "single" = hero view with back-to-gallery toggle */
+  viewMode?: PreviewViewMode | null;
   message?: string | null;
   error?: string | null;
   errorDetails?: string | null;
@@ -245,19 +265,48 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
       const runs = Array.isArray(base.runs) ? base.runs : [];
       const normalizedRuns = runs
         .filter((r) => r && typeof r === "object")
-        .map((r) => ({
-          id: typeof (r as any).id === "string" ? (r as any).id : newRunId(),
-          createdAt: Number((r as any).createdAt) || Date.now(),
-          contextSignature: typeof (r as any).contextSignature === "string" ? (r as any).contextSignature : "",
-          answeredQuestionCount:
-            typeof (r as any).answeredQuestionCount === "number" && Number.isFinite((r as any).answeredQuestionCount)
-              ? (r as any).answeredQuestionCount
-              : null,
-          images: Array.isArray((r as any).images)
+        .map((r) => {
+          const imgs = Array.isArray((r as any).images)
             ? (r as any).images.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src))
-            : [],
-          message: typeof (r as any).message === "string" ? (r as any).message : null,
-        }))
+            : [];
+          const rawPricing = Array.isArray((r as any).imagePricing) ? (r as any).imagePricing : [];
+          const imagePricing: (CachedPricing | undefined)[] = imgs.map((_, i) => {
+            const p = rawPricing[i];
+            if (!p || typeof p !== "object" || !Number.isFinite(p.totalMin) || !Number.isFinite(p.totalMax))
+              return undefined;
+            return {
+              totalMin: Number(p.totalMin),
+              totalMax: Number(p.totalMax),
+              currency: typeof p.currency === "string" ? p.currency : "USD",
+              imagePriceRange:
+                typeof p.imagePriceRange === "object" &&
+                p.imagePriceRange !== null &&
+                Number.isFinite(p.imagePriceRange.low) &&
+                Number.isFinite(p.imagePriceRange.high)
+                  ? { low: p.imagePriceRange.low, high: p.imagePriceRange.high }
+                  : undefined,
+              servicePriceRange:
+                typeof p.servicePriceRange === "object" &&
+                p.servicePriceRange !== null &&
+                Number.isFinite(p.servicePriceRange.low) &&
+                Number.isFinite(p.servicePriceRange.high)
+                  ? { low: p.servicePriceRange.low, high: p.servicePriceRange.high }
+                  : undefined,
+            };
+          });
+          return {
+            id: typeof (r as any).id === "string" ? (r as any).id : newRunId(),
+            createdAt: Number((r as any).createdAt) || Date.now(),
+            contextSignature: typeof (r as any).contextSignature === "string" ? (r as any).contextSignature : "",
+            answeredQuestionCount:
+              typeof (r as any).answeredQuestionCount === "number" && Number.isFinite((r as any).answeredQuestionCount)
+                ? (r as any).answeredQuestionCount
+                : null,
+            images: imgs,
+            message: typeof (r as any).message === "string" ? (r as any).message : null,
+            ...(imagePricing.some(Boolean) ? { imagePricing } : {}),
+          };
+        })
         .filter((r) => Boolean(r.images?.length));
 
       const activeRunId = typeof base.activeRunId === "string" ? base.activeRunId : null;
@@ -268,6 +317,14 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
         status: base.status === "running" ? "idle" : base.status,
         runs: normalizedRuns,
         activeRunId: nextActiveRunId,
+        selectedConceptIndex:
+          typeof (base as any).selectedConceptIndex === "number" && Number.isFinite((base as any).selectedConceptIndex)
+            ? Math.max(0, Math.floor((base as any).selectedConceptIndex))
+            : null,
+        viewMode:
+          (base as any).viewMode === "gallery" || (base as any).viewMode === "single"
+            ? (base as any).viewMode
+            : null,
         message: typeof base.message === "string" ? base.message : null,
         error: typeof base.error === "string" ? base.error : null,
         errorDetails: typeof (base as any).errorDetails === "string" ? (base as any).errorDetails : null,
@@ -307,6 +364,8 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
         status: v2.status === "running" ? "idle" : v2.status,
         runs: run ? [run] : [],
         activeRunId: run ? run.id : null,
+        selectedConceptIndex: null,
+        viewMode: null,
         message: typeof v2.message === "string" ? v2.message : null,
         error: typeof v2.error === "string" ? v2.error : null,
         errorDetails: null,
@@ -328,6 +387,8 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
         status: "idle",
         runs: [],
         activeRunId: null,
+        selectedConceptIndex: null,
+        viewMode: null,
         message: null,
         error: null,
         errorDetails: null,
@@ -405,7 +466,7 @@ export function ImagePreviewExperience(props: {
   /** When true, hides the budget slider overlay (e.g. when preview is in dominant/large mode). */
   hideBudgetInOverlay?: boolean;
 }) {
-  const { theme } = useFormTheme();
+  const { theme, config: designConfig } = useFormTheme();
   const {
     instanceId,
     sessionId,
@@ -434,6 +495,31 @@ export function ImagePreviewExperience(props: {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingOwnImages, setIsUploadingOwnImages] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>(() => loadUploadedImages(instanceId, sessionId));
+  const [regenerationsRemaining, setRegenerationsRemaining] = useState<number>(0);
+
+  const galleryMaxImages = useMemo(
+    () =>
+      Number.isFinite(Number((designConfig as any)?.gallery_max_images))
+        ? Math.max(1, Math.min(12, Math.floor(Number((designConfig as any).gallery_max_images))))
+        : CONCEPT_GALLERY_COUNT,
+    [designConfig]
+  );
+
+  const refreshRegenAllowance = useCallback(async () => {
+    if (!instanceId) return;
+    try {
+      const required = Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
+      const res = await fetch(`/api/leads/availability/${encodeURIComponent(instanceId)}?required=${required}`);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      const bal = typeof data?.currentBalance === "number" ? Number(data.currentBalance) : 0;
+      setRegenerationsRemaining(Math.max(0, Math.floor(bal / required)));
+    } catch {}
+  }, [galleryMaxImages, instanceId]);
+
+  useEffect(() => {
+    void refreshRegenAllowance();
+  }, [refreshRegenAllowance]);
 
   const sceneUploadUrl = useMemo(() => {
     const sceneUploadStepIds = ["step-upload-scene-image", "step-refinement-upload-scene-image"] as const;
@@ -486,6 +572,9 @@ export function ImagePreviewExperience(props: {
   const pendingBudgetRefineRef = useRef(false);
   const prevBudgetForPricingRef = useRef<number | null>(null);
   const prevRunsLengthRef = useRef(0);
+  const heroForPricingRef = useRef<string | null>(null);
+  const skipNextFetchRef = useRef(false);
+  const currentHeroRef = useRef<string | null>(null);
   const fetchAccuratePricingRef = useRef<(() => Promise<void>) | null>(null);
   const [accuratePricing, setAccuratePricing] = useState<null | {
     totalMin: number;
@@ -663,6 +752,29 @@ export function ImagePreviewExperience(props: {
     return idx >= 0 ? idx : Math.max(0, runs.length - 1);
   }, [activeRunId, runs]);
 
+  const selectedConceptIndex = cache?.selectedConceptIndex ?? null;
+  const viewMode = (cache?.viewMode === "gallery" || cache?.viewMode === "single" ? cache.viewMode : null) as PreviewViewMode | null;
+  const showGalleryGrid =
+    (viewMode === "gallery" || (viewMode === null && selectedConceptIndex === null)) &&
+    Boolean(activeRun?.images && activeRun.images.length > 1) &&
+    cache?.status !== "running";
+  const showConceptPicker = showGalleryGrid;
+
+  const canRegenerateInGallery =
+    !showConceptPicker ||
+    runs.length === 0 ||
+    typeof regenerationsRemaining !== "number" ||
+    regenerationsRemaining > 0;
+
+  const hero = useMemo(() => {
+    if (!activeRun?.images?.length) return null;
+    const idx =
+      selectedConceptIndex != null && Number.isFinite(selectedConceptIndex)
+        ? Math.max(0, Math.min(selectedConceptIndex, activeRun.images.length - 1))
+        : 0;
+    return activeRun.images[idx] ?? activeRun.images[0] ?? null;
+  }, [activeRun, selectedConceptIndex]);
+
   // Persist "context updated" info, but do NOT auto-regenerate.
   useEffect(() => {
     if (!enabled) return;
@@ -674,6 +786,7 @@ export function ImagePreviewExperience(props: {
             status: "idle",
             runs: [],
             activeRunId: null,
+            selectedConceptIndex: null,
             message: null,
             error: null,
             errorDetails: null,
@@ -806,12 +919,24 @@ export function ImagePreviewExperience(props: {
         .filter(isValidUrlLikeImage)
         .slice(0, 6);
       const useCase = normalizeUseCase((config as any)?.useCase);
-      // After first image exists, use scene-placement inpaint for refinements/budget changes.
+      // Only use scene-placement when there's a product to place. For pure scene redesign (no product),
+      // keep scene use case with generationIntent-driven prompts (flux-kontext + scene module).
       const canUseScenePlacementForRefinement =
         hasExistingPreview &&
         (useCase === "scene" || useCase === "scene-placement") &&
+        (stepProductUpload || false) &&
         (runAnchorImage || stepSceneUpload || primaryReferenceImage);
       const effectiveUseCase = canUseScenePlacementForRefinement ? "scene-placement" : useCase;
+
+      // Style drift: original reference = user's first upload; generationIndex = runs so far.
+      const originalReferenceImage =
+        (stepSceneUpload || stepUserUpload || storedUploads?.[0] || null) as string | null;
+      const generationIndex = runs.length;
+      const generationIntent: "initial" | "small_improvement" | "regenerate" = isBudgetDrivenRegeneration
+        ? "regenerate"
+        : hasExistingPreview
+          ? "small_improvement"
+          : "initial";
       // For refinements: use latest image as base. scene-placement + hasExistingPreview = drilldown edit.
       const sceneImageForRequest =
         useCase === "scene" && runAnchorImage
@@ -848,6 +973,8 @@ export function ImagePreviewExperience(props: {
             status: "idle",
             runs: [],
             activeRunId: null,
+            selectedConceptIndex: null,
+            viewMode: null,
             message: null,
             error: null,
             errorDetails: null,
@@ -936,8 +1063,13 @@ export function ImagePreviewExperience(props: {
                     instanceId,
                     sessionId,
                     referenceImages: referenceImagesForRequest,
+                    sceneImage: sceneImageForRequest ?? undefined,
+                    productImage: stepProductUpload ?? undefined,
                     answeredQA,
                     instanceContext,
+                    generationIntent,
+                    originalReferenceImage: originalReferenceImage ?? undefined,
+                    generationIndex,
 		              })
 		            : null;
 
@@ -1023,13 +1155,16 @@ export function ImagePreviewExperience(props: {
               budgetForRequest !== null && isBudgetDrivenRegeneration
                 ? `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Keep the same overall style and layout, but visibly adjust materials, finishes, fixtures, and scope to fit this budget level.`
                 : prompt;
+		        const numOutputs = generationIntent === "initial" ? CONCEPT_GALLERY_COUNT : 1;
 		        const requestBody: any = {
 		          prompt: promptWithBudgetConstraint,
 		          instanceId,
-		          numOutputs: 1,
+		          numOutputs,
 		          useCase: normalizedUseCase,
-              generationIntent: isBudgetDrivenRegeneration ? "regenerate" : hasExistingPreview ? "small_improvement" : "initial",
+		          generationIntent,
 		        };
+		        if (originalReferenceImage) requestBody.originalReferenceImage = originalReferenceImage;
+		        if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
 		        if (budgetForRequest !== null) requestBody.budgetRange = budgetForRequest;
 		        if (negativePrompt) requestBody.negativePrompt = negativePrompt;
 
@@ -1083,6 +1218,9 @@ export function ImagePreviewExperience(props: {
         }
 
         const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
+        }
         const msg = typeof (json as any)?.message === "string" ? String((json as any).message) : null;
         if (imgs.length === 0) {
           throw new Error("Preview generated, but no images were returned.");
@@ -1106,11 +1244,14 @@ export function ImagePreviewExperience(props: {
           };
           nextRuns.push(run);
 
+          const preserveViewMode = base?.viewMode === "single" || base?.viewMode === "gallery";
           const next: PreviewCacheV3 = {
             schemaVersion: 3,
             status: "complete",
             runs: nextRuns,
             activeRunId: runId,
+            selectedConceptIndex: preserveViewMode && base?.viewMode === "single" ? 0 : null,
+            viewMode: preserveViewMode ? base!.viewMode : "gallery",
             message: msg,
             error: null,
             errorDetails: null,
@@ -1125,6 +1266,7 @@ export function ImagePreviewExperience(props: {
           saveCache(instanceId, sessionId, next);
           return next;
         });
+        void refreshRegenAllowance();
       } catch (e) {
         pendingBudgetRefineRef.current = false;
         const message = e instanceof Error ? e.message : "Failed to generate preview.";
@@ -1140,6 +1282,7 @@ export function ImagePreviewExperience(props: {
               status: "idle",
               runs: [],
               activeRunId: null,
+              selectedConceptIndex: null,
               message: null,
               error: null,
               errorDetails: null,
@@ -1175,12 +1318,13 @@ export function ImagePreviewExperience(props: {
       config,
       enabled,
       instanceId,
-	      runs,
-	      sessionId,
-	      effectiveStepDataSoFar,
-	      contextState,
-	    ]
-	  );
+      refreshRegenAllowance,
+      runs,
+      sessionId,
+      effectiveStepDataSoFar,
+      contextState,
+    ]
+  );
 
   const requestManualGenerate = useCallback(() => {
     if (!enabled) return;
@@ -1254,13 +1398,10 @@ export function ImagePreviewExperience(props: {
     if (!enabled) return;
     if ((cache?.runs?.length || 0) > 0) return;
     if (cache?.status === "running") return;
-    // Prevent an infinite retry loop if the first attempt fails (e.g., 404/502).
-    // Users can manually retry via the UI.
     if (cache?.status === "error") return;
     void runGenerate("auto");
   }, [cache?.runs?.length, cache?.status, enabled, runGenerate]);
 
-  const hero = activeRun?.images?.[0] ?? null;
   const isPlaceholderHero = useMemo(() => (hero ? isPlaceholderPreviewImage(hero) : false), [hero]);
   const lightboxLayoutId = `image-preview:${instanceId}:${sessionId}`;
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -1469,6 +1610,15 @@ export function ImagePreviewExperience(props: {
   const previewPricing = useMemo(() => {
     return buildPreviewPricingFromConfig((config as any)?.previewPricing, sessionId);
   }, [(config as any)?.previewPricing, sessionId]);
+
+  // Only use config-based pricing for display when explicitly provided; never show $200-$400 placeholder
+  const hasExplicitPricingConfig = Boolean(
+    (config as any)?.previewPricing &&
+      (typeof (config as any).previewPricing?.totalMin === "number" ||
+        typeof (config as any).previewPricing?.totalMax === "number" ||
+        typeof (config as any).previewPricing?.min === "number" ||
+        typeof (config as any).previewPricing?.max === "number")
+  );
   const pricingLocale =
     typeof navigator !== "undefined"
       ? ((navigator.languages && navigator.languages[0]) || navigator.language || undefined)
@@ -1487,6 +1637,7 @@ export function ImagePreviewExperience(props: {
   const fetchAccuratePricing = useCallback(async () => {
     if (!instanceId || !sessionId) return;
     if (accuratePricingStatus === "running") return;
+    const heroAtFetchStart = hero;
     setAccuratePricingStatus("running");
 
     try {
@@ -1561,27 +1712,64 @@ export function ImagePreviewExperience(props: {
         typeof imgRange.high === "number"
           ? { low: Math.min(imgRange.low, imgRange.high), high: Math.max(imgRange.low, imgRange.high) }
           : { low: Math.min(totalMin, totalMax), high: Math.max(totalMin, totalMax) };
-      setAccuratePricing((prev) => {
-        // Service range is fixed after first load — slider bounds stay the same; only image estimate updates.
-        const keepServiceRange = prev?.servicePriceRange &&
-          typeof prev.servicePriceRange.low === "number" &&
-          typeof prev.servicePriceRange.high === "number";
-        const finalServiceRange = keepServiceRange && prev?.servicePriceRange
-          ? prev.servicePriceRange
-          : servicePriceRange;
-        return {
-          totalMin: Math.min(totalMin, totalMax),
-          totalMax: Math.max(totalMin, totalMax),
-          currency: currencyRaw || "USD",
-          imagePriceRange,
-          ...(finalServiceRange ? { servicePriceRange: finalServiceRange } : {}),
-        };
-      });
-      setAccuratePricingStatus("complete");
+      const cached: CachedPricing = {
+        totalMin: Math.min(totalMin, totalMax),
+        totalMax: Math.max(totalMin, totalMax),
+        currency: currencyRaw || "USD",
+        imagePriceRange,
+        ...(servicePriceRange ? { servicePriceRange } : {}),
+      };
+
+      // Only update displayed pricing if user is still viewing this hero (avoid overwriting after stack nav)
+      const stillViewingHero = currentHeroRef.current === heroAtFetchStart;
+      if (stillViewingHero) {
+        setAccuratePricing((prev) => {
+          const keepServiceRange =
+            prev?.servicePriceRange &&
+            typeof prev.servicePriceRange.low === "number" &&
+            typeof prev.servicePriceRange.high === "number";
+          const finalServiceRange = keepServiceRange && prev?.servicePriceRange ? prev.servicePriceRange : servicePriceRange;
+          return {
+            ...cached,
+            ...(finalServiceRange ? { servicePriceRange: finalServiceRange } : {}),
+          };
+        });
+        heroForPricingRef.current = heroAtFetchStart;
+        setAccuratePricingStatus("complete");
+      }
+
+      // Always store in cache for when user navigates back (even if they've nav'd away during fetch)
+      const heroIdx = activeRun?.images?.indexOf(heroAtFetchStart) ?? -1;
+      if (heroIdx >= 0 && activeRun?.id && instanceId && sessionId) {
+        setCache((prev) => {
+          const base = prev ?? loadCache(instanceId, sessionId);
+          if (!base) return prev;
+          const nextRuns = (base.runs ?? []).map((r) => {
+            if (r.id !== activeRun.id) return r;
+            const existing = r.imagePricing ?? [];
+            const nextPricing: (CachedPricing | undefined)[] = [...existing];
+            while (nextPricing.length <= heroIdx) nextPricing.push(undefined);
+            nextPricing[heroIdx] = cached;
+            return { ...r, imagePricing: nextPricing };
+          });
+          const next: PreviewCacheV3 = { ...base, runs: nextRuns, updatedAt: Date.now() };
+          saveCache(instanceId, sessionId, next);
+          return next;
+        });
+      }
     } catch {
-      setAccuratePricingStatus("error");
+      if (currentHeroRef.current === heroAtFetchStart) setAccuratePricingStatus("error");
     }
-  }, [accuratePricingStatus, config, effectiveStepDataSoFar, hero, instanceId, sessionId]);
+  }, [
+    accuratePricingStatus,
+    activeRun,
+    config,
+    effectiveStepDataSoFar,
+    hero,
+    instanceId,
+    selectedConceptIndex,
+    sessionId,
+  ]);
   fetchAccuratePricingRef.current = fetchAccuratePricing;
 
   // Default budget to 20% into the range when no value from step data
@@ -1730,7 +1918,8 @@ export function ImagePreviewExperience(props: {
       ? navigationTransition
       : null;
   const stackedPreviewLayers = useMemo(() => {
-    if (!hero || runs.length <= 1) return [] as PreviewStackLayer[];
+    // Only show stack after at least one real generation and when in single view (not gallery).
+    if (!hero || runs.length < 1 || showConceptPicker || isPlaceholderHero) return [] as PreviewStackLayer[];
 
     const layers: PreviewStackLayer[] = [];
     const seen = new Set<string>([hero]);
@@ -1744,14 +1933,30 @@ export function ImagePreviewExperience(props: {
       addLayer(activeNavigationTransition.fromImage, `transition-${activeNavigationTransition.key}`, "transition");
     }
 
+    // In single mode with multiple concepts: stack the other concepts from this run (flipbook effect)
+    const inSingleWithMultiple =
+      activeRun?.images &&
+      activeRun.images.length > 1 &&
+      (selectedConceptIndex != null || viewMode === "single");
+    if (inSingleWithMultiple) {
+      const selIdx = selectedConceptIndex != null && Number.isFinite(selectedConceptIndex)
+        ? Math.max(0, Math.min(selectedConceptIndex, activeRun.images.length - 1))
+        : 0;
+      activeRun.images.forEach((src, idx) => {
+        if (idx !== selIdx) addLayer(src, `concept-${idx}`, "history");
+      });
+    }
+
     // Faded stack on left: previous runs (history) + next runs (upcoming)
-    const previousRuns = runs.slice(0, activeIndex).reverse();
-    const nextRuns = runs.slice(activeIndex + 1);
-    previousRuns.forEach((run) => addLayer(run.images?.[0], `history-${run.id}`, "history"));
-    nextRuns.forEach((run) => addLayer(run.images?.[0], `next-${run.id}`, "history"));
+    if (runs.length > 1) {
+      const previousRuns = runs.slice(0, activeIndex).reverse();
+      const nextRuns = runs.slice(activeIndex + 1);
+      previousRuns.forEach((run) => addLayer(run.images?.[0], `history-${run.id}`, "history"));
+      nextRuns.forEach((run) => addLayer(run.images?.[0], `next-${run.id}`, "history"));
+    }
 
     return layers;
-  }, [activeIndex, activeNavigationTransition, hero, runs]);
+  }, [activeIndex, activeNavigationTransition, activeRun, hero, isPlaceholderHero, runs, selectedConceptIndex, showConceptPicker, viewMode]);
   const goPrev = () => {
     if (!canPrev) return;
     const nextId = runs[activeIndex - 1]?.id;
@@ -1759,7 +1964,14 @@ export function ImagePreviewExperience(props: {
     setCache((prev) => {
       const base = prev ?? loadCache(instanceId, sessionId);
       if (!base) return prev;
-      const next: PreviewCacheV3 = { ...base, activeRunId: nextId, updatedAt: Date.now() };
+      // Stay in single view when navigating between runs; never switch to gallery
+      const next: PreviewCacheV3 = {
+        ...base,
+        activeRunId: nextId,
+        viewMode: "single",
+        selectedConceptIndex: 0,
+        updatedAt: Date.now(),
+      };
       saveCache(instanceId, sessionId, next);
       return next;
     });
@@ -1771,7 +1983,14 @@ export function ImagePreviewExperience(props: {
     setCache((prev) => {
       const base = prev ?? loadCache(instanceId, sessionId);
       if (!base) return prev;
-      const next: PreviewCacheV3 = { ...base, activeRunId: nextId, updatedAt: Date.now() };
+      // Stay in single view when navigating between runs; never switch to gallery
+      const next: PreviewCacheV3 = {
+        ...base,
+        activeRunId: nextId,
+        viewMode: "single",
+        selectedConceptIndex: 0,
+        updatedAt: Date.now(),
+      };
       saveCache(instanceId, sessionId, next);
       return next;
     });
@@ -1857,9 +2076,8 @@ export function ImagePreviewExperience(props: {
     ["--sif-lead-gen-ring" as any]: leadGenRing,
   } as React.CSSProperties;
 
-  // Pricing pill: show whenever we have hero image + pricing config. In dominant layout (full-screen preview),
-  // the pill is the only UI besides the image — user explicitly wants it visible at that stage.
-  const shouldShowPricingPill = Boolean(hero && variant === "hero" && previewPricing);
+  // Pricing pill: show only in single mode (user has chosen one image), not while picking from the 4-tile gallery.
+  const shouldShowPricingPill = Boolean(hero && variant === "hero" && previewPricing && !showConceptPicker);
   const formattedPricingRange = previewPricing
     ? `${formatCurrency(previewPricing.totalMin, { locale: pricingLocale, currency: pricingCurrency })}-${formatCurrency(
         previewPricing.totalMax,
@@ -1886,14 +2104,14 @@ export function ImagePreviewExperience(props: {
   }, [accuratePricing, pricingCurrency, pricingLocale]);
 
   const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
-  // Price pill shows the image-specific price range (totalMin – totalMax) from the API
+  // Price pill shows the image-specific price range from the API. Never show $200-$400 placeholder.
   const pillPrice = formattedAccuratePricingRange
     ? formattedAccuratePricingRange
     : accuratePricingStatus === "error"
-      ? formattedPricingRange || "$•••-$•••"
+      ? hasExplicitPricingConfig ? formattedPricingRange : "$•••-$•••"
       : leadGateEnabled && leadCaptured
         ? "$•••-$•••"
-        : formattedPricingRange || "$•••-$•••";
+        : hasExplicitPricingConfig ? formattedPricingRange : "$•••-$•••";
   const pillLoading = Boolean(leadGateEnabled && leadCaptured && accuratePricingStatus === "running");
   const hasBudgetOverlayControl = Boolean(hero && canUseLiveBudgetSlider && !hideBudgetInOverlay);
   const shouldShowCenteredPricingPill = Boolean(
@@ -1912,10 +2130,43 @@ export function ImagePreviewExperience(props: {
       : "top-[calc(env(safe-area-inset-top)+12px)] sm:top-3";
 
   useEffect(() => {
+    currentHeroRef.current = hero;
+  }, [hero]);
+
+  // When image changes (e.g. stack prev/next), use cached pricing if we have it for this image; otherwise invalidate to refetch.
+  useEffect(() => {
+    if (!hero || !leadCaptured) return;
+    if (hero === heroForPricingRef.current) return;
+    // Look up by hero URL so we match the actual image (stack always shows images[0] per run)
+    const heroIdx = activeRun?.images?.indexOf(hero) ?? -1;
+    const cached = heroIdx >= 0 ? activeRun?.imagePricing?.[heroIdx] : undefined;
+    if (cached && typeof cached.totalMin === "number" && typeof cached.totalMax === "number") {
+      heroForPricingRef.current = hero;
+      skipNextFetchRef.current = true;
+      setAccuratePricing({
+        totalMin: cached.totalMin,
+        totalMax: cached.totalMax,
+        currency: cached.currency || "USD",
+        imagePriceRange: cached.imagePriceRange,
+        servicePriceRange: cached.servicePriceRange,
+      });
+      setAccuratePricingStatus("complete");
+      return;
+    }
+    heroForPricingRef.current = null;
+    setAccuratePricing(null);
+    setAccuratePricingStatus("idle");
+  }, [activeRun, hero, leadCaptured]);
+
+  useEffect(() => {
     if (!leadGateEnabled) return;
     if (!leadCaptured) return;
     if (formattedAccuratePricingRange) return;
     if (accuratePricingStatus !== "idle") return;
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
     void fetchAccuratePricingRef.current?.();
   }, [accuratePricingStatus, formattedAccuratePricingRange, leadCaptured, leadGateEnabled]);
 
@@ -1944,6 +2195,8 @@ export function ImagePreviewExperience(props: {
 				                maxWidth: "100%",
 				                aspectRatio: "1 / 1",
 				                maxHeight: effectivePreviewSize,
+				                // Prevent "starts small then grows" when parent layout hasn't settled yet
+				                ...((showLoader || busy) && { minWidth: 180, minHeight: 180 }),
 				              }}
 			            >
 			              {/* Keep prior previews visually present, but only use the deck animation when browsing history. */}
@@ -2007,7 +2260,9 @@ export function ImagePreviewExperience(props: {
 				              <div
 				                className={cn(
 				                  "absolute inset-0 z-20 overflow-hidden rounded-xl",
-				                  transparentChrome ? "bg-transparent" : "bg-muted/30"
+				                  // Gallery mode: always solid so it never overlays/bleeds into single view.
+				                  // Single mode: transparent ok when chrome is transparent (stack shows to the left).
+				                  transparentChrome && !showConceptPicker ? "bg-transparent" : "bg-muted/30"
 				                )}
 				              >
 	            <input
@@ -2035,10 +2290,10 @@ export function ImagePreviewExperience(props: {
               ) : null}
 
               {/* Top controls: compact layout so actions stay available but less visually busy */}
-              {hero ? (
+              {(hero || showConceptPicker) ? (
                 <div className="absolute inset-x-2 top-2 z-10 flex items-start justify-between pointer-events-none">
                   <div className="pointer-events-auto">
-                    {hero && !busy ? (
+                    {(hero || showConceptPicker) && !busy ? (
                       leadGateEnabled ? (
                         <LeadGenPopover
                           open={showGenerateGate}
@@ -2078,27 +2333,39 @@ export function ImagePreviewExperience(props: {
                         >
                           <button
                             type="button"
-                            disabled={busy}
+                            disabled={busy || !canRegenerateInGallery}
                             onClick={handleRefreshClick}
                             className={overlayButtonClass}
-                            aria-label="Not what you want? Try again"
+                            aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
                             style={{ fontFamily: theme.fontFamily, ...overlayVars }}
                           >
-                            <span className="opacity-65">Not what you want?</span>
-                            <span className="font-medium">Try again</span>
+                            {showConceptPicker ? (
+                              <span className="font-medium">Regenerate</span>
+                            ) : (
+                              <>
+                                <span className="opacity-65">Not what you want?</span>
+                                <span className="font-medium">Try again</span>
+                              </>
+                            )}
                           </button>
                         </LeadGenPopover>
                       ) : (
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={busy || !canRegenerateInGallery}
                           onClick={handleRefreshClick}
                           className={overlayButtonClass}
-                          aria-label="Not what you want? Try again"
+                          aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
                           style={{ fontFamily: theme.fontFamily, ...overlayVars }}
                         >
-                          <span className="opacity-65">Not what you want?</span>
-                          <span className="font-medium">Try again</span>
+                          {showConceptPicker ? (
+                            <span className="font-medium">Regenerate</span>
+                          ) : (
+                            <>
+                              <span className="opacity-65">Not what you want?</span>
+                              <span className="font-medium">Try again</span>
+                            </>
+                          )}
                         </button>
                       )
                     ) : null}
@@ -2108,8 +2375,11 @@ export function ImagePreviewExperience(props: {
                     className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-[var(--sif-overlay-bg)] p-1 text-white shadow-sm backdrop-blur-md"
                     style={{ fontFamily: theme.fontFamily, ...overlayVars }}
                   >
-                    {leadGateEnabled ? (
-                      <LeadGenPopover
+                    {/* Download and expand only in single view — not meaningful in gallery picker mode */}
+                    {!showConceptPicker ? (
+                      <>
+                        {leadGateEnabled ? (
+                          <LeadGenPopover
                         open={showDownloadGate}
                         onOpenChange={(v) => {
                           if (!v) {
@@ -2152,37 +2422,144 @@ export function ImagePreviewExperience(props: {
                           <Download className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         </button>
                       </LeadGenPopover>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy || !hero}
-                        onClick={handleDownloadClick}
-                        className={overlayIconButtonClass}
-                        aria-label="Download preview"
-                        title="Download preview"
-                      >
-                        <Download className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                      </button>
-                    )}
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy || !hero}
+                            onClick={handleDownloadClick}
+                            className={overlayIconButtonClass}
+                            aria-label="Download preview"
+                            title="Download preview"
+                          >
+                            <Download className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                          </button>
+                        )}
 
-                    <button
-                      type="button"
-                      onClick={openLightbox}
-                      disabled={!hero}
-                      aria-label="View larger"
-                      title="View larger"
-                      className={overlayIconButtonClass}
-                    >
-                      <Maximize2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                    </button>
+                        <button
+                          type="button"
+                          onClick={openLightbox}
+                          disabled={!hero}
+                          aria-label="View larger"
+                          title="View larger"
+                          className={overlayIconButtonClass}
+                        >
+                          <Maximize2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                        </button>
+                      </>
+                    ) : null}
+
+                    {activeRun?.images && activeRun.images.length > 1 ? (
+                      showConceptPicker ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCache((prev) => {
+                              const base = prev ?? loadCache(instanceId, sessionId);
+                              if (!base) return prev;
+                              const next: PreviewCacheV3 = {
+                                ...base,
+                                selectedConceptIndex: 0,
+                                viewMode: "single",
+                                updatedAt: Date.now(),
+                              };
+                              saveCache(instanceId, sessionId, next);
+                              return next;
+                            });
+                          }}
+                          aria-label="View single"
+                          title="View single"
+                          className={overlayIconButtonClass}
+                        >
+                          <ImageIcon className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCache((prev) => {
+                              const base = prev ?? loadCache(instanceId, sessionId);
+                              if (!base) return prev;
+                              const next: PreviewCacheV3 = {
+                                ...base,
+                                viewMode: "gallery",
+                                updatedAt: Date.now(),
+                              };
+                              saveCache(instanceId, sessionId, next);
+                              return next;
+                            });
+                          }}
+                          aria-label="Back to gallery"
+                          title="Back to gallery"
+                          className={overlayIconButtonClass}
+                        >
+                          <LayoutGrid className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                        </button>
+                      )
+                    ) : null}
                   </div>
                 </div>
               ) : null}
 
-	            <div className="h-full w-full">
-	              {hero ? (
+	            {/* Two distinct modes: gallery (4-tile picker) vs single (hero image). Only one renders. */}
+	            <div className="h-full w-full" data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}>
+	              {showConceptPicker && activeRun?.images?.length ? (
 	                <div
-	                  className="h-full w-full cursor-zoom-in"
+	                  className="h-full w-full flex flex-col min-h-0 isolate"
+	                  style={{
+	                    gap: (designConfig as any)?.gallery_spacing ?? 8,
+	                    padding: (designConfig as any)?.gallery_spacing ?? 8,
+	                  }}
+	                >
+	                  <p
+	                    className="text-center text-xs sm:text-sm font-medium"
+	                    style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+	                  >
+	                    Choose a starter image that&apos;s roughly close enough to start with
+	                  </p>
+	                  <div
+	                    className="flex-1 grid grid-cols-2 min-h-[220px]"
+	                    style={{
+	                      gridTemplateRows: "1fr 1fr",
+	                      gap: (designConfig as any)?.gallery_spacing ?? 8,
+	                    }}
+	                  >
+	                    {activeRun.images.slice(0, CONCEPT_GALLERY_COUNT).map((src, idx) => (
+	                      <button
+	                        key={idx}
+	                        type="button"
+	                        onClick={() => {
+	                          setCache((prev) => {
+	                            const base = prev ?? loadCache(instanceId, sessionId);
+	                            if (!base) return prev;
+	                            const next: PreviewCacheV3 = {
+	                              ...base,
+	                              selectedConceptIndex: idx,
+	                              viewMode: "single",
+	                              updatedAt: Date.now(),
+	                            };
+	                            saveCache(instanceId, sessionId, next);
+	                            return next;
+	                          });
+	                        }}
+	                        className="relative w-full h-full min-h-0 overflow-hidden rounded-lg border-2 border-transparent hover:border-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-colors"
+	                        style={{
+	                          borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
+	                        }}
+	                        aria-label={`Select option ${idx + 1}`}
+	                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt={`Concept ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+	                      </button>
+	                    ))}
+	                  </div>
+	                </div>
+	              ) : hero ? (
+	                <div
+	                  className="h-full w-full cursor-zoom-in isolate"
 	                  role="button"
 	                  tabIndex={0}
 	                  aria-label="Open larger preview"
@@ -2202,7 +2579,7 @@ export function ImagePreviewExperience(props: {
 	                  />
 	                </div>
 	              ) : (
-	                <div className="h-full w-full bg-muted/40" />
+	                <div className="h-full w-full bg-muted/40 isolate" />
 	              )}
 	            </div>
 
@@ -2357,21 +2734,30 @@ export function ImagePreviewExperience(props: {
                   showRefreshMask ? "z-20 bg-black/15" : null
                 )}
               >
-                <FormLoader
+                <AdventureLoader
+                  phase={
+                    (cache?.message?.toLowerCase().includes("refreshing") || hero)
+                      ? "preview_refreshing"
+                      : cache?.message?.toLowerCase().includes("fine-tuning")
+                        ? "preview_refining"
+                        : "preview_generating"
+                  }
                   variant="pill"
                   size="sm"
                   tone="overlay"
+                  active={busy}
+                  messageOverride={cache?.message || (hero ? "Refreshing your design + pricing…" : "Generating your design + pricing for you…")}
                   className="bg-slate-900/75"
                   style={{ ...overlayVars }}
-                  message={cache?.message || (hero ? "Refreshing your design + pricing…" : "Generating your design + pricing for you…")}
-                >
-                  <div
-                    className="rounded-full bg-white/15 px-2 py-0.5 text-[0.625rem] font-medium tracking-wide text-white/80 shrink-0 ring-1 ring-white/15"
-                    style={{ fontFamily: theme.fontFamily }}
-                  >
-                    {formattedLoaderCountdown} left
-                  </div>
-                </FormLoader>
+                  countdown={
+                    <div
+                      className="rounded-full bg-white/15 px-2 py-0.5 text-[0.625rem] font-medium tracking-wide text-white/80 shrink-0 ring-1 ring-white/15"
+                      style={{ fontFamily: theme.fontFamily }}
+                    >
+                      {formattedLoaderCountdown} left
+                    </div>
+                  }
+                />
               </div>
             ) : null}
 
@@ -2402,9 +2788,12 @@ export function ImagePreviewExperience(props: {
                 <div className="absolute inset-0 z-30 flex items-end justify-end pb-4 pr-4 pointer-events-none">
                   <div
                     className={cn(
-                      "pointer-events-auto overflow-visible backdrop-blur-xl",
-                      "w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl shadow-[0_10px_28px_rgba(15,23,42,0.24)]",
-                      showCenteredPricingForm ? "min-h-0" : "h-auto"
+                      "pointer-events-auto overflow-visible backdrop-blur-xl transition-[width] duration-200",
+                      showCenteredPricingForm
+                        ? "w-[min(26rem,calc(100vw-1.5rem))] rounded-2xl"
+                        : "w-[min(11.25rem,calc(100vw-1.5rem))] rounded-xl",
+                      showCenteredPricingForm ? "min-h-0" : "h-auto",
+                      "shadow-[0_10px_28px_rgba(15,23,42,0.24)]"
                     )}
                     style={{
                       backgroundColor: pillBg,
@@ -2412,7 +2801,7 @@ export function ImagePreviewExperience(props: {
                     }}
                   >
                     {showCenteredPricingForm ? (
-                      <div className="relative flex w-full px-3 py-3">
+                      <div className="relative flex w-full px-5 py-4">
                         <button
                           type="button"
                           onClick={() => {
@@ -2427,13 +2816,13 @@ export function ImagePreviewExperience(props: {
                             }
                             setShowCenteredPricingForm(false);
                           }}
-                          className="absolute top-2 right-2 z-10 flex size-8 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+                          className="absolute top-2.5 right-2.5 z-10 flex size-9 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
                           aria-label="Back"
                         >
                           <ArrowLeft className="size-4" strokeWidth={2.5} />
                         </button>
-                        <div className="box-border flex w-full flex-col gap-3" style={{ fontFamily: theme.fontFamily, ...pricingPillVars }}>
-                          <div className="text-[0.8125rem] font-semibold leading-snug text-[var(--sif-lead-gen-fg)]">
+                        <div className="box-border flex w-full flex-col gap-1.5 pr-12" style={{ fontFamily: theme.fontFamily, ...pricingPillVars }}>
+                          <div className="text-[0.9375rem] font-semibold leading-snug text-[var(--sif-lead-gen-fg)]">
                             {centeredPricingStep === "email"
                               ? "Where should we send the pricing to?"
                               : centeredPricingStep === "name"
@@ -2443,14 +2832,14 @@ export function ImagePreviewExperience(props: {
 
                           {centeredPricingStep === "email" ? (
                             <div className="relative">
-                              <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
+                              <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
                               <Input
                                 autoFocus
                                 value={centeredPricingEmail}
                                 onChange={(e) => setCenteredPricingEmail(e.target.value)}
                                 placeholder="you@company.com"
                                 inputMode="email"
-                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-9 pr-[36%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-10 pr-[36%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingEmailSubmit();
@@ -2461,7 +2850,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidEmail(centeredPricingEmail)}
                                 onClick={() => void handleCenteredPricingEmailSubmit()}
-                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 Continue
@@ -2475,7 +2864,7 @@ export function ImagePreviewExperience(props: {
                                 onChange={(e) => setCenteredPricingName(e.target.value)}
                                 placeholder="Jane Appleseed"
                                 autoComplete="name"
-                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 pr-[36%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 pr-[36%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingNameSubmit();
@@ -2486,7 +2875,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidFullName(centeredPricingName)}
                                 onClick={() => void handleCenteredPricingNameSubmit()}
-                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 Continue
@@ -2494,14 +2883,14 @@ export function ImagePreviewExperience(props: {
                             </div>
                           ) : (
                             <div className="relative">
-                              <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
+                              <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
                               <Input
                                 autoFocus
                                 value={centeredPricingPhone}
                                 onChange={(e) => setCenteredPricingPhone(formatPhoneInput(e.target.value).display)}
                                 placeholder="(555) 123-4567"
                                 inputMode="tel"
-                                className="h-9 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-9 pr-[42%] text-[0.8125rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-10 pr-[42%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                 style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") void handleCenteredPricingPhoneSubmit();
@@ -2512,7 +2901,7 @@ export function ImagePreviewExperience(props: {
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead}
                                 onClick={() => void handleCenteredPricingPhoneSubmit()}
-                                className="absolute right-1 top-1/2 flex h-7 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3 text-[0.75rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
                                 style={{ fontFamily: theme.fontFamily }}
                               >
                                 {isSubmittingCenteredPricingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : "Show pricing"}
@@ -2521,9 +2910,9 @@ export function ImagePreviewExperience(props: {
                           )}
 
                           {centeredPricingError ? (
-                            <div className="text-[0.75rem] leading-relaxed text-red-200">{centeredPricingError}</div>
+                            <div className="text-[0.8125rem] leading-relaxed text-red-200 -mt-0.5">{centeredPricingError}</div>
                           ) : (
-                            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 text-[0.7rem] leading-relaxed text-[var(--sif-lead-gen-muted)]">
+                            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 text-[0.8125rem] leading-relaxed text-[var(--sif-lead-gen-muted)] -mt-0.5">
                               <span>
                                 {centeredPricingStep === "email"
                                   ? "Instant reveal after sending."
@@ -2651,10 +3040,10 @@ export function ImagePreviewExperience(props: {
 				                    {shouldShowBottomPricingPill ? (
 				                      <div
 				                        data-pricing-pill
-				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-2xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[8rem] transition-[max-width,padding] duration-300 ease-out"
+				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[10rem] transition-[max-width,padding] duration-300 ease-out"
 			                        style={{
-			                          maxWidth: 'clamp(45%, 72% - 7vw, 50%)',
-			                          padding: 'clamp(0.25rem, 1.5vw, 0.625rem) clamp(0.5rem, 2vw, 0.625rem)',
+			                          maxWidth: 'clamp(48%, 70% - 6vw, 58%)',
+			                          padding: 'clamp(0.4rem, 2vw, 0.75rem) clamp(0.6rem, 2.5vw, 0.85rem)',
 			                          backgroundColor: pillBg,
 			                          backdropFilter: 'blur(12px)',
 			                          WebkitBackdropFilter: 'blur(12px)',

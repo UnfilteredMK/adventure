@@ -28,6 +28,7 @@ from programs.form_pipeline.constraints import extract_token_budget
 from programs.form_pipeline.context_builder import build_context
 from programs.form_pipeline.utils import _compact_json
 from programs.question_planner.cache import planner_cache_key
+from programs.question_planner.form_skeleton import COPY_ONLY_SLOTS, get_next_slot_from_asked
 from programs.question_planner.plan_parsing import derive_step_id_from_key, extract_plan_items, normalize_plan_key
 from programs.question_planner.program import QuestionPlannerProgram
 from programs.question_planner.renderer.cache import render_cache_key
@@ -40,6 +41,12 @@ from programs.question_planner.renderer.validation import (
     _validate_mini,
 )
 from api.payload_extractors import extract_session_id
+
+# Copy-only keys -> step_id for deterministicCopy response
+_COPY_ONLY_KEY_TO_STEP_ID: dict[str, str] = {
+    "style_direction": "step-style-direction",
+    "budget_range": "step-budget-range",
+}
 
 # Plan keys for which we convert multiple_choice to image_choice_grid (option images).
 _OPTION_IMAGE_STEP_KEYS: frozenset[str] = frozenset({
@@ -65,6 +72,7 @@ _OPTION_IMAGE_KEY_DENY_SUBSTRINGS: tuple[str, ...] = (
     "timeline",
     "budget",
     "pricing",
+    "project_type",  # Scope qualifier – no option images; keep text-only
 )
 _OPTION_IMAGE_KEY_ALLOW_SUBSTRINGS: tuple[str, ...] = (
     "style",
@@ -797,20 +805,48 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
         if len(sliced) >= max_steps_this_call:
             break
 
+    # Extract copy-only items (style, budget) -> deterministicCopy; only scope items go to renderer
+    deterministic_copy: Dict[str, Any] = {}
+    sliced_for_render: List[Dict[str, Any]] = []
+    for item in sliced:
+        key = normalize_plan_key(item.get("key"))
+        step_id = _COPY_ONLY_KEY_TO_STEP_ID.get(key) if key else None
+        if step_id:
+            copy_data: Dict[str, Any] = {}
+            q = str(item.get("question") or item.get("intent") or "").strip()
+            if q:
+                copy_data["question"] = q
+            if key == "style_direction":
+                mn = item.get("min_selections") or item.get("minSelections")
+                mx = item.get("max_selections") or item.get("maxSelections")
+                if mn is not None:
+                    copy_data["min_selections"] = int(mn) if isinstance(mn, (int, float)) else 3
+                if mx is not None:
+                    copy_data["max_selections"] = int(mx) if isinstance(mx, (int, float)) else 5
+            elif key == "budget_range":
+                sub = str(item.get("subtext") or "").strip()
+                if sub:
+                    copy_data["subtext"] = sub
+                copy_data["headline"] = q or "What budget range should we design around?"
+            if copy_data:
+                deterministic_copy[step_id] = copy_data
+        else:
+            sliced_for_render.append(item)
+
     if os.getenv("AI_FORM_DEBUG") == "true":
         try:
             print(
                 (
                     f"[FormPipeline] requestId={request_id} "
                     f"askedStepIds={len(asked_ids)} rawPlanLen={len(str(raw_plan or '').strip())} "
-                    f"fullPlanItems={len(full_plan_items)} mergedPlanItems={len(merged_plan_items)} slicedPlanItems={len(sliced)}"
+                    f"fullPlanItems={len(full_plan_items)} mergedPlanItems={len(merged_plan_items)} slicedPlanItems={len(sliced)} renderItems={len(sliced_for_render)} detCopy={bool(deterministic_copy)}"
                 ),
                 flush=True,
             )
             if not full_plan_items:
                 snippet = str(raw_plan or "").strip().replace("\n", "\\n")[:280]
                 print(f"[FormPipeline] requestId={request_id} plannerRawPlanSnippet={snippet}", flush=True)
-            elif full_plan_items and not sliced:
+            elif full_plan_items and not sliced_for_render and not deterministic_copy:
                 planned_ids_preview = []
                 for it in merged_plan_items[:12]:
                     k = normalize_plan_key(it.get("key"))
@@ -827,7 +863,7 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Only accept renderer outputs that match planned ids (prevents hallucinated steps like confirmation).
     planned_id_order: List[str] = []
     planned_ids: set[str] = set()
-    for item in sliced:
+    for item in sliced_for_render:
         if isinstance(item, dict):
             k = normalize_plan_key(item.get("key"))
             if k:
@@ -862,7 +898,7 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
     option_image_stats: Dict[str, int] = {}
 
     _t0 = time.time()
-    plan_json_for_render = _compact_json({"plan": sliced})
+    plan_json_for_render = _compact_json({"plan": sliced_for_render})
     render_cache_key = (
         _render_cache_key(
             session_id=session_id,
@@ -887,14 +923,14 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if not render_cache_hit:
         parsed_steps = render_plan_items_to_mini_steps(
-            sliced,
+            sliced_for_render,
             choice_option_min=ctx.get("choice_option_min"),
             choice_option_max=ctx.get("choice_option_max"),
             choice_option_target=ctx.get("choice_option_target"),
             budget_bounds_hint=ctx.get("budget_bounds_hint"),
         )
-        if generate_option_images and parsed_steps and sliced:
-            option_image_stats = _convert_option_images_for_steps(parsed_steps, sliced, ctx, session_id=session_id) or {}
+        if generate_option_images and parsed_steps and sliced_for_render:
+            option_image_stats = _convert_option_images_for_steps(parsed_steps, sliced_for_render, ctx, session_id=session_id) or {}
     t_renderer_ms = int((time.time() - _t0) * 1000)
 
     ui_types = _select_ui_types()
@@ -938,8 +974,8 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Renderer backstop for deterministic suffix items.
     # If the renderer fails to emit required suffix steps, inject minimal validated steps.
-    if sliced and len(emitted) < len(sliced):
-        for plan_item in sliced:
+    if sliced_for_render and len(emitted) < len(sliced_for_render):
+        for plan_item in sliced_for_render:
             if not isinstance(plan_item, dict):
                 continue
             if plan_item.get("deterministic") is not True:
@@ -950,7 +986,7 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
             sid = derive_step_id_from_key(key)
             if not sid or sid in taken_ids:
                 continue
-            if len(emitted) >= len(sliced):
+            if len(emitted) >= len(sliced_for_render):
                 break
 
             t = str(plan_item.get("type_hint") or "").strip().lower()
@@ -994,6 +1030,8 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
         "miniSteps": emitted,
         "stepDataSoFar": dict(step_data_so_far),
     }
+    if deterministic_copy:
+        meta["deterministicCopy"] = deterministic_copy
 
     if _include_response_meta(payload):
         meta["debugContext"] = {
@@ -1003,12 +1041,12 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
             "servicesSummaryLen": len(str(ctx.get("services_summary") or ctx.get("grounding_summary") or "")),
             "companySummaryLen": len(str(ctx.get("company_summary") or "")),
             "allowedMiniTypes": allowed_mini_types,
-            "maxSteps": len(sliced),
+            "maxSteps": len(sliced_for_render),
             "plannerModel": planner_lm_cfg.get("modelName"),
             "rendererModel": "deterministic",
             "plannerCacheHit": planner_cache_hit,
             "renderCacheHit": render_cache_hit,
-            "plannedItems": len(sliced),
+            "plannedItems": len(sliced_for_render),
             "renderedJsonlLines": len(parsed_steps),
             "emittedSteps": len(emitted),
             "tokenBudgetTotal": token_budget_total,
@@ -1051,7 +1089,7 @@ def next_steps_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
                         "rendererModel": "deterministic",
                         "plannerCacheHit": bool(planner_cache_hit),
                         "renderCacheHit": bool(render_cache_hit),
-                        "plannedItems": int(len(sliced)),
+                        "plannedItems": int(len(sliced_for_render)),
                         "renderedJsonlLines": int(len(parsed_steps)),
                         "emittedSteps": int(len(emitted)),
                     },

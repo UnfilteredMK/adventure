@@ -398,14 +398,15 @@ def render_plan_items_to_mini_steps(
                 # Hard backstop: choice steps require options for schema validation.
                 options = _coerce_options(["Not sure yet"])
 
+            step_type = type_hint if type_hint in ("segmented_choice", "chips_multi", "image_choice_grid") else "multiple_choice"
             step = {
                 "id": step_id,
-                "type": "multiple_choice",
+                "type": step_type,
                 "question": question,
                 "options": options,
             }
 
-        if step.get("type") == "multiple_choice":
+        if step.get("type") in ("multiple_choice", "segmented_choice", "chips_multi", "image_choice_grid"):
             allow_multiple = item.get("allow_multiple")
             if allow_multiple is None:
                 allow_multiple = item.get("allowMultiple")

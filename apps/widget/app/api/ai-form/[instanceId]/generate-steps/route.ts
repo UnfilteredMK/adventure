@@ -804,9 +804,8 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 	        const payload = {
           // Forward useCase to the Python service (prefer request value when present).
           useCase: effectiveUseCase,
-          // Generate option thumbnails in the upstream batch so image-choice steps
-          // can render with images immediately when delivered to the client.
-          optionImages: true,
+          // Option images disabled for now; keep capability for future use.
+          optionImages: false,
           // 1. SESSION (Required)
           session: {
             sessionId: body.sessionId,
@@ -1143,26 +1142,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 
         // Planning is not part of the contract; this route only returns question steps + optional usage.
 
-        // Wire must-have copy into deterministic steps (budget + uploads).
-            // If the model returned no question steps, emit a single safe fallback question so the UI can progress.
-	            // This protects against upstream responses that include no question steps.
-	            if (streamMiniStepCount === 0 && callsRemaining > 0) {
-              const serviceLabel =
-	                (effectiveServiceName && String(effectiveServiceName).trim()) ||
-	                (effectiveIndustryName && String(effectiveIndustryName).trim()) ||
-                String(inferredIndustry || "this project");
-              const fallbackStep = {
-                id: "step-project-type",
-                type: "segmented_choice",
-                question: `What best describes the ${serviceLabel} work you need?`,
-                options: ["New / install", "Update / redesign", "Repair / fix", "Not sure"],
-                allowMultiple: false,
-              };
-              emitMiniStep(fallbackStep);
-              streamMiniStepCount++;
-            }
-
-		        // CRITICAL: Only send structural steps when readyForImageGen is true
+        // CRITICAL: Only send structural steps when readyForImageGen is true
 		        // This prevents upload steps from appearing too early (e.g., on step 1)
 		        const isFinalBatchByCap = (batchIndex + 1) >= maxCalls;
 		        const readyForImageGen = Boolean((result as any)?.readyForImageGen) || isFinalBatchByCap;
@@ -1285,10 +1265,17 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 	            : [];
 	      const sanitizedMiniSteps = Array.isArray(miniSteps) ? miniSteps.map(sanitizeMiniStep) : [];
 			    const lmUsage = upstreamJson?.lmUsage ?? null;
+		    const deterministicCopy =
+		      upstreamJson &&
+		      typeof (upstreamJson as any)?.deterministicCopy === "object" &&
+		      !Array.isArray((upstreamJson as any).deterministicCopy)
+		        ? (upstreamJson as any).deterministicCopy
+		        : undefined;
 		    const responsePayload = {
 		        requestId,
 		        schemaVersion,
 		        miniSteps: sanitizedMiniSteps,
+		        deterministicCopy: deterministicCopy ?? undefined,
 		        lmUsage,
 	        // Backend-owned capability flags (frontend must be reactive, never predictive).
 	        capabilities: {

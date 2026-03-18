@@ -2,16 +2,23 @@
 Prompt library used by DSPy signatures.
 
 This module is intentionally "fixed" and reusable across programs.
+Vertical-agnostic: adapt to services_summary; no hardcoded industries.
 """
 
 from __future__ import annotations
 
 from typing import Iterable, List
 
+from programs.question_planner.form_skeleton import (
+    BANNED_PRE_CONCEPT_KEYS,
+    SCOPE_KEYS,
+    SKELETON_DESCRIPTION,
+)
+
 
 CONTEXT_JSON_FIELDS = """`planner_context_json` typically includes:
 - **Service context**: `services_summary` (primary), plus optional `industry` and `service`
-- **State/memory**: `answered_qa` (list of {stepId, question, answer}), `asked_step_ids` (dedupe)
+- **What's done** (used to find the next gap): `asked_step_ids`, `answered_qa` (list of {stepId, question, answer})
 - **Hints/constraints** (hint-only; do not overfit):
   - `allowed_mini_types_hint`
   - `choice_option_min` / `choice_option_max` / `choice_option_target`
@@ -53,31 +60,33 @@ def _planner_goal_and_instructions() -> str:
             "## Platform goal\n"
             "This is an AI Pre-Design & Sales Conversion Platform. The form collects context through questions\n"
             "to generate visual pre-designs (AI images) that help prospects visualize their project before getting\n"
-            "a quote. The goal is visual alignment integrated with quoting—prospects become \"visual buyers\"\n"
-            "who are more qualified before the first conversation.\n"
+            "a quote. The goal is visual alignment integrated with quoting.\n"
             "\n"
             "## Role\n"
-            "You generate the *next best questions* to ask. Your job is to select the minimum set of questions that\n"
-            "maximizes downstream success for the given `platform_goal`, while staying aligned to\n"
-            "the specific service context (industry/service + service_summary + company_summary (if provided)).\n"
+            "You do NOT plan the flow. The skeleton is fixed. You FILL GAPS: given `asked_step_ids` and "
+            "`answered_qa`, output the next slot that fits the skeleton and is not yet done. "
+            "Each slot has a PART CONTRACT: some need full output (copy + options), others need copy only.\n"
+            "\n"
+            "## Form skeleton (per-slot contract)\n"
+            f"{SKELETON_DESCRIPTION}\n"
+            "\n"
+            "## Per-slot output rules\n"
+            "- **style_direction** (copy only): Output key=style_direction, question, min_selections (3–5), max_selections (3–5). "
+            "NO option_hints (options come from DB). Wording like \"Pick 3–5 styles that inspire you\" or similar.\n"
+            f"- **scope** (full): Output key in {', '.join(SCOPE_KEYS)}. Include question AND option_hints. "
+            "Adapt options to services_summary (vertical-agnostic).\n"
+            "- **budget_range** (copy only): Output key=budget_range, question (headline), subtext. "
+            "NO min/max/options (range comes from pricing API). Slider component is fixed.\n"
+            "- **service / upload**: Output empty (deterministic).\n"
+            f"- Do NOT use: {', '.join(BANNED_PRE_CONCEPT_KEYS)} (refinements phase).\n"
             "\n"
             "## How to behave\n"
-            "- Vertical-agnostic: your approach should work for any industry/service.\n"
-            "- Do not copy an industry's specifics from examples unless the current `services_summary` calls for it.\n"
-            "- MAXIMUM 4 questions before concept. Keep the form short to show value early.\n"
-            "- Funnel order (STRICT): the frontend already asked style_direction deterministically, so start with project_parts/update_areas. No other pre-concept steps.\n"
-            "- Do NOT add granular steps like fixtures, lighting_style, storage, materials, finish, countertops, flooring.\n"
-            "  Those details are for the refinements phase AFTER the concept appears. Before concept: only scope here; style and budget are deterministic frontend steps.\n"
-            "- Ask 1 scoping question (project_parts / update_areas / remodel_intensity) to narrow what the user wants done.\n"
-            "  Use keys like project_parts, update_areas, or remodel_intensity — NOT 'scope' (banned).\n"
-            "- Budget is collected by a deterministic widget step, not by planner-generated questions.\n"
-            "- Do not generate a `budget_range` plan item.\n"
-            "- Avoid operational logistics like permits, timeline, or contractor scheduling (unless explicitly required by the service context).\n"
-            "- Use memory (`answered_qa`, `asked_step_ids`) to avoid repeats and stay consistent.\n"
-            "- Use constraints/hints (allowed types, option targets, batch constraints, required uploads) as guidance, not rigid requirements.\n"
+            "- Look at asked_step_ids and answered_qa. What's the next skeleton slot that isn't done?\n"
+            "- Vertical-agnostic: adapt copy and options to `services_summary`; don't invent facts.\n"
+            "- Use `copy_context` for tone and wording style.\n"
             "\n"
             "## Output boundary\n"
-            "You do NOT output UI steps. You output a plan (keys + user-facing question intent) for what to ask next."
+            "You output a plan (keys + question + per-slot fields). For copy-only slots, omit option_hints and range."
         ),
     )
 
@@ -133,40 +142,25 @@ def build_planner_prompt() -> str:
                 "Use `services_summary` to keep questions/wording relevant; avoid invented facts.",
                 "Avoid overly-generic buckets unless unavoidable (e.g. 'Basic/Mid/High/Luxury').",
                 "For multi-select lists, keep options tightly relevant (don’t mix unrelated categories).",
-                "ORDERING (IMPORTANT): The frontend already handles the style/image grid deterministically before DSPy runs.\n"
-                "  - Your first generated step must be project_parts or update_areas or remodel_intensity (scope: what to update).\n"
-                "  - Do NOT generate style_direction.\n"
-                "  - Do NOT add fixture_preference, lighting_style, storage_style, materials, finish, countertops, flooring, etc.\n"
-                "  - Those granular choices belong in the refinements phase after the concept appears.",
-                "KEYS (IMPORTANT): For the pre-concept funnel, use ONLY these keys:\n"
-                "  - project_parts or update_areas or remodel_intensity (scope)\n"
-                "  - Do NOT use: style_direction, fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
-                "STYLE_GRID (CRITICAL): Never generate style_direction.\n"
-                "  - The frontend owns the style/image selector step and already has its options/images.\n"
-                "  - Start with the next planning question after style has been answered.",
+                "FILL GAPS: Output only the next slot(s). If next slot is service/upload, output empty.",
+                f"Scope keys for full output: {', '.join(SCOPE_KEYS)}. Copy-only keys: style_direction, budget_range. Banned: {', '.join(BANNED_PRE_CONCEPT_KEYS)}.",
             ],
         ),
         _bullets(
             "REQUIRED RENDER HINTS:",
             [
-                "In this service, pre-concept planning questions are rendered as `multiple_choice`.\n"
-                "For `multiple_choice` items, every plan item MUST include `option_hints`.\n"
-                "  - Format: either a list of strings (labels) OR a list of objects {label, value?, image_prompt?, price_tier?}.\n"
-                "  - For image-backed choices after the first step (e.g. material_preference, shape), include short `image_prompt` per option so each option can be rendered as an image (e.g. \"modern minimalist kitchen cabinets\"). Keep `label` as plain English for overlay.\n"
-                "  - REQUIRED: For material_preference, finish_style, product/component choices, and any quality-tiered option set, ALWAYS include `price_tier` on every option.\n"
-                "    Use: '$' = budget/builder-grade, '$$' = mid-range, '$$$' = premium, '$$$$' = luxury/custom.\n"
-                "    The `image_prompt` for each option MUST reflect its price tier visually — e.g.:\n"
-                "      '$' option: \"vinyl plank flooring, builder-grade, basic fixtures\" (not luxury materials)\n"
-                "      '$$' option: \"engineered hardwood, mid-range quartz countertops\"\n"
-                "      '$$$' option: \"solid hardwood, natural stone, semi-custom cabinetry\"\n"
-                "      '$$$$' option: \"wide-plank white oak, Calacatta marble, bespoke millwork\"\n"
-                "    The images generated for each option must LOOK different in material quality, not just style.\n"
-                "  - DO NOT include `price_tier` on irrelevant questions (e.g., scheduling, logistics, pure yes/no, or non-cost-sensitive preferences).\n"
-                "  - For `remodel_intensity`, prefer labels like \"Light refresh\" / \"Partial remodel\" / \"Full remodel\".\n"
-                "  - For other steps: keep to ~3–8 options; include 'Not sure yet' / 'Other' only when it makes sense.",
-                "If a question should allow selecting multiple answers, set `allow_multiple: true`.",
-                "If you want to support an 'Other' free-text option, set `allow_other: true` and optionally `other_label` / `other_placeholder`.",
-                "These are hints only: do NOT output full UI step schemas (no `id`, no `options` array, no frontend-only fields).",
+                "For SCOPE (full) steps: type_hint=multiple_choice or segmented_choice, MUST include option_hints.\n"
+                "  - project_type (ALWAYS first scope question): Use services_summary to pick VERTICAL-SPECIFIC options. "
+                "Example – Bathroom: Shower+tub+vanity overhaul, Full remodel, Flooring and tiling only, Paint+fixtures refresh, New bathroom, Not sure. "
+                "Example – Kitchen: Cabinets+counters, Full remodel, Backsplash+appliances, New build, Not sure. "
+                "Do NOT use generic New/install, Update/redesign. Be specific to what that vertical actually does.\n"
+                "  - project_parts/update_areas: concise labels for what user can update (e.g. area names, room types).\n"
+                "  - remodel_intensity: e.g. \"Light refresh\" / \"Partial\" / \"Full redesign\".\n"
+                "  - Keep ~3–8 options; include 'Other' when appropriate.",
+                "For style_direction (copy only): question + min_selections + max_selections. NO option_hints.",
+                "For budget_range (copy only): question (headline) + subtext. NO min/max/option_hints.",
+                "If scope question allows multiple answers, set `allow_multiple: true`.",
+                "For 'Other' free-text, set `allow_other: true` and optionally `other_label` / `other_placeholder`.",
             ],
         ),
     )

@@ -598,14 +598,28 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
     elif is_edit:
         # EDIT mode: the reference photo is the BEFORE state — generate the fully-completed AFTER.
         lines.append(SINGLE_SCENE_GUARDRAIL)
-        lines.append(
-            f"The uploaded photo is the BEFORE state. Generate the photorealistic AFTER state: "
-            f"this exact space once a professional {subject} project has been fully completed."
-        )
-        lines.append(
-            "Hard anchor constraint: preserve camera framing/perspective, scene geometry, lighting direction, and "
-            "all unchanged structural elements from the reference image."
-        )
+        generation_intent_raw = str(
+            payload.get("generationIntent") or payload.get("generation_intent") or ""
+        ).strip().lower().replace("-", "_")
+        is_initial_overhaul = generation_intent_raw == "initial"
+
+        if is_initial_overhaul:
+            lines.append(
+                "MAKE A COMPLETE OVERHAUL. The uploaded photo is the BEFORE state. Generate the fully-completed "
+                "AFTER state with ALL surfaces, fixtures, and finishes replaced and upgraded. Apply style and budget "
+                "constraints to the renovated result. Preserve ONLY: room layout, camera angle, structural walls. "
+                "REPLACE everything else."
+            )
+        else:
+            lines.append(
+                f"The uploaded photo is the BEFORE state. Generate the photorealistic AFTER state: "
+                f"this exact space once a professional {subject} project has been fully completed."
+            )
+        if not is_initial_overhaul:
+            lines.append(
+                "Hard anchor constraint: preserve camera framing/perspective, scene geometry, lighting direction, and "
+                "all unchanged structural elements from the reference image."
+            )
         if service_summary:
             lines.append(
                 f"Service context: {service_summary} "

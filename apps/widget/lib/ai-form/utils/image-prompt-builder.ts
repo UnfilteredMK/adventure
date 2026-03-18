@@ -52,6 +52,9 @@ export async function buildImagePromptViaDSPy(params: {
   productImage?: string | null;
   answeredQA?: Array<{ stepId?: string; question?: string; answer?: any }>;
   instanceContext?: Record<string, any> | null;
+  generationIntent?: "initial" | "small_improvement" | "regenerate";
+  originalReferenceImage?: string | null;
+  generationIndex?: number;
 }): Promise<ImagePromptResult> {
   const {
     contextState,
@@ -70,6 +73,9 @@ export async function buildImagePromptViaDSPy(params: {
     productImage,
     answeredQA,
     instanceContext,
+    generationIntent,
+    originalReferenceImage,
+    generationIndex,
   } = params;
 
   // Prefer service-generated prompt spec (fast + consistent). Fall back to local deterministic builder.
@@ -89,6 +95,9 @@ export async function buildImagePromptViaDSPy(params: {
           answeredQA,
           instanceContext,
           noCache: typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("fresh") === "1" : undefined,
+          ...(generationIntent ? { generationIntent } : {}),
+          ...(originalReferenceImage ? { originalReferenceImage } : {}),
+          ...(generationIndex !== undefined ? { generationIndex } : {}),
         }),
         cache: "no-store",
       });

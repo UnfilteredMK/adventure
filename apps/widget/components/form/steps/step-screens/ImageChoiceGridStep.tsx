@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { cn } from "@/lib/utils";
 import type { StepDefinition } from "@/types/ai-form";
 import type { MultipleChoiceUI } from "@/types/ai-form-ui-contract";
 import { StepLayout } from "../ui-layout/StepLayout";
@@ -165,9 +166,14 @@ export function ImageChoiceGridStep({
     >
       <div className={compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-5xl min-w-0 flex-col overflow-hidden" : "flex min-h-0 w-full min-w-0 flex-col"}>
         {selectionHint ? (
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/70 px-3 py-2 text-xs sm:text-sm">
-            <span className="text-muted-foreground">{selectionHint}</span>
-            <span className={maxReached ? "font-semibold text-primary" : "font-medium text-muted-foreground"}>
+          <div
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-lg border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/70",
+              compactInPreview ? "mb-2 shrink-0 px-2 py-1.5 text-[11px]" : "mb-3 px-3 py-2 text-xs sm:text-sm"
+            )}
+          >
+            <span className="text-muted-foreground truncate min-w-0">{selectionHint}</span>
+            <span className={cn("shrink-0 tabular-nums", maxReached ? "font-semibold text-primary" : "font-medium text-muted-foreground")}>
               {selectedArray.length}
               {Number.isFinite(Number(maxSelections)) ? ` / ${Number(maxSelections)}` : ""}
             </span>
