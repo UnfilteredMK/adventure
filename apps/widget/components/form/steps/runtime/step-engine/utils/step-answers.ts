@@ -1,4 +1,4 @@
-import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_SERVICE_ID } from "../constants";
+import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_SERVICE_ID, DETERMINISTIC_STYLE_ID } from "../constants";
 import { normalizeOptionalString } from "./core";
 
 export function pickPrimaryServiceId(stepData: Record<string, any>): string | null {
@@ -85,5 +85,7 @@ export function deterministicAnswersPresent(params: {
   const consentOk = !needsConsent || typeof stepData[DETERMINISTIC_CONSENT_ID] === "string";
   const needsService = steps.some((s: any) => s?.id === DETERMINISTIC_SERVICE_ID);
   const serviceOk = !needsService || typeof stepData[DETERMINISTIC_SERVICE_ID] === "string";
-  return consentOk && serviceOk;
+  const needsStyle = steps.some((s: any) => s?.id === DETERMINISTIC_STYLE_ID);
+  const styleOk = !needsStyle || hasMeaningfulAnswer(stepData[DETERMINISTIC_STYLE_ID]);
+  return consentOk && serviceOk && styleOk;
 }

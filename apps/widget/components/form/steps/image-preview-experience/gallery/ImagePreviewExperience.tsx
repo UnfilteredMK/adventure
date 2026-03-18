@@ -800,8 +800,7 @@ export function ImagePreviewExperience(props: {
           : [
               ...(primaryReferenceImage ? [primaryReferenceImage] : []),
               ...storedUploads.filter((u) => u && u !== primaryReferenceImage),
-              // Only include selection images once the user has uploaded something.
-              ...(storedUploads.length > 0 ? selectedOptionReferenceImages : []),
+              ...selectedOptionReferenceImages.filter((u) => u && u !== primaryReferenceImage),
             ]
       )
         .filter(isValidUrlLikeImage)

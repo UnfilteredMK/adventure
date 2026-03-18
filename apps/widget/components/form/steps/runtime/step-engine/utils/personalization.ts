@@ -1,5 +1,5 @@
 import type { FormState } from "@/types/ai-form";
-import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_FULL_NAME_ID, DETERMINISTIC_SERVICE_ID } from "../constants";
+import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_FULL_NAME_ID, DETERMINISTIC_SERVICE_ID, DETERMINISTIC_STYLE_ID } from "../constants";
 import { normalizeOptionalString } from "./core";
 import { isFunctionCallStep } from "./function-calls";
 import { isStructuralStep } from "./step-classification";
@@ -27,6 +27,7 @@ export function isPersonalizableQuestionStep(step: any): boolean {
   const id = String((step as any)?.id || "");
   if (id === DETERMINISTIC_FULL_NAME_ID) return false;
   if (id === DETERMINISTIC_CONSENT_ID || id.startsWith(DETERMINISTIC_SERVICE_ID)) return false;
+  if (id === DETERMINISTIC_STYLE_ID) return false;
   return true;
 }
 

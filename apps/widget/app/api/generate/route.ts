@@ -84,6 +84,7 @@ function resolveImages(body: any, useCase: UseCase): ResolvedImages {
 	const selectedImage = normalizePrimary(body.selectedImage);
 
 	let ordered: string[];
+  let referenceOnly: string[] = [];
 	switch (useCase) {
 		case 'tryon':
 			ordered = [userImage, productImage, ...incomingRefs].filter(Boolean) as string[];
@@ -95,16 +96,17 @@ function resolveImages(body: any, useCase: UseCase): ResolvedImages {
 			ordered = [selectedImage, sceneImage, productImage, ...incomingRefs].filter(Boolean) as string[];
 			break;
 		default: {
-			const candidates = [userImage, sceneImage, productImage, ...incomingRefs].filter(Boolean) as string[];
-			ordered = candidates;
+			const primaries = [userImage, sceneImage, productImage].filter(Boolean) as string[];
+			ordered = primaries.length > 0 ? [...primaries, ...incomingRefs] : [];
+			referenceOnly = primaries.length === 0 ? incomingRefs : [];
 			break;
 		}
 	}
 
 	const allImages = Array.from(new Set(ordered));
 	const targetImage = allImages.length > 0 ? allImages[0] : undefined;
-	const referenceImages = allImages.slice(1);
-	return { targetImage, referenceImages, hasInputImage: allImages.length > 0 };
+	const referenceImages = targetImage ? allImages.slice(1) : Array.from(new Set(referenceOnly));
+	return { targetImage, referenceImages, hasInputImage: Boolean(targetImage) };
 }
 
 interface ModelDefaults {
@@ -336,7 +338,7 @@ export async function POST(request: NextRequest) {
 			numInferenceSteps: defaults.numInferenceSteps,
 			safetyTolerance,
 			promptUpsampling: defaults.promptUpsampling,
-			referenceImages: hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : [],
+			referenceImages: hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : referenceImages,
 			userImage: body.userImage || (useCase === 'tryon' ? targetImage : undefined),
 			sceneImage: body.sceneImage || ((useCase === 'scene' || useCase === 'scene-placement') ? targetImage : undefined),
 			productImage: body.productImage || (useCase === 'tryon' ? referenceImages[0] : undefined),

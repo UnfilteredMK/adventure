@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from programs.common.dspy_runtime import configure_dspy, extract_dspy_usage, make_dspy_lm_for_module
+from programs.common.visual_text_safety import sanitize_visual_context_text
 from programs.subcategory_catalog.program import SubcategoryCatalogProgram
 
 
@@ -40,21 +41,29 @@ def _coerce_float(value: Any, default: float) -> float:
 
 
 def _resolve_strings(payload: Dict[str, Any]) -> Tuple[str, str, str, str]:
-    service_summary = str(
+    service_summary = sanitize_visual_context_text(
         payload.get("serviceSummary")
         or payload.get("service_summary")
         or payload.get("servicesSummary")
         or payload.get("services_summary")
-        or ""
-    ).strip()
-    industry = str(payload.get("industry") or payload.get("categoryName") or payload.get("category_name") or "").strip()
-    service = str(
+        or "",
+        max_len=500,
+    )
+    industry = sanitize_visual_context_text(
+        payload.get("industry") or payload.get("categoryName") or payload.get("category_name") or "",
+        max_len=160,
+    )
+    service = sanitize_visual_context_text(
         payload.get("service")
         or payload.get("subcategoryName")
         or payload.get("subcategory_name")
-        or ""
-    ).strip()
-    subcategory_name = str(payload.get("subcategoryName") or payload.get("subcategory_name") or service or "").strip()
+        or "",
+        max_len=160,
+    )
+    subcategory_name = sanitize_visual_context_text(
+        payload.get("subcategoryName") or payload.get("subcategory_name") or service or "",
+        max_len=160,
+    )
     return service_summary, industry, service, subcategory_name
 
 
@@ -112,7 +121,7 @@ def generate_subcategory_catalog(payload: Dict[str, Any]) -> Dict[str, Any]:
     target_count = max(8, min(40, _coerce_int(payload.get("count") or payload.get("targetCount"), 20)))
     service_summary, industry, service, subcategory_name = _resolve_strings(payload)
     service_name = subcategory_name or service
-    category_name = str(payload.get("categoryName") or payload.get("category_name") or industry).strip()
+    category_name = sanitize_visual_context_text(payload.get("categoryName") or payload.get("category_name") or industry, max_len=160)
 
     if not service_summary and not industry and not service_name:
         return {

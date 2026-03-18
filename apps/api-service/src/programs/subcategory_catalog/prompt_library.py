@@ -76,6 +76,7 @@ def build_subcategory_catalog_prompt() -> str:
                 "Each `image_prompt` must explicitly describe the service result and the visual direction so an image model can render it.",
                 "Each `description` should briefly explain what defines that direction in plain English.",
                 "Use `price_tier` only from '$', '$$', '$$$', '$$$$'. If used, the image_prompt must visually reflect that tier.",
+                "Do not ask for before/after comparisons, split screens, collages, mockups with labels, or any visible text in the generated image.",
                 "Do not include 'Other', 'Not sure', placeholders, duplicates, or generic filler options.",
                 "Avoid generic words like 'nice', 'beautiful', or 'premium' unless grounded in real materials or design cues.",
                 "Favor broad-but-real customer preference clusters, not tiny detail tweaks.",

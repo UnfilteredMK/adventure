@@ -74,6 +74,8 @@ export function ImageChoiceGrid({
   const density = useLayoutDensity();
   const isCompact = density === "compact";
   const selectedArray = Array.isArray(value) ? value : (value ? [value] : []);
+  const maxSelectionLimit = Number.isFinite(Number(maxSelections)) ? Math.max(1, Math.floor(Number(maxSelections))) : null;
+  const isAtSelectionCap = Boolean(multiple && maxSelectionLimit !== null && selectedArray.length >= maxSelectionLimit);
   const isNarrowViewport = useIsNarrowViewport(768);
   const desktopThumbnailMode = thumbnailMode && !isNarrowViewport;
 
@@ -81,7 +83,7 @@ export function ImageChoiceGrid({
     if (multiple) {
       if (selectedArray.includes(val)) {
         onChange(selectedArray.filter((v) => v !== val));
-      } else if (Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections)) {
+      } else if (isAtSelectionCap) {
         return;
       } else {
         onChange([...selectedArray, val]);
@@ -156,6 +158,7 @@ export function ImageChoiceGrid({
       if (multiple) {
         if (shouldSelect) {
           if (selectedArray.includes(val)) return selectedArray;
+          if (isAtSelectionCap) return selectedArray;
           return [...selectedArray, val];
         }
         if (!selectedArray.includes(val)) return selectedArray;
@@ -411,6 +414,7 @@ export function ImageChoiceGrid({
         {options.map((opt, index) => {
           const key = opt.value || opt.label;
           const picked = selectedArray.includes(key);
+          const disabled = Boolean(multiple && !picked && isAtSelectionCap);
 
           return (
             <motion.button
@@ -418,11 +422,14 @@ export function ImageChoiceGrid({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
+              disabled={disabled}
               onClick={() => toggle(key)}
+              aria-disabled={disabled}
               className={cn(
                 "group relative flex h-full min-h-0 min-w-0 flex-col transition-all",
                 thumbnailMode ? "overflow-hidden rounded-lg border" : "overflow-hidden rounded-2xl border-4",
                 desktopThumbnailMode ? "transform-gpu hover:scale-[1.06] hover:-translate-y-0.5 hover:z-10 hover:shadow-xl" : null,
+                disabled ? "cursor-not-allowed opacity-45" : null,
                 thumbnailMode
                   ? (picked ? "border-primary bg-transparent" : "border-black/10 bg-transparent hover:border-black/25")
                   : (picked ? "border-primary" : "border-transparent bg-muted/20")

@@ -52,6 +52,34 @@ function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene" | un
   return undefined;
 }
 
+function buildDeterministicStyleStep(serviceOption: any): UIStep | null {
+  const styleOptions = Array.isArray(serviceOption?.styleOptions) ? serviceOption.styleOptions : [];
+  if (styleOptions.length === 0) return null;
+  const question =
+    typeof serviceOption?.styleQuestion === "string" && serviceOption.styleQuestion.trim()
+      ? serviceOption.styleQuestion.trim()
+      : "Pick 3-5 ideal styles from the grid.";
+  return {
+    id: "step-style-direction",
+    type: "image_choice_grid",
+    question,
+    options: styleOptions
+      .map((opt: any) => ({
+        label: String(opt?.label || ""),
+        value: String(opt?.value || opt?.label || ""),
+        imageUrl: typeof opt?.imageUrl === "string" ? opt.imageUrl : "",
+        ...(typeof opt?.description === "string" && opt.description ? { description: opt.description } : {}),
+        ...(typeof opt?.priceTier === "string" && opt.priceTier ? { priceTier: opt.priceTier } : {}),
+      }))
+      .filter((opt: any) => opt.label && opt.value && opt.imageUrl)
+      .slice(0, 20),
+    multi_select: true,
+    min_selections: 3,
+    max_selections: 5,
+    metricGain: 0.12,
+  } as any;
+}
+
 export function AdventureFormExperience({
   instanceId,
   demoType,
@@ -426,6 +454,8 @@ export function AdventureFormExperience({
                   industryId: typeof o?.industryId === "string" ? o.industryId : null,
                   industryName: typeof o?.industryName === "string" ? o.industryName : null,
                   serviceSummary: typeof o?.serviceSummary === "string" ? o.serviceSummary : typeof o?.service_summary === "string" ? o.service_summary : null,
+                  styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
+                  styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
                 }))
                 .filter((x: any) => Boolean(x.serviceId)),
             );
@@ -575,39 +605,46 @@ export function AdventureFormExperience({
           } as any);
         }
 
+        const serviceParamRaw =
+          params.get("serviceId") ||
+          params.get("service_id") ||
+          params.get("service") ||
+          null;
+        const serviceParam = typeof serviceParamRaw === "string" ? serviceParamRaw.trim() : "";
+        const serviceParamLower = serviceParam.toLowerCase();
+        const shouldAutostart =
+          params.get("autostart") === "1" ||
+          params.get("autostart") === "true" ||
+          params.get("start") === "1" ||
+          params.get("start") === "true";
+        const selectedFromParam =
+          serviceParam && serviceOptions.length > 0
+            ? serviceOptions.find((o: any) => {
+                const value = String(o?.value || "").trim();
+                const label = String(o?.label || o?.serviceName || "").trim().toLowerCase();
+                return value === serviceParam || (label && label === serviceParamLower);
+              })
+            : null;
+        const prefillService =
+          selectedFromParam && selectedFromParam.value
+            ? String(selectedFromParam.value)
+            : serviceParam
+              ? serviceParam
+              : shouldAutostart && serviceOptions.length === 1 && serviceOptions[0]?.value
+                ? String(serviceOptions[0].value)
+                : null;
+        const prefillServiceOption =
+          prefillService && serviceOptions.length > 0
+            ? serviceOptions.find((o: any) => String(o?.value || "") === prefillService) || null
+            : null;
+        const prefillStyleStep = prefillServiceOption ? buildDeterministicStyleStep(prefillServiceOption) : null;
+        if (prefillStyleStep) {
+          steps.push(prefillStyleStep);
+        }
+
         // If a service is already known (single option / query param), seed it into step state so
         // StepEngine can immediately call `/generate-steps` and advance.
         try {
-          const serviceParamRaw =
-            params.get("serviceId") ||
-            params.get("service_id") ||
-            params.get("service") ||
-            null;
-          const serviceParam = typeof serviceParamRaw === "string" ? serviceParamRaw.trim() : "";
-          const serviceParamLower = serviceParam.toLowerCase();
-          const shouldAutostart =
-            params.get("autostart") === "1" ||
-            params.get("autostart") === "true" ||
-            params.get("start") === "1" ||
-            params.get("start") === "true";
-          const selectedFromParam =
-            serviceParam && serviceOptions.length > 0
-              ? serviceOptions.find((o: any) => {
-                  const value = String(o?.value || "").trim();
-                  const label = String(o?.label || o?.serviceName || "").trim().toLowerCase();
-                  return value === serviceParam || (label && label === serviceParamLower);
-                })
-              : null;
-
-          const prefillService =
-            selectedFromParam && selectedFromParam.value
-              ? String(selectedFromParam.value)
-              : serviceParam
-                ? serviceParam
-                : shouldAutostart && serviceOptions.length === 1 && serviceOptions[0]?.value
-                  ? String(serviceOptions[0].value)
-                  : null;
-
           if (prefillService) {
             const existing = loadStepState(instanceId);
             const hasExistingForSession = Boolean(existing && existing.sessionId === sessionId);

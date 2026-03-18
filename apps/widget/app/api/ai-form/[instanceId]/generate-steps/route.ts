@@ -170,6 +170,50 @@ function sanitizeMiniStep(raw: any): any {
   return step;
 }
 
+function isCatalogBackedStyleStep(step: any): boolean {
+  const rawId = String(step?.id || step?.key || "").trim().toLowerCase();
+  return rawId === "style_direction" || rawId === "step-style-direction";
+}
+
+function buildCatalogStyleOptions(rows: any[]): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : null;
+    if (!meta || String(meta.generated_for || "") !== "subcategory_catalog") continue;
+    const label =
+      typeof meta.option_label === "string" && meta.option_label.trim()
+        ? meta.option_label.trim()
+        : typeof meta.option_value === "string" && meta.option_value.trim()
+          ? meta.option_value.trim()
+          : "";
+    const value =
+      typeof meta.option_value === "string" && meta.option_value.trim()
+        ? meta.option_value.trim()
+        : label;
+    const imageUrl = typeof row?.image_url === "string" ? row.image_url.trim() : "";
+    if (!label || !value || !imageUrl) continue;
+    const dedupeKey =
+      typeof meta.catalog_key === "string" && meta.catalog_key.trim()
+        ? meta.catalog_key.trim().toLowerCase()
+        : value.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({
+      label,
+      value,
+      imageUrl,
+      ...(typeof meta.option_description === "string" && meta.option_description.trim()
+        ? { description: meta.option_description.trim() }
+        : {}),
+      ...(typeof meta.price_tier === "string" && meta.price_tier.trim()
+        ? { priceTier: meta.price_tier.trim() }
+        : {}),
+    });
+  }
+  return out;
+}
+
 function isStepIdLike(raw: unknown): boolean {
   const s = typeof raw === "string" ? raw : "";
   if (!s) return false;
@@ -543,6 +587,65 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         const effectiveIndustryName =
           (firstCategory?.name && firstCategory.name.trim()) || clientIndustryName || null;
         const inferredIndustry = effectiveIndustryName || (aiFormConfig as any).industry || "General";
+        let catalogStyleOptionsPromise: Promise<any[]> | null = null;
+
+        const getCatalogStyleOptions = async (): Promise<any[]> => {
+          if (!effectiveServiceId) return [];
+          if (!catalogStyleOptionsPromise) {
+            catalogStyleOptionsPromise = (async () => {
+              const selectCols = "id, image_url, metadata, created_at, account_id";
+              const accountId = typeof (instance as any)?.account_id === "string" ? String((instance as any).account_id).trim() : "";
+              const [accountResult, globalResult] = await Promise.all([
+                accountId
+                  ? supabase
+                      .from("images")
+                      .select(selectCols)
+                      .eq("subcategory_id", effectiveServiceId)
+                      .eq("account_id", accountId)
+                      .eq("status", "completed")
+                      .order("created_at", { ascending: false })
+                      .limit(100)
+                  : Promise.resolve({ data: [], error: null }),
+                supabase
+                  .from("images")
+                  .select(selectCols)
+                  .eq("subcategory_id", effectiveServiceId)
+                  .is("account_id", null)
+                  .eq("status", "completed")
+                  .order("created_at", { ascending: false })
+                  .limit(100),
+              ]);
+
+              const merged = [
+                ...(Array.isArray(accountResult.data) ? accountResult.data : []),
+                ...(Array.isArray(globalResult.data) ? globalResult.data : []),
+              ];
+              const options = buildCatalogStyleOptions(merged);
+
+              if (debugEnabled) {
+                logger.info("[generate-steps] STYLE_CATALOG_LOOKUP", {
+                  reqId,
+                  instanceId,
+                  accountRows: Array.isArray(accountResult.data) ? accountResult.data.length : 0,
+                  globalRows: Array.isArray(globalResult.data) ? globalResult.data.length : 0,
+                  optionCount: options.length,
+                  subcategoryId: effectiveServiceId,
+                });
+              }
+
+              return options;
+            })().catch((error) => {
+              logger.warn("[generate-steps] STYLE_CATALOG_LOOKUP_FAILED", {
+                reqId,
+                instanceId,
+                error: error instanceof Error ? error.message : String(error),
+                subcategoryId: effectiveServiceId,
+              });
+              return [];
+            });
+          }
+          return catalogStyleOptionsPromise;
+        };
 
 		        const grounding = getServiceGrounding({
 		          categoryName: effectiveIndustryName,
@@ -759,9 +862,23 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
           ...Object.keys(stepDataSoFar || {}).filter((k) => typeof k === "string" && isStepIdLike(k) && !k.startsWith("__")),
         ]);
 
-	        const emitMiniStep = (mini: any) => {
+	        const emitMiniStep = async (mini: any) => {
 	          try {
-	            const sanitized = sanitizeMiniStep(mini);
+	            let sanitized = sanitizeMiniStep(mini);
+              if (isCatalogBackedStyleStep(sanitized)) {
+                return;
+              }
+              const styleOptionsMissing = isCatalogBackedStyleStep(sanitized) && (!Array.isArray(sanitized?.options) || sanitized.options.length === 0);
+              if (styleOptionsMissing) {
+                const catalogOptions = await getCatalogStyleOptions();
+                if (catalogOptions.length > 0) {
+                  sanitized = {
+                    ...sanitized,
+                    type: "image_choice_grid",
+                    options: catalogOptions,
+                  };
+                }
+              }
 	            // BYPASS MAPPER: Use shared contract types directly
 	            const stepId = sanitized?.id;
 	            if (!stepId) {
@@ -894,7 +1011,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         let rawUpstreamTruncated = false;
         const RAW_UPSTREAM_MAX_CHARS = 20_000;
 
-        const processFrame = (frame: string) => {
+          const processFrame = async (frame: string) => {
           const lines = frame.split("\n");
           let event: string | null = null;
           const dataLines: string[] = [];
@@ -915,7 +1032,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 
           if (event === "mini_step" && data && typeof data === "object") {
             streamMiniStepCount++;
-            emitMiniStep(data);
+            await emitMiniStep(data);
             return;
           }
           if (event === "meta" && data && typeof data === "object") {
@@ -953,10 +1070,10 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
               while ((idx = buf.indexOf("\n\n")) >= 0) {
                 const frame = buf.slice(0, idx);
                 buf = buf.slice(idx + 2);
-                if (frame.trim()) processFrame(frame);
+                if (frame.trim()) await processFrame(frame);
               }
             }
-            if (buf.trim()) processFrame(buf);
+            if (buf.trim()) await processFrame(buf);
           } else {
             const text = await svcResp.text().catch(() => "");
             if (!rawUpstreamTruncated) {
@@ -983,7 +1100,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
               }
               const minis = Array.isArray((json as any).miniSteps) ? (json as any).miniSteps : [];
               for (const mini of minis) {
-                emitMiniStep(mini);
+                await emitMiniStep(mini);
                 streamMiniStepCount++;
               }
             } else if (text) {

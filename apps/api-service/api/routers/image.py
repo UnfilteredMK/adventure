@@ -12,6 +12,7 @@ from starlette.status import HTTP_400_BAD_REQUEST
 
 from api.request_adapter import to_next_steps_payload
 from api.utils import dedup_urls, normalize_output_urls
+from programs.common.visual_text_safety import sanitize_visual_context_text
 from programs.image_generator.model_selector import select_model, select_routing_policy
 from programs.image_generator.orchestrator import build_image_prompt, generate_image
 
@@ -297,6 +298,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @router.post("/subcategory-catalog/generate")
     async def subcategory_catalog_generate(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
         from programs.form_pipeline.orchestrator import _should_skip_option_image_for_label  # noqa: E402
+        from programs.image_generator.image_prompt_library import build_option_image_prompt  # noqa: E402
         from programs.image_generator.providers.image_generation import generate_option_images_for_step  # noqa: E402
         from programs.subcategory_catalog.orchestrator import generate_subcategory_catalog  # noqa: E402
 
@@ -306,9 +308,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             status = HTTP_400_BAD_REQUEST if error == "missing_service_context" else 500
             return JSONResponse(status_code=status, content=planned)
 
-        question = str(planned.get("question") or "").strip() or "Choose a starting visual direction."
+        question = sanitize_visual_context_text(planned.get("question") or "", max_len=240) or "Choose a starting visual direction."
         concepts = planned.get("concepts") if isinstance(planned.get("concepts"), list) else []
-        service_str = str(
+        service_str = sanitize_visual_context_text(
             payload.get("serviceSummary")
             or payload.get("service_summary")
             or payload.get("service")
@@ -316,8 +318,9 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             or payload.get("subcategory_name")
             or payload.get("industry")
             or payload.get("categoryName")
-            or "Service"
-        ).strip() or "Service"
+            or "Service",
+            max_len=320,
+        ) or "Service"
         context_prompt = f"{service_str}: {question}"
 
         try:
@@ -339,10 +342,10 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         for concept in concepts:
             if not isinstance(concept, dict):
                 continue
-            label = str(concept.get("label") or concept.get("value") or "").strip()
+            label = sanitize_visual_context_text(concept.get("label") or concept.get("value") or "", max_len=120)
             value = str(concept.get("value") or "").strip() or re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or label
-            image_prompt = str(concept.get("image_prompt") or concept.get("imagePrompt") or label).strip()
-            description = str(concept.get("description") or concept.get("descriptor") or "").strip()
+            image_prompt = sanitize_visual_context_text(concept.get("image_prompt") or concept.get("imagePrompt") or label, max_len=320)
+            description = sanitize_visual_context_text(concept.get("description") or concept.get("descriptor") or "", max_len=200)
             price_tier = str(concept.get("price_tier") or concept.get("priceTier") or "").strip()
             if not label or not image_prompt:
                 continue
@@ -366,7 +369,8 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
                 prompt_text = f"{prompt_text}, {description}"
             tier_suffix = f" {_PRICE_TIER_DESCS[price_tier]}" if price_tier in _PRICE_TIER_DESCS else ""
             prompts.append(
-                f"Photorealistic photo, no text, no words, no letters, no labels, no captions, no watermarks, no signs. "
+                f"Photorealistic photo of one finished scene, not a split-screen or before-and-after layout. "
+                f"No text, no words, no letters, no labels, no captions, no watermarks, no signs. "
                 f"{context_prompt}. Option: {prompt_text}.{tier_suffix}"
             )
             indices.append(len(normalized) - 1)
@@ -507,7 +511,14 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             tier_suffix = ""
             if price_tier in _PRICE_TIER_DESCS:
                 tier_suffix = f" {_PRICE_TIER_DESCS[price_tier]}"
-            prompts.append(f"Photorealistic photo, no text, no words, no letters, no labels, no captions, no watermarks, no signs. {context_prompt}. Option: {prompt_text}.{tier_suffix}")
+            prompts.append(
+                build_option_image_prompt(
+                    f"{prompt_text}.{tier_suffix}".strip(),
+                    context_prompt,
+                    step_id=step_id,
+                    question=question,
+                )
+            )
             indices.append(len(normalized) - 1)
 
         urls: list[Optional[str]] = []

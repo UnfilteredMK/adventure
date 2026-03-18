@@ -5,6 +5,66 @@ import { logger } from '@/lib/server/logger';
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
+function buildCatalogStyleOptions(rows: any[]): {
+  options: Array<{
+    label: string;
+    value: string;
+    imageUrl: string;
+    description?: string | null;
+    priceTier?: string | null;
+  }>;
+  question: string | null;
+} {
+  const seen = new Set<string>();
+  const options: Array<{
+    label: string;
+    value: string;
+    imageUrl: string;
+    description?: string | null;
+    priceTier?: string | null;
+  }> = [];
+  let question: string | null = null;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : null;
+    if (!meta || String(meta.generated_for || "") !== "subcategory_catalog") continue;
+    const label =
+      typeof meta.option_label === "string" && meta.option_label.trim()
+        ? meta.option_label.trim()
+        : typeof meta.option_value === "string" && meta.option_value.trim()
+          ? meta.option_value.trim()
+          : "";
+    const value =
+      typeof meta.option_value === "string" && meta.option_value.trim()
+        ? meta.option_value.trim()
+        : label;
+    const imageUrl = typeof row?.image_url === "string" ? row.image_url.trim() : "";
+    if (!label || !value || !imageUrl) continue;
+    const dedupeKey =
+      typeof meta.catalog_key === "string" && meta.catalog_key.trim()
+        ? meta.catalog_key.trim().toLowerCase()
+        : value.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    options.push({
+      label,
+      value,
+      imageUrl,
+      ...(typeof meta.option_description === "string" && meta.option_description.trim()
+        ? { description: meta.option_description.trim() }
+        : {}),
+      ...(typeof meta.price_tier === "string" && meta.price_tier.trim()
+        ? { priceTier: meta.price_tier.trim() }
+        : {}),
+    });
+    if (!question && typeof meta.question_text === "string" && meta.question_text.trim()) {
+      question = meta.question_text.trim();
+    }
+  }
+
+  return { options, question };
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { instanceId: string } }
@@ -151,6 +211,14 @@ export async function GET(
       industryName?: string | null;
       serviceName?: string | null;
       serviceSummary?: string | null;
+      styleQuestion?: string | null;
+      styleOptions?: Array<{
+        label: string;
+        value: string;
+        imageUrl: string;
+        description?: string | null;
+        priceTier?: string | null;
+      }>;
     }> = [];
     try {
       const { data: instanceSubcats, error: instanceSubcatsError } = await supabase
@@ -288,6 +356,63 @@ export async function GET(
           });
           serviceOptions = candidateIds.map((id) => ({ value: id, label: id, serviceName: id }));
         }
+      }
+    }
+
+    if (serviceOptions.length > 0) {
+      try {
+        const subcategoryIds = serviceOptions.map((opt) => String(opt.value || "").trim()).filter(Boolean);
+        const accountId = typeof (instance as any)?.account_id === "string" ? String((instance as any).account_id).trim() : "";
+        const selectCols = "subcategory_id, image_url, metadata, created_at, account_id";
+        const [accountImages, globalImages] = await Promise.all([
+          accountId
+            ? supabase
+                .from("images")
+                .select(selectCols)
+                .in("subcategory_id", subcategoryIds)
+                .eq("account_id", accountId)
+                .eq("status", "completed")
+                .order("created_at", { ascending: false })
+                .limit(500)
+            : Promise.resolve({ data: [], error: null }),
+          supabase
+            .from("images")
+            .select(selectCols)
+            .in("subcategory_id", subcategoryIds)
+            .is("account_id", null)
+            .eq("status", "completed")
+            .order("created_at", { ascending: false })
+            .limit(500),
+        ]);
+
+        const rowsBySubcategory = new Map<string, any[]>();
+        for (const row of [
+          ...(Array.isArray(accountImages.data) ? accountImages.data : []),
+          ...(Array.isArray(globalImages.data) ? globalImages.data : []),
+        ]) {
+          const subcategoryId = typeof row?.subcategory_id === "string" ? row.subcategory_id : "";
+          if (!subcategoryId) continue;
+          const bucket = rowsBySubcategory.get(subcategoryId) || [];
+          bucket.push(row);
+          rowsBySubcategory.set(subcategoryId, bucket);
+        }
+
+        serviceOptions = serviceOptions.map((opt) => {
+          const subcategoryId = String(opt.value || "").trim();
+          const catalog = buildCatalogStyleOptions(rowsBySubcategory.get(subcategoryId) || []);
+          return catalog.options.length > 0
+            ? {
+                ...opt,
+                styleQuestion: catalog.question,
+                styleOptions: catalog.options,
+              }
+            : opt;
+        });
+      } catch (e) {
+        logger.warn("[widget] Failed to resolve styleOptions", {
+          instanceId,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
 

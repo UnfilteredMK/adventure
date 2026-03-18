@@ -4,6 +4,12 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from programs.common.visual_text_safety import (
+    ANTI_COMPARISON_NEGATIVE_TERMS,
+    SINGLE_SCENE_GUARDRAIL,
+    sanitize_visual_context_text,
+)
+
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
@@ -385,7 +391,7 @@ def _kv_details(step_data: Dict[str, Any], *, skip_keys: set[str]) -> List[str]:
             continue
         if any(key.startswith(p) for p in _INTERNAL_KEY_PREFIXES):
             continue
-        val = _coerce_text(v).strip()
+        val = sanitize_visual_context_text(_coerce_text(v))
         if not val:
             continue
         if _looks_like_uuid(val):
@@ -451,7 +457,7 @@ def _budget_material_descriptor(budget_raw: str) -> str:
 
 _DEFAULT_NEGATIVE = (
     "blurry text, watermark, logo, letters, words, writing, signage, "
-    "cartoon, anime, painting, illustration, low quality, deformed"
+    f"cartoon, anime, painting, illustration, low quality, deformed, {ANTI_COMPARISON_NEGATIVE_TERMS}"
 )
 
 _SKIP_KEYS = frozenset({
@@ -472,6 +478,20 @@ _SKIP_KEYS = frozenset({
 })
 
 
+def _merge_negative_prompt(primary: str, fallback: str) -> str:
+    parts: List[str] = []
+    seen: set[str] = set()
+    for raw in (primary, fallback):
+        for item in str(raw or "").split(","):
+            token = item.strip()
+            key = token.lower()
+            if not token or key in seen:
+                continue
+            seen.add(key)
+            parts.append(token)
+    return ", ".join(parts)
+
+
 def _extract_answered_qa(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     """Pull question/answer pairs from the answeredQA array if present."""
     raw = payload.get("answeredQA") or payload.get("answered_qa") or []
@@ -481,14 +501,18 @@ def _extract_answered_qa(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        q = str(item.get("question") or "").strip()
+        q = sanitize_visual_context_text(item.get("question") or "", max_len=140)
         a = item.get("answer")
         a_text = ""
         if isinstance(a, list):
-            parts = [str(x).strip() for x in a if str(x).strip() and not _looks_like_uuid(str(x)) and not _looks_like_url(str(x))]
+            parts = [
+                sanitize_visual_context_text(str(x).strip(), max_len=140)
+                for x in a
+                if str(x).strip() and not _looks_like_uuid(str(x)) and not _looks_like_url(str(x))
+            ]
             a_text = ", ".join(parts)
         elif isinstance(a, str):
-            t = a.strip()
+            t = sanitize_visual_context_text(a, max_len=200)
             if not _looks_like_uuid(t) and not _looks_like_url(t):
                 a_text = t
         if q and a_text:
@@ -523,13 +547,13 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
     step_data = _extract_step_data(payload)
     use_case = _normalize_use_case(payload.get("useCase") or payload.get("use_case"))
     reference_images, scene_image, product_image = extract_reference_images(payload)
-    negative_prompt = extract_negative_prompt(payload) or _DEFAULT_NEGATIVE
+    negative_prompt = _merge_negative_prompt(extract_negative_prompt(payload), _DEFAULT_NEGATIVE)
 
-    service = _best_effort_service(step_data, payload)
-    service_summary = _extract_service_summary(payload)
+    service = sanitize_visual_context_text(_best_effort_service(step_data, payload), max_len=140)
+    service_summary = sanitize_visual_context_text(_extract_service_summary(payload), max_len=300)
     location = _extract_location(step_data)
     style_tags = _extract_style_tags(step_data)
-    notes = str(step_data.get("notes") or "").strip()
+    notes = sanitize_visual_context_text(step_data.get("notes") or "", max_len=200)
     budget_raw = str(
         step_data.get("budget_range")
         or step_data.get("budgetRange")
@@ -538,7 +562,7 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
         or ""
     ).strip()
     budget = _format_budget(budget_raw) if budget_raw else ""
-    timeline = str(step_data.get("timeline") or "").strip()
+    timeline = sanitize_visual_context_text(step_data.get("timeline") or "", max_len=80)
 
     is_edit = len(reference_images) > 0
     subject = service[:140] if service else "home improvement"
@@ -573,6 +597,7 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     elif is_edit:
         # EDIT mode: the reference photo is the BEFORE state — generate the fully-completed AFTER.
+        lines.append(SINGLE_SCENE_GUARDRAIL)
         lines.append(
             f"The uploaded photo is the BEFORE state. Generate the photorealistic AFTER state: "
             f"this exact space once a professional {subject} project has been fully completed."
@@ -625,6 +650,7 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     else:
         # INITIAL generation: descriptive text-to-image
+        lines.append(SINGLE_SCENE_GUARDRAIL)
         if location:
             lines.append(f"A photorealistic image of a beautifully completed {subject} project in {location[:80]}.")
         else:

@@ -22,6 +22,8 @@ class ScenePromptSignature(dspy.Signature):
       3) user_preferences/style details
     - Never include UUIDs, URLs, or technical identifiers in the prompt.
     - Never include text instructions like "no text" in the main prompt (use negative_prompt).
+    - Always describe a single finished image, never a before/after comparison, split screen, side-by-side layout,
+      diptych, collage, storyboard, annotated mockup, or any design with visible text overlays.
     - For edit mode (is_edit=true): The uploaded reference image is the BEFORE state.
       Generate the fully-completed, professional AFTER state.
       Use service_name and service_summary to understand exactly what this project entails —
@@ -29,10 +31,11 @@ class ScenePromptSignature(dspy.Signature):
       look brand-new and professionally done. Nothing the service would have touched should look
       old, worn, or original. Preserve only the structural/contextual elements that would NOT
       be changed by this service (e.g. background environment, camera angle, unchanged parts of
-      the subject). Replace or transform everything the service covers.
+      the subject). Replace or transform everything the service covers. Treat the upload as source context only,
+      not as one half of a comparison graphic.
     - For generation mode (is_edit=false): use descriptive language painting the final result.
       Use service_summary to understand the scope of work and ensure the scene reflects a
-      fully-completed professional project.
+      fully-completed professional project rendered as one coherent final scene.
     - Focus on materials, colors, textures, lighting, and spatial arrangement.
     - Keep prompts under 300 words; be specific and visual, not abstract.
     - CRITICAL: Budget level MUST be reflected in the visual quality shown.

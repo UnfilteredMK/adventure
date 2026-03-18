@@ -441,6 +441,11 @@ def render_plan_items_to_mini_steps(
                 except Exception:
                     pass
 
+            if _is_catalog_backed_style_step(key):
+                step["multi_select"] = True
+                step.setdefault("min_selections", 3)
+                step.setdefault("max_selections", 5)
+
             allow_other = item.get("allow_other")
             if allow_other is None:
                 allow_other = item.get("allowOther")

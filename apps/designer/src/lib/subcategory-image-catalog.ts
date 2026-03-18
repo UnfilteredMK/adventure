@@ -13,6 +13,8 @@ const PRICE_TIER_DESCS: Record<string, string> = {
   "$$$$": "Luxury, bespoke finishes, marble, custom millwork, designer fixtures.",
 };
 
+const BEFORE_AFTER_RE = /\bbefore\s*(?:\/|-|&|and)\s*after\b/gi;
+
 export type CatalogOptionInput = {
   description?: string | null;
   label?: string | null;
@@ -52,6 +54,16 @@ function normalizeText(input: unknown): string {
     .trim();
 }
 
+function sanitizeVisualContextText(input: unknown): string {
+  return String(input || "")
+    .trim()
+    .replace(BEFORE_AFTER_RE, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s+/g, " ")
+    .replace(/^[,\s;:-]+|[,\s;:-]+$/g, "")
+    .trim();
+}
+
 function isHttpImageUrl(value: unknown): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
@@ -61,16 +73,25 @@ function isCatalogImage(row: CatalogImageRow): boolean {
   return String(meta?.generated_for || "") === SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR;
 }
 
+function logCatalog(label: string, data: Record<string, unknown>) {
+  try {
+    const text = JSON.stringify(data);
+    console.log(`[subcategory-catalog] ${label} ${text.length > 4000 ? `${text.slice(0, 4000)}...` : text}`);
+  } catch {
+    console.log(`[subcategory-catalog] ${label}`);
+  }
+}
+
 function buildContextPrompt(params: {
   question?: string | null;
   serviceSummary?: string | null;
   categoryName?: string | null;
   subcategoryName?: string | null;
 }): string {
-  const serviceSummary = String(params.serviceSummary || "").trim();
-  const categoryName = String(params.categoryName || "").trim();
-  const subcategoryName = String(params.subcategoryName || "").trim();
-  const question = String(params.question || "").trim() || "Choose a direction.";
+  const serviceSummary = sanitizeVisualContextText(params.serviceSummary);
+  const categoryName = sanitizeVisualContextText(params.categoryName);
+  const subcategoryName = sanitizeVisualContextText(params.subcategoryName);
+  const question = sanitizeVisualContextText(params.question) || "Choose a direction.";
   const subject = serviceSummary || [categoryName, subcategoryName].filter(Boolean).join(": ") || subcategoryName || "Service";
   return `${subject}: ${question}`;
 }
@@ -92,16 +113,16 @@ export function buildCatalogPromptForOption(params: {
   subcategoryName?: string | null;
 }): string {
   const promptText =
-    String(params.option.imagePrompt || "").trim() ||
-    String(params.option.label || "").trim() ||
-    String(params.option.value || "").trim() ||
+    sanitizeVisualContextText(params.option.imagePrompt) ||
+    sanitizeVisualContextText(params.option.label) ||
+    sanitizeVisualContextText(params.option.value) ||
     "Design direction";
-  const description = String(params.option.description || "").trim();
+  const description = sanitizeVisualContextText(params.option.description);
   const tier = String(params.option.priceTier || "").trim();
   const tierSuffix = tier && PRICE_TIER_DESCS[tier] ? ` Price tier cues: ${PRICE_TIER_DESCS[tier]}` : "";
   const context = buildContextPrompt(params);
   const descriptionSuffix = description ? ` Direction details: ${description}` : "";
-  return `Photorealistic photo, no text, no words, no letters, no labels, no captions, no watermarks, no signs. ${context}. Option: ${promptText}.${descriptionSuffix}${tierSuffix}`;
+  return `Photorealistic photo of one finished scene, not a split-screen or before-and-after layout. No text, no words, no letters, no labels, no captions, no watermarks, no signs. ${context}. Option: ${promptText}.${descriptionSuffix}${tierSuffix}`;
 }
 
 export async function listCatalogImages(params: {
@@ -153,7 +174,14 @@ async function uploadCatalogImageFromUrl(params: {
   fileHint: string;
 }): Promise<{ publicUrl: string; storagePath: string } | null> {
   const resp = await fetch(params.imageUrl, { cache: "no-store" });
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    logCatalog("upload_fetch_failed", {
+      imageUrl: params.imageUrl,
+      status: resp.status,
+      subcategoryId: params.subcategoryId,
+    });
+    return null;
+  }
   const contentType = String(resp.headers.get("content-type") || "image/webp").trim() || "image/webp";
   const storagePath = `${IMAGE_STORAGE_PREFIXES.subcategory}/${params.subcategoryId}/${Date.now()}-${slugifySegment(params.fileHint)}.webp`;
   const bytes = new Uint8Array(await resp.arrayBuffer());
@@ -162,10 +190,24 @@ async function uploadCatalogImageFromUrl(params: {
     contentType,
     upsert: false,
   });
-  if (upload.error) return null;
+  if (upload.error) {
+    logCatalog("storage_upload_failed", {
+      contentType,
+      error: upload.error.message,
+      storagePath,
+      subcategoryId: params.subcategoryId,
+    });
+    return null;
+  }
   const publicData = params.supabase.storage.from(IMAGES_BUCKET).getPublicUrl(upload.data.path);
   const publicUrl = String(publicData?.data?.publicUrl || "");
-  if (!publicUrl) return null;
+  if (!publicUrl) {
+    logCatalog("public_url_missing", {
+      storagePath,
+      subcategoryId: params.subcategoryId,
+    });
+    return null;
+  }
   return { publicUrl, storagePath };
 }
 
@@ -221,7 +263,15 @@ export async function persistGeneratedCatalogImages(params: {
           : typeof generated?.image === "string"
             ? generated.image
             : "";
-    if (!isHttpImageUrl(imageUrl)) continue;
+    if (!isHttpImageUrl(imageUrl)) {
+      logCatalog("missing_generated_image_url", {
+        key,
+        optionLabel: option.label || null,
+        optionValue: option.value || null,
+        subcategoryId: params.subcategoryId,
+      });
+      continue;
+    }
 
     const promptText = buildCatalogPromptForOption({
       categoryName: params.categoryName,
@@ -236,7 +286,14 @@ export async function persistGeneratedCatalogImages(params: {
       subcategoryId: params.subcategoryId,
       supabase: params.supabase,
     });
-    if (!upload) continue;
+    if (!upload) {
+      logCatalog("upload_failed", {
+        imageUrl,
+        key,
+        subcategoryId: params.subcategoryId,
+      });
+      continue;
+    }
 
     const promptInsert = await params.supabase
       .from("prompts")
@@ -247,6 +304,13 @@ export async function persistGeneratedCatalogImages(params: {
       })
       .select("id")
       .single();
+    if (promptInsert.error) {
+      logCatalog("prompt_insert_failed", {
+        error: promptInsert.error.message,
+        key,
+        subcategoryId: params.subcategoryId,
+      });
+    }
     const promptId = String(promptInsert?.data?.id || "");
 
     const imageInsert = await params.supabase
@@ -256,12 +320,14 @@ export async function persistGeneratedCatalogImages(params: {
         image_url: upload.publicUrl,
         instance_id: null,
         metadata: {
+          ai_model: SUBCATEGORY_IMAGE_CATALOG_MODEL_ID,
           catalog_key: key,
           catalog_scope: params.scope,
           category_name: String(params.categoryName || "").trim() || null,
           generated_for: SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR,
           image_prompt_source: String(option.imagePrompt || "").trim() || null,
-          model_id: SUBCATEGORY_IMAGE_CATALOG_MODEL_ID,
+          model_name: "Flux Schnell",
+          model_provider: "Replicate",
           option_description: String(option.description || "").trim() || null,
           option_label: String(option.label || "").trim() || null,
           option_value: String(option.value || "").trim() || null,
@@ -275,7 +341,7 @@ export async function persistGeneratedCatalogImages(params: {
           subcategory_id: params.subcategoryId,
           subcategory_name: String(params.subcategoryName || "").trim() || null,
         } as Json,
-        model_id: SUBCATEGORY_IMAGE_CATALOG_MODEL_ID,
+        model_id: null,
         negative_prompt: null,
         prompt_id: promptId || null,
         replicate_prediction_id: null,
@@ -287,10 +353,22 @@ export async function persistGeneratedCatalogImages(params: {
       .single();
 
     if (imageInsert.error) {
+      logCatalog("image_insert_failed", {
+        error: imageInsert.error.message,
+        key,
+        storagePath: upload.storagePath,
+        subcategoryId: params.subcategoryId,
+      });
       await params.supabase.storage.from(IMAGES_BUCKET).remove([upload.storagePath]).catch(() => undefined);
       continue;
     }
 
+    logCatalog("image_stored", {
+      imageId: imageInsert.data?.id ?? null,
+      key,
+      storagePath: upload.storagePath,
+      subcategoryId: params.subcategoryId,
+    });
     stored += 1;
   }
 

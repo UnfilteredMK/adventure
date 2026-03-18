@@ -619,10 +619,10 @@ export default function NewInstancePage() {
       <div
         className={[
           "container mx-auto flex w-full flex-col px-4",
-          currentStep === 3 ? "max-w-5xl py-6" : "max-w-3xl py-10",
+          currentStep === 3 ? "max-w-5xl py-6 pb-28" : "max-w-3xl py-10",
         ].join(" ")}
       >
-        <div className="mb-6">
+        <div className={currentStep === 3 ? "mb-4" : "mb-6"}>
           <Button
             variant="ghost"
             onClick={() => router.back()}
@@ -634,8 +634,8 @@ export default function NewInstancePage() {
           </Button>
         </div>
 
-        <div className="mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">Create AI Designer</h1>
+        <div className={currentStep === 3 ? "mb-5" : "mb-8"}>
+          <h1 className="text-3xl font-semibold tracking-tight">Create an Adventure Instance</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {currentStep === 1 && 'Step 1 of 4 · Basics'}
             {currentStep === 2 && 'Step 2 of 4 · Choose type'}
@@ -678,353 +678,361 @@ export default function NewInstancePage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {currentStep === 1 && (
-            <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
-              <div className="space-y-5">
-                <div className="space-y-2">
-                  <Label className="text-sm">Name</Label>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., Product Photos AI, Real Estate Visualizer"
-                  />
-                </div>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <Label className="text-sm">Name</Label>
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g., Product Photos AI, Real Estate Visualizer"
+                    />
+                  </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm">
-                    Description <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Briefly describe what your AI designer will do"
-                    className="resize-none"
-                    rows={3}
-                  />
-                </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm">
+                      Description <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Briefly describe what your AI designer will do"
+                      className="resize-none"
+                      rows={3}
+                    />
+                  </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm">
-                    Website URL <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    value={websiteUrl}
-                    onChange={(e) => setWebsiteUrl(e.target.value)}
-                    placeholder="e.g., https://yourcompany.com"
-                    inputMode="url"
-                  />
+                  <div className="space-y-2">
+                    <Label className="text-sm">
+                      Website URL <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      value={websiteUrl}
+                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      placeholder="e.g., https://yourcompany.com"
+                      inputMode="url"
+                    />
+                  </div>
                 </div>
+              </div>
 
-                <div className="pt-2 flex justify-end">
-                  <Button type="button" onClick={nextFromStep1}>
-                    Next
-                  </Button>
-                </div>
+              <div className="flex justify-end pt-4">
+                <Button type="button" onClick={nextFromStep1}>
+                  Next
+                </Button>
               </div>
             </div>
           )}
 
-	          {currentStep === 2 && (
-	            <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
-	              <div className="space-y-5">
-	                <div className="space-y-1.5">
-	                  <Label className="text-sm">Type</Label>
-	                  <p className="text-xs text-muted-foreground">
-	                    Choose what you sell.
-	                  </p>
-	                </div>
-	
-		                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-		                  <button
-		                    type="button"
-		                    onClick={() => setInstanceType('service')}
-		                    className={[
-		                      "relative flex flex-col rounded-xl border p-4 text-left transition-all",
-		                      "hover:border-primary/40 hover:bg-accent/30",
-		                      instanceType === 'service'
-		                        ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
-		                        : "border-border/60 bg-background/30 hover:shadow-sm",
-		                    ].join(" ")}
-		                  >
-		                    {instanceType === "service" ? (
-		                      <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-		                        <Check className="h-4 w-4 text-primary" />
-		                      </div>
-		                    ) : null}
-		                    <div className="flex items-center gap-3">
-		                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-sm ring-1 ring-primary/10">
-		                        <ConciergeBell className="h-5 w-5" />
-		                      </span>
-	                      <div className="min-w-0">
-	                        <div className="text-sm font-semibold leading-none">Services</div>
-	                        <div className="mt-1 text-xs text-muted-foreground">
-	                          For service businesses.
-	                        </div>
-	                      </div>
-	                    </div>
-	
-	                    <div className="mt-3 flex flex-wrap gap-1.5">
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Lead capture
-	                      </span>
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Service picker
-	                      </span>
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Quote-ready
-	                      </span>
-	                    </div>
-	                  </button>
-	
-		                  <button
-		                    type="button"
-		                    onClick={() => setInstanceType('ecomm')}
-		                    className={[
-		                      "relative flex flex-col rounded-xl border p-4 text-left transition-all",
-		                      "hover:border-primary/40 hover:bg-accent/30",
-		                      instanceType === 'ecomm'
-		                        ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
-		                        : "border-border/60 bg-background/30 hover:shadow-sm",
-		                    ].join(" ")}
-		                  >
-		                    {instanceType === "ecomm" ? (
-		                      <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-		                        <Check className="h-4 w-4 text-primary" />
-		                      </div>
-		                    ) : null}
-		                    <div className="flex items-center gap-3">
-		                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-sm ring-1 ring-primary/10">
-		                        <Store className="h-5 w-5" />
-		                      </span>
-	                      <div className="min-w-0">
-	                        <div className="text-sm font-semibold leading-none">E‑commerce</div>
-	                        <div className="mt-1 text-xs text-muted-foreground">
-	                          For online product stores.
-	                        </div>
-	                      </div>
-	                    </div>
-	
-	                    <div className="mt-3 flex flex-wrap gap-1.5">
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Catalog
-	                      </span>
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Product visuals
-	                      </span>
-	                      <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-	                        Store flow
-	                      </span>
-	                    </div>
-	                  </button>
-	                </div>
+          {currentStep === 2 && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
+                <div className="space-y-5">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Type</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Choose what you sell.
+                    </p>
+                  </div>
 
-                <div className="flex items-center justify-between gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => setCurrentStep(1)}>
-                    Back
-                  </Button>
-                  <Button type="button" onClick={nextFromStep2}>
-                    Next
-                  </Button>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setInstanceType('service')}
+                      className={[
+                        "relative flex flex-col rounded-xl border p-4 text-left transition-all",
+                        "hover:border-primary/40 hover:bg-accent/30",
+                        instanceType === 'service'
+                          ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
+                          : "border-border/60 bg-background/30 hover:shadow-sm",
+                      ].join(" ")}
+                    >
+                      {instanceType === "service" ? (
+                        <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      ) : null}
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-sm ring-1 ring-primary/10">
+                          <ConciergeBell className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold leading-none">Services</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            For service businesses.
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Lead capture
+                        </span>
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Visual pre-sale
+                        </span>
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Quote intent
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setInstanceType('ecomm')}
+                      className={[
+                        "relative flex flex-col rounded-xl border p-4 text-left transition-all",
+                        "hover:border-primary/40 hover:bg-accent/30",
+                        instanceType === 'ecomm'
+                          ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
+                          : "border-border/60 bg-background/30 hover:shadow-sm",
+                      ].join(" ")}
+                    >
+                      {instanceType === "ecomm" ? (
+                        <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      ) : null}
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-sm ring-1 ring-primary/10">
+                          <Store className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold leading-none">E‑commerce</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            For online product stores.
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Catalog
+                        </span>
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Product visuals
+                        </span>
+                        <span className="rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+                          Store flow
+                        </span>
+                      </div>
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => setCurrentStep(1)}>
+                  Back
+                </Button>
+                <Button type="button" onClick={nextFromStep2}>
+                  Next
+                </Button>
               </div>
             </div>
           )}
 
           {currentStep === 3 && (
-            <div className="grid min-h-0 max-h-[calc(100dvh-220px)] grid-rows-[minmax(0,1fr)_auto] gap-4">
-              <div className="grid min-h-0 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_340px] md:gap-6">
-                <div className="min-h-0 overflow-hidden">
-                  <CategorySelector
-                    onAccumulatedServicesChange={handleAccumulatedServicesChange}
-                    accountId={accountId}
-                    instanceType={instanceType || undefined}
-                    showCategoryManagement={true}
-                    variant="services"
-                  />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_340px] md:gap-6">
+                <div className="flex h-[calc(100dvh-300px)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm backdrop-blur">
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <CategorySelector
+                      onAccumulatedServicesChange={handleAccumulatedServicesChange}
+                      accountId={accountId}
+                      instanceType={instanceType || undefined}
+                      showCategoryManagement={true}
+                      variant="services"
+                    />
+                  </div>
+
+                  <div className="mt-4 flex shrink-0 items-center justify-between gap-2 pt-4">
+                    <Button type="button" variant="outline" onClick={() => setCurrentStep(2)} className="px-6">
+                      Back
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={nextFromStep3}
+                      disabled={!canProceed || loading}
+                      className="min-w-[200px] px-8"
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="min-h-0">
-                  <Card className="md:sticky md:top-6">
+                <div className="min-h-0 overflow-hidden">
+                  <Card className="overflow-hidden md:sticky md:top-6">
                     <CardHeader className="pb-3">
-	                      <div className="flex items-start justify-between gap-3">
-	                        <div>
-	                          <CardTitle className="text-base">Estimated charges</CardTitle>
-	                          <CardDescription>Credits + USD estimate.</CardDescription>
-	                        </div>
-	                      </div>
-	                    </CardHeader>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <CardTitle className="text-base">Estimated charges</CardTitle>
+                          <CardDescription>Credits + USD estimate.</CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
 
-	                    <CardContent className="space-y-4">
-	                      {selectedServices.length === 0 ? (
-	                        <div className="rounded-xl border border-dashed border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
-	                          Select at least 1 service to see pricing.
-	                        </div>
-	                      ) : (
-	                        <>
-	                          {(() => {
-	                            const rows = [
-	                              {
-	                                credits: pricingPreview.creditPrice ?? 1,
-	                                helper: "Per generated image",
-	                                key: "image",
-	                                label: "Image gen",
-	                              },
-	                              {
-	                                credits: pricingPreview.emailLeadPrice ?? 1,
-	                                helper: "Per captured email",
-	                                key: "email",
-	                                label: "Email lead",
-	                              },
-	                              {
-	                                credits: pricingPreview.phoneLeadPrice ?? 1,
-	                                helper: "Per captured phone",
-	                                key: "phone",
-	                                label: "Phone lead",
-	                              },
-	                            ];
+                    <CardContent className="space-y-4">
+                      {selectedServices.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
+                          Select at least 1 service to see pricing.
+                        </div>
+                      ) : (
+                        <>
+                          {(() => {
+                            const rows = [
+                              {
+                                credits: pricingPreview.creditPrice ?? 1,
+                                helper: "Per generated image",
+                                key: "image",
+                                label: "Image gen",
+                              },
+                              {
+                                credits: pricingPreview.emailLeadPrice ?? 1,
+                                helper: "Per captured email",
+                                key: "email",
+                                label: "Email lead",
+                              },
+                              {
+                                credits: pricingPreview.phoneLeadPrice ?? 1,
+                                helper: "Per captured phone",
+                                key: "phone",
+                                label: "Phone lead",
+                              },
+                            ];
 
-	                            return (
-	                              <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60 overflow-hidden">
-	                                {rows.map((row) => {
-	                                  const credits = row.credits;
-	                                  const creditsLabel =
-	                                    pricingPreview.loading
-	                                      ? "…"
-	                                      : Number.isInteger(credits)
-	                                      ? String(credits)
-	                                      : Number(credits).toFixed(2);
+                            return (
+                              <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60 overflow-hidden">
+                                {rows.map((row) => {
+                                  const credits = row.credits;
+                                  const creditsLabel =
+                                    pricingPreview.loading
+                                      ? "…"
+                                      : Number.isInteger(credits)
+                                      ? String(credits)
+                                      : Number(credits).toFixed(2);
 
-	                                  const { base, high, low } = usdFromCredits(row.credits);
-	                                  const usdTitle = pricingPreview.loading
-	                                    ? row.helper
-	                                    : `${row.helper} · USD range ${formatUsd(low)}–${formatUsd(high)} (est. ${formatUsd(base)} @ $0.07/credit)`;
+                                  const { base, high, low } = usdFromCredits(row.credits);
+                                  const usdTitle = pricingPreview.loading
+                                    ? row.helper
+                                    : `${row.helper} · USD range ${formatUsd(low)}–${formatUsd(high)} (est. ${formatUsd(base)} @ $0.07/credit)`;
 
-	                                  return (
-	                                    <div key={row.key} className="px-3 py-2.5" title={usdTitle}>
-	                                      <div className="flex items-center justify-between gap-4">
-	                                        <div className="min-w-0">
-	                                          <div className="text-sm text-foreground">{row.label}</div>
-	                                          <div className="mt-0.5 text-[11px] text-muted-foreground">{row.helper}</div>
-	                                        </div>
-	                                        <div className="text-right">
-	                                          <div className="text-sm font-semibold tabular-nums">
-	                                            {creditsLabel}{" "}
-	                                            <span className="text-[11px] font-normal text-muted-foreground">credits</span>
-	                                          </div>
-	                                          <div className="text-[11px] text-muted-foreground tabular-nums">
-	                                            ≈ {pricingPreview.loading ? "…" : formatUsd(base)}
-	                                          </div>
-	                                        </div>
-	                                      </div>
-	                                    </div>
-	                                  );
-	                                })}
-	                              </div>
-	                            );
-	                          })()}
-	                        </>
-	                      )}
-	                    </CardContent>
-	                  </Card>
-	                </div>
-              </div>
-
-              <div className="border-t border-border/60 pt-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Button type="button" variant="outline" onClick={() => setCurrentStep(2)} className="px-6">
-                    Back
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={nextFromStep3}
-                    disabled={!canProceed || loading}
-                    className="px-8 min-w-[200px]"
-                  >
-                    Next
-                  </Button>
+                                  return (
+                                    <div key={row.key} className="px-3 py-2.5" title={usdTitle}>
+                                      <div className="flex items-center justify-between gap-4">
+                                        <div className="min-w-0">
+                                          <div className="text-sm text-foreground">{row.label}</div>
+                                          <div className="mt-0.5 text-[11px] text-muted-foreground">{row.helper}</div>
+                                        </div>
+                                        <div className="text-right">
+                                          <div className="text-sm font-semibold tabular-nums">
+                                            {creditsLabel}{" "}
+                                            <span className="text-[11px] font-normal text-muted-foreground">credits</span>
+                                          </div>
+                                          <div className="text-[11px] text-muted-foreground tabular-nums">
+                                            ≈ {pricingPreview.loading ? "…" : formatUsd(base)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
                 </div>
               </div>
             </div>
           )}
 
           {currentStep === 4 && (
-            <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
-              <div className="space-y-5">
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Mode</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Pick a starting preset. You can customize everything later.
-                  </p>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur">
+                <div className="space-y-5">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Mode</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Pick a starting preset. You can customize everything later.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPresetMode("form")}
+                      className={[
+                        "relative rounded-xl border p-4 text-left transition-all",
+                        "hover:border-primary/40 hover:bg-accent/30",
+                        presetMode === "form"
+                          ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
+                          : "border-border/60 bg-background/30 hover:shadow-sm",
+                      ].join(" ")}
+                    >
+                      {presetMode === "form" ? (
+                        <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      ) : null}
+                      <div className="text-sm font-semibold">Form mode (website traffic)</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        A guided flow built for visitors. Great for collecting context before generating images.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPresetMode("iframe")}
+                      className={[
+                        "relative rounded-xl border p-4 text-left transition-all",
+                        "hover:border-primary/40 hover:bg-accent/30",
+                        presetMode === "iframe"
+                          ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
+                          : "border-border/60 bg-background/30 hover:shadow-sm",
+                      ].join(" ")}
+                    >
+                      {presetMode === "iframe" ? (
+                        <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      ) : null}
+                      <div className="text-sm font-semibold">Iframe mode (homepage embed)</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Optimized for embedding directly on a landing page. Visitors generate without a separate flow.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPresetMode("internal")}
+                      className={[
+                        "relative rounded-xl border p-4 text-left transition-all",
+                        "hover:border-primary/40 hover:bg-accent/30",
+                        presetMode === "internal"
+                          ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
+                          : "border-border/60 bg-background/30 hover:shadow-sm",
+                      ].join(" ")}
+                    >
+                      {presetMode === "internal" ? (
+                        <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      ) : null}
+                      <div className="text-sm font-semibold">Internal tool mode (sales)</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Tuned for Zoom calls and sales meetings. Less “marketing” UI, more direct generation.
+                      </div>
+                    </button>
+                  </div>
                 </div>
+              </div>
 
-	                <div className="grid grid-cols-1 gap-3">
-	                  <button
-	                    type="button"
-	                    onClick={() => setPresetMode("form")}
-	                    className={[
-	                      "relative rounded-xl border p-4 text-left transition-all",
-	                      "hover:border-primary/40 hover:bg-accent/30",
-	                      presetMode === "form"
-	                        ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
-	                        : "border-border/60 bg-background/30 hover:shadow-sm",
-	                    ].join(" ")}
-	                  >
-	                    {presetMode === "form" ? (
-	                      <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-	                        <Check className="h-4 w-4 text-primary" />
-	                      </div>
-	                    ) : null}
-	                    <div className="text-sm font-semibold">Form mode (website traffic)</div>
-	                    <div className="mt-1 text-xs text-muted-foreground">
-	                      A guided flow built for visitors. Great for collecting context before generating images.
-	                    </div>
-	                  </button>
-
-	                  <button
-	                    type="button"
-	                    onClick={() => setPresetMode("iframe")}
-	                    className={[
-	                      "relative rounded-xl border p-4 text-left transition-all",
-	                      "hover:border-primary/40 hover:bg-accent/30",
-	                      presetMode === "iframe"
-	                        ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
-	                        : "border-border/60 bg-background/30 hover:shadow-sm",
-	                    ].join(" ")}
-	                  >
-	                    {presetMode === "iframe" ? (
-	                      <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-	                        <Check className="h-4 w-4 text-primary" />
-	                      </div>
-	                    ) : null}
-	                    <div className="text-sm font-semibold">Iframe mode (homepage embed)</div>
-	                    <div className="mt-1 text-xs text-muted-foreground">
-	                      Optimized for embedding directly on a landing page. Visitors generate without a separate flow.
-	                    </div>
-	                  </button>
-
-	                  <button
-	                    type="button"
-	                    onClick={() => setPresetMode("internal")}
-	                    className={[
-	                      "relative rounded-xl border p-4 text-left transition-all",
-	                      "hover:border-primary/40 hover:bg-accent/30",
-	                      presetMode === "internal"
-	                        ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-ring/10"
-	                        : "border-border/60 bg-background/30 hover:shadow-sm",
-	                    ].join(" ")}
-	                  >
-	                    {presetMode === "internal" ? (
-	                      <div className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-	                        <Check className="h-4 w-4 text-primary" />
-	                      </div>
-	                    ) : null}
-	                    <div className="text-sm font-semibold">Internal tool mode (sales)</div>
-	                    <div className="mt-1 text-xs text-muted-foreground">
-	                      Tuned for Zoom calls and sales meetings. Less “marketing” UI, more direct generation.
-	                    </div>
-	                  </button>
-	                </div>
-
-                <div className="flex items-center justify-between gap-2 pt-2">
+              <div className="space-y-3 pt-4">
+                <div className="flex items-center justify-between gap-2">
                   <Button type="button" variant="outline" onClick={() => setCurrentStep(3)}>
                     Back
                   </Button>
@@ -1045,6 +1053,7 @@ export default function NewInstancePage() {
           )}
         </form>
       </div>
+
     </div>
   );
-} 
+}

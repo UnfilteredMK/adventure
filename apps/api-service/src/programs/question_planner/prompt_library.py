@@ -65,9 +65,9 @@ def _planner_goal_and_instructions() -> str:
             "- Vertical-agnostic: your approach should work for any industry/service.\n"
             "- Do not copy an industry's specifics from examples unless the current `services_summary` calls for it.\n"
             "- MAXIMUM 4 questions before concept. Keep the form short to show value early.\n"
-            "- Funnel order (STRICT): style_direction → project_parts/update_areas. No other steps.\n"
+            "- Funnel order (STRICT): the frontend already asked style_direction deterministically, so start with project_parts/update_areas. No other pre-concept steps.\n"
             "- Do NOT add granular steps like fixtures, lighting_style, storage, materials, finish, countertops, flooring.\n"
-            "  Those details are for the refinements phase AFTER the concept appears. Before concept: only style, scope, budget.\n"
+            "  Those details are for the refinements phase AFTER the concept appears. Before concept: only scope here; style and budget are deterministic frontend steps.\n"
             "- Ask 1 scoping question (project_parts / update_areas / remodel_intensity) to narrow what the user wants done.\n"
             "  Use keys like project_parts, update_areas, or remodel_intensity — NOT 'scope' (banned).\n"
             "- Budget is collected by a deterministic widget step, not by planner-generated questions.\n"
@@ -133,27 +133,24 @@ def build_planner_prompt() -> str:
                 "Use `services_summary` to keep questions/wording relevant; avoid invented facts.",
                 "Avoid overly-generic buckets unless unavoidable (e.g. 'Basic/Mid/High/Luxury').",
                 "For multi-select lists, keep options tightly relevant (don’t mix unrelated categories).",
-                "ORDERING (IMPORTANT): Exactly 2 steps after service: style → scope. No extras.\n"
-                "  - Position 1: style_direction (visual direction).\n"
-                "  - Position 2: project_parts or update_areas or remodel_intensity (scope: what to update).\n"
+                "ORDERING (IMPORTANT): The frontend already handles the style/image grid deterministically before DSPy runs.\n"
+                "  - Your first generated step must be project_parts or update_areas or remodel_intensity (scope: what to update).\n"
+                "  - Do NOT generate style_direction.\n"
                 "  - Do NOT add fixture_preference, lighting_style, storage_style, materials, finish, countertops, flooring, etc.\n"
                 "  - Those granular choices belong in the refinements phase after the concept appears.",
                 "KEYS (IMPORTANT): For the pre-concept funnel, use ONLY these keys:\n"
-                "  - style_direction (visual direction)\n"
                 "  - project_parts or update_areas or remodel_intensity (scope)\n"
-                "  - Do NOT use: fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
-                "STYLE_GRID (CRITICAL): The first step MUST be style_direction, but the frontend supplies the actual style/image options from the subcategory catalog.\n"
-                "  - Do NOT generate option_hints/options for style_direction.\n"
-                "  - Only output the user-facing question plus selection rules.\n"
-                "  - Preferred question: \"Pick 3-5 ideal styles from the grid.\"\n"
-                "  - Set allow_multiple: true, min_selections: 3, max_selections: 5.",
+                "  - Do NOT use: style_direction, fixture_preference, lighting_style, storage_style, material_preference, finish_style, color_tone, countertop_material, flooring_material, etc.",
+                "STYLE_GRID (CRITICAL): Never generate style_direction.\n"
+                "  - The frontend owns the style/image selector step and already has its options/images.\n"
+                "  - Start with the next planning question after style has been answered.",
             ],
         ),
         _bullets(
             "REQUIRED RENDER HINTS:",
             [
                 "In this service, pre-concept planning questions are rendered as `multiple_choice`.\n"
-                "For `multiple_choice` items, every plan item MUST include `option_hints`, EXCEPT `style_direction`.\n"
+                "For `multiple_choice` items, every plan item MUST include `option_hints`.\n"
                 "  - Format: either a list of strings (labels) OR a list of objects {label, value?, image_prompt?, price_tier?}.\n"
                 "  - For image-backed choices after the first step (e.g. material_preference, shape), include short `image_prompt` per option so each option can be rendered as an image (e.g. \"modern minimalist kitchen cabinets\"). Keep `label` as plain English for overlay.\n"
                 "  - REQUIRED: For material_preference, finish_style, product/component choices, and any quality-tiered option set, ALWAYS include `price_tier` on every option.\n"
@@ -166,7 +163,6 @@ def build_planner_prompt() -> str:
                 "    The images generated for each option must LOOK different in material quality, not just style.\n"
                 "  - DO NOT include `price_tier` on irrelevant questions (e.g., scheduling, logistics, pure yes/no, or non-cost-sensitive preferences).\n"
                 "  - For `remodel_intensity`, prefer labels like \"Light refresh\" / \"Partial remodel\" / \"Full remodel\".\n"
-                "  - For style_direction (first step): do NOT emit options. Emit only the question and selection constraints. Set `allow_multiple: true`, `min_selections: 3`, `max_selections: 5`.",
                 "  - For other steps: keep to ~3–8 options; include 'Not sure yet' / 'Other' only when it makes sense.",
                 "If a question should allow selecting multiple answers, set `allow_multiple: true`.",
                 "If you want to support an 'Other' free-text option, set `allow_other: true` and optionally `other_label` / `other_placeholder`.",

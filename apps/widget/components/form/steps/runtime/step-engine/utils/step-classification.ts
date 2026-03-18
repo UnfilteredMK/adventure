@@ -1,4 +1,4 @@
-import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_SERVICE_ID } from "../constants";
+import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_SERVICE_ID, DETERMINISTIC_STYLE_ID } from "../constants";
 import { isFunctionCallStep } from "./function-calls";
 
 export function isStructuralStep(step: any): boolean {
@@ -36,6 +36,7 @@ export function isPreviewGateQuestionStep(step: any): boolean {
   const stepId = String((step as any)?.id || "");
   if (stepId.startsWith(DETERMINISTIC_SERVICE_ID)) return false;
   if (stepId === DETERMINISTIC_CONSENT_ID) return false;
+  if (stepId === DETERMINISTIC_STYLE_ID) return false;
   return true;
 }
 

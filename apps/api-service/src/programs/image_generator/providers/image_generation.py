@@ -154,6 +154,18 @@ def _replicate_default_model_id(*, use_case: Optional[str] = None) -> str:
     return model_id
 
 
+def _is_flux_schnell_model(model_id: str) -> bool:
+    return "flux-schnell" in str(model_id or "").strip().lower()
+
+
+def _is_flux_kontext_model(model_id: str) -> bool:
+    return "flux-kontext" in str(model_id or "").strip().lower()
+
+
+def _is_flux_1_1_pro_model(model_id: str) -> bool:
+    return "flux-1.1-pro" in str(model_id or "").strip().lower()
+
+
 def _replicate_create_prediction(*, model_id: str, input: Dict[str, Any]) -> Dict[str, Any]:
     token = _replicate_api_token()
     url = "https://api.replicate.com/v1/predictions"
@@ -322,6 +334,46 @@ def _option_images_placeholder_enabled() -> bool:
     return str(os.getenv("AI_FORM_OPTION_IMAGES_PLACEHOLDER_ON_FAIL") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _truncate_log_value(value: Any, *, limit: int = 240) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _prediction_error_message(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+
+    for key in ("error", "detail", "message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = _prediction_error_message(value)
+            if nested:
+                return nested
+        if isinstance(value, list):
+            for item in value:
+                nested = _prediction_error_message(item)
+                if nested:
+                    return nested
+    return ""
+
+
+def _log_option_image_failure(*, idx: int, model: str, prompt: str, reason: str, prediction: Optional[Dict[str, Any]] = None) -> None:
+    pred = prediction if isinstance(prediction, dict) else {}
+    prediction_id = _truncate_log_value(pred.get("id") or "")
+    status = _truncate_log_value(pred.get("status") or "")
+    error = _truncate_log_value(_prediction_error_message(pred) or reason or "unknown_error", limit=400)
+    prompt_preview = _truncate_log_value(prompt, limit=160)
+    print(
+        f"[option_images] failed idx={idx} model={model} prediction_id={prediction_id or '-'} "
+        f"status={status or '-'} err={error} prompt={prompt_preview}",
+        flush=True,
+    )
+
+
 def _placeholder_image_data_url(*, seed: int, width: int = 512, height: int = 384) -> str:
     """
     Local fallback thumbnail (no external calls).
@@ -367,6 +419,13 @@ def _option_images_model_id() -> str:
     return m or "black-forest-labs/flux-schnell"
 
 
+def _option_image_inference_steps(model_id: str) -> int:
+    configured = _env_int("AI_FORM_OPTION_IMAGES_INFERENCE_STEPS", 4)
+    if _is_flux_schnell_model(model_id):
+        return max(1, min(4, configured))
+    return max(1, configured)
+
+
 def generate_option_images_for_step(
     prompts: List[str],
     *,
@@ -396,8 +455,6 @@ def generate_option_images_for_step(
     max_conc = max(1, min(24, _env_int("AI_FORM_OPTION_IMAGES_MAX_CONCURRENCY", 24)))
     qps = _env_float("AI_FORM_OPTION_IMAGES_QPS", 0.0)
     cache_ttl = max(0, _env_int("AI_FORM_OPTION_IMAGES_CACHE_TTL_SEC", 900))
-    log_errors = str(os.getenv("AI_FORM_OPTION_IMAGES_LOG_ERRORS") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
-
     def _seed_for_prompt(prompt: str) -> Optional[int]:
         """
         Deterministic seed for option thumbnails.
@@ -433,7 +490,7 @@ def generate_option_images_for_step(
             "prompt": prompt,
             "num_outputs": 1,
             "aspect_ratio": "1:1",
-            "num_inference_steps": 4,
+            "num_inference_steps": _option_image_inference_steps(model),
             "output_format": "webp",
             "disable_safety_checker": False,
         }
@@ -442,15 +499,28 @@ def generate_option_images_for_step(
         try:
             created = _replicate_create_prediction(model_id=model, input=inp)
             pred_id = str(created.get("id") or "")
-            status = str(created.get("status") or "")
+            status = str(created.get("status") or "").lower()
             output = created.get("output")
             urls = _normalize_replicate_output_to_urls(output)
-            if not urls and status.lower() not in {"succeeded", "failed", "canceled"}:
+            final = created
+            if not urls and status not in {"succeeded", "failed", "canceled"}:
                 final = _replicate_wait_for_completion(pred_id, timeout_sec=timeout_sec)
+                status = str(final.get("status") or "").lower()
                 urls = _normalize_replicate_output_to_urls(final.get("output"))
             url0 = urls[0] if urls else None
             if url0:
                 _option_images_cache_set(cache_key, url0, ttl_sec=cache_ttl)
+            else:
+                reason = "prediction returned no image URL"
+                if status in {"failed", "canceled", "timeout"}:
+                    reason = f"prediction {status}"
+                _log_option_image_failure(
+                    idx=idx,
+                    model=model,
+                    prediction=final,
+                    prompt=prompt,
+                    reason=reason,
+                )
             return idx, url0, False
         except Exception as e:
             if _option_images_placeholder_enabled():
@@ -466,15 +536,16 @@ def generate_option_images_for_step(
                 except Exception:
                     # Fall through to normal error handling
                     pass
-            if log_errors:
-                try:
-                    msg = str(e)[:400]
-                except Exception:
-                    msg = "unknown_error"
-                print(
-                    f"[option_images] failed idx={idx} model={model} err={msg}",
-                    flush=True,
-                )
+            try:
+                msg = str(e)[:400]
+            except Exception:
+                msg = "unknown_error"
+            _log_option_image_failure(
+                idx=idx,
+                model=model,
+                prompt=prompt,
+                reason=msg,
+            )
             return idx, None, False
 
     with ThreadPoolExecutor(max_workers=min(len(prompts), max_conc)) as executor:
@@ -525,12 +596,15 @@ def generate_images(
     model_id: Optional[str] = None,
     use_case: Optional[str] = None,
     negative_prompt: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     num_inference_steps: Optional[int] = None,
     guidance_scale: Optional[float] = None,
     prompt_strength: Optional[float] = None,
     image_prompt_strength: Optional[float] = None,
+    safety_tolerance: Optional[int] = None,
+    prompt_upsampling: Optional[bool] = None,
     go_fast: Optional[bool] = None,
     reference_images: Optional[List[str]] = None,
     scene_image: Optional[str] = None,
@@ -541,6 +615,13 @@ def generate_images(
 
     model = str(model_id or "").strip() or _replicate_default_model_id(use_case=use_case)
     timeout_sec = float(os.getenv("REPLICATE_TIMEOUT_SEC") or "60")
+    ratio = str(aspect_ratio or "").strip() or _derive_aspect_ratio(width, height) or None
+    primary_reference = next((x for x in (reference_images or []) if isinstance(x, str) and x.strip()), None)
+    primary_edit_image = (
+        scene_image.strip()
+        if isinstance(scene_image, str) and scene_image.strip()
+        else (primary_reference.strip() if isinstance(primary_reference, str) and primary_reference.strip() else None)
+    )
 
     # Minimal cross-model input. Replicate models differ; some reject unknown keys.
     # Build a strict payload for known strict schemas, otherwise use broad compatibility keys.
@@ -561,11 +642,53 @@ def generate_images(
             ratio = _derive_aspect_ratio(width, height)
             if ratio:
                 inp["aspect_ratio"] = ratio
+    elif _is_flux_schnell_model(model):
+        inp = {
+            "prompt": prompt,
+            "num_outputs": max(1, min(4, n)),
+            "aspect_ratio": ratio or "1:1",
+            "num_inference_steps": max(1, min(4, int(num_inference_steps or 4))),
+            "output_format": str(output_format or "webp").strip() or "webp",
+            "disable_safety_checker": False,
+        }
+        if isinstance(go_fast, bool):
+            inp["go_fast"] = go_fast
+    elif _is_flux_kontext_model(model):
+        inp = {"prompt": prompt}
+        if primary_edit_image:
+            inp["input_image"] = primary_edit_image
+        if ratio and not primary_edit_image:
+            inp["aspect_ratio"] = ratio
+        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
+            inp["safety_tolerance"] = safety_tolerance
+        if isinstance(prompt_upsampling, bool):
+            inp["prompt_upsampling"] = prompt_upsampling
+        fmt = str(output_format or "").strip()
+        if fmt:
+            inp["output_format"] = fmt
+    elif _is_flux_1_1_pro_model(model):
+        inp = {"prompt": prompt}
+        if ratio:
+            inp["aspect_ratio"] = ratio
+        if ratio == "custom":
+            if isinstance(width, int) and width > 0:
+                inp["width"] = width
+            if isinstance(height, int) and height > 0:
+                inp["height"] = height
+        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
+            inp["safety_tolerance"] = safety_tolerance
+        if isinstance(prompt_upsampling, bool):
+            inp["prompt_upsampling"] = prompt_upsampling
+        fmt = str(output_format or "").strip()
+        if fmt:
+            inp["output_format"] = fmt
     else:
         inp = {"prompt": prompt}
         inp["num_outputs"] = n
         if negative_prompt and str(negative_prompt).strip():
             inp["negative_prompt"] = str(negative_prompt).strip()
+        if ratio:
+            inp["aspect_ratio"] = ratio
         if isinstance(width, int) and width > 0:
             inp["width"] = width
         if isinstance(height, int) and height > 0:
@@ -578,6 +701,10 @@ def generate_images(
             inp["prompt_strength"] = float(prompt_strength)
         if isinstance(image_prompt_strength, (int, float)) and float(image_prompt_strength) > 0:
             inp["image_prompt_strength"] = float(image_prompt_strength)
+        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
+            inp["safety_tolerance"] = safety_tolerance
+        if isinstance(prompt_upsampling, bool):
+            inp["prompt_upsampling"] = prompt_upsampling
         if isinstance(go_fast, bool):
             inp["go_fast"] = go_fast
         if reference_images and isinstance(reference_images, list) and reference_images:

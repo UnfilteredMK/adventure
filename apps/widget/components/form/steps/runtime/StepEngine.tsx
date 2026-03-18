@@ -5,7 +5,7 @@ import React, { useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStepEngine } from '@/hooks/use-step-engine';
 import { useFormMetrics } from '@/hooks/use-form-metrics';
-import { FlowPlan, FormState, StepDefinition } from '@/types/ai-form';
+import { FlowPlan, FormState, StepDefinition, UIStep } from '@/types/ai-form';
 import { useFormTheme } from '../../demo/FormThemeProvider';
 import { emitFeedback, emitTelemetry } from '@/lib/ai-form/telemetry';
 import { isDevModeEnabled } from '@/lib/ai-form/dev-mode';
@@ -29,6 +29,7 @@ import {
   DETERMINISTIC_PRODUCT_IMAGE_ID,
   DETERMINISTIC_SCENE_IMAGE_ID,
   DETERMINISTIC_SERVICE_ID,
+  DETERMINISTIC_STYLE_ID,
   DETERMINISTIC_USER_IMAGE_ID,
   FORM_STATE_SCHEMA_VERSION,
   PRICING_ESTIMATE_KEY,
@@ -107,6 +108,39 @@ interface StepEngineProps {
   /** When true, render widget-style branding header above the step jogger. */
   showBrandingHeader?: boolean;
   onMeta?: (meta: { [key: string]: any }) => void;
+}
+
+function isBootstrapStepIdValue(stepId: string | null | undefined): boolean {
+  const id = String(stepId || "");
+  return id.startsWith(DETERMINISTIC_SERVICE_ID) || id === DETERMINISTIC_CONSENT_ID || id === DETERMINISTIC_STYLE_ID;
+}
+
+function buildDeterministicStyleStepForService(serviceMeta: any): UIStep | null {
+  const styleOptions = Array.isArray(serviceMeta?.styleOptions) ? serviceMeta.styleOptions : [];
+  if (styleOptions.length === 0) return null;
+  const question =
+    typeof serviceMeta?.styleQuestion === "string" && serviceMeta.styleQuestion.trim()
+      ? serviceMeta.styleQuestion.trim()
+      : "Pick 3-5 ideal styles from the grid.";
+  return {
+    id: DETERMINISTIC_STYLE_ID,
+    type: "image_choice_grid",
+    question,
+    options: styleOptions
+      .map((opt: any) => ({
+        label: String(opt?.label || ""),
+        value: String(opt?.value || opt?.label || ""),
+        imageUrl: typeof opt?.imageUrl === "string" ? opt.imageUrl : "",
+        ...(typeof opt?.description === "string" && opt.description ? { description: opt.description } : {}),
+        ...(typeof opt?.priceTier === "string" && opt.priceTier ? { priceTier: opt.priceTier } : {}),
+      }))
+      .filter((opt: any) => opt.label && opt.value && opt.imageUrl)
+      .slice(0, 20),
+    multi_select: true,
+    min_selections: 3,
+    max_selections: 5,
+    metricGain: 0.12,
+  } as any;
 }
 
 export function StepEngine({
@@ -197,6 +231,7 @@ export function StepEngine({
   const [budgetApiRange, setBudgetApiRange] = useState<{ min: number; max: number; currency: string } | null>(null);
   const budgetApiLoadedSessionRef = useRef<string | null>(null);
   const devModeEnabled = useMemo(() => isDevModeEnabled(), []);
+  const previousSelectedServiceIdRef = useRef<string | null>(null);
   
   const { trackStepStart, trackStepComplete } = useFormMetrics({
     instanceId,
@@ -421,6 +456,7 @@ export function StepEngine({
     updateStepData,
     patchStep,
     markStepComplete,
+    removeContextEntry,
   } = useStepEngine({
     instanceId,
     sessionScopeKey: effectiveSessionScopeKey,
@@ -428,6 +464,19 @@ export function StepEngine({
     onFlowComplete: handleFlowComplete,
     extra: contextExtra
   });
+  const serviceCatalogSnapshot = useMemo(
+    () => (sessionId ? loadServiceCatalog(sessionId) : null),
+    [sessionId, state?.stepData]
+  );
+  const selectedServiceId = useMemo(
+    () => pickPrimaryServiceId((state?.stepData || {}) as Record<string, any>),
+    [state?.stepData]
+  );
+  const selectedServiceMeta = selectedServiceId ? (serviceCatalogSnapshot?.byServiceId as any)?.[selectedServiceId] : null;
+  const deterministicStyleStep = useMemo(
+    () => buildDeterministicStyleStepForService(selectedServiceMeta),
+    [selectedServiceMeta]
+  );
 
   const budgetValue = useMemo((): number | null => {
     const raw = (state?.stepData as any)?.[DETERMINISTIC_BUDGET_ID];
@@ -1283,8 +1332,7 @@ export function StepEngine({
     // Determine step source and characteristics
     const isDeterministic =
       isStructuralStep(currentStep) ||
-      stepId.startsWith("step-service-primary") ||
-      stepId === "step-pricing-accuracy-consent";
+      isBootstrapStepIdValue(stepId);
     const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
     const totalSteps = state?.steps?.length || 0;
     
@@ -1562,8 +1610,7 @@ export function StepEngine({
         const meta = stepMetaRef.current.get(stepId);
         const isDeterministic =
           isStructuralStep(skipped) ||
-          stepId.startsWith("step-service-primary") ||
-          stepId === "step-pricing-accuracy-consent";
+          isBootstrapStepIdValue(stepId);
         const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
         const totalSteps = state?.steps?.length || 0;
         
@@ -2151,6 +2198,53 @@ export function StepEngine({
     [fetchAndAppendBatch]
   );
 
+  useEffect(() => {
+    if (!state || !selectedServiceId) return;
+    const previousServiceId = previousSelectedServiceIdRef.current;
+    const serviceChanged = Boolean(previousServiceId && previousServiceId !== selectedServiceId);
+    previousSelectedServiceIdRef.current = selectedServiceId;
+
+    const existingStyleStep = (state.steps || []).find((step: any) => String((step as any)?.id || "") === DETERMINISTIC_STYLE_ID) as any;
+    if (!deterministicStyleStep) {
+      if (serviceChanged && existingStyleStep) {
+        removeContextEntry(DETERMINISTIC_STYLE_ID);
+      }
+      return;
+    }
+
+    if (!existingStyleStep) {
+      const serviceIndex = (state.steps || []).findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_SERVICE_ID);
+      addSteps([deterministicStyleStep as any], false, {
+        insertAtIndex: serviceIndex >= 0 ? serviceIndex + 1 : 1,
+        moveExisting: true,
+      });
+      return;
+    }
+
+    const existingSignature = JSON.stringify({
+      question: existingStyleStep?.question ?? null,
+      options: Array.isArray(existingStyleStep?.options) ? existingStyleStep.options : [],
+    });
+    const nextSignature = JSON.stringify({
+      question: (deterministicStyleStep as any).question ?? null,
+      options: Array.isArray((deterministicStyleStep as any)?.options) ? (deterministicStyleStep as any).options : [],
+    });
+    if (existingSignature !== nextSignature || existingStyleStep?.type !== "image_choice_grid") {
+      patchStep(DETERMINISTIC_STYLE_ID, {
+        type: "image_choice_grid",
+        question: (deterministicStyleStep as any).question,
+        options: (deterministicStyleStep as any).options,
+        multi_select: true,
+        min_selections: 3,
+        max_selections: 5,
+      } as any);
+    }
+
+    if (serviceChanged) {
+      removeContextEntry(DETERMINISTIC_STYLE_ID);
+    }
+  }, [addSteps, deterministicStyleStep, patchStep, removeContextEntry, selectedServiceId, state]);
+
   // If the user refreshes after completing deterministic steps, there may be no AI steps yet.
   // In that case, automatically fetch the first batch once we have the deterministic answers.
   useEffect(() => {
@@ -2163,7 +2257,7 @@ export function StepEngine({
     const hasAnyNonDeterministicStep = (state.steps || []).some((step: any) => {
       const stepId = step?.id;
       if (!stepId) return false;
-      if (stepId === DETERMINISTIC_CONSENT_ID || stepId === DETERMINISTIC_SERVICE_ID) return false;
+      if (isBootstrapStepIdValue(stepId)) return false;
       return true;
     });
     if (hasAnyNonDeterministicStep) return;
@@ -2231,8 +2325,7 @@ export function StepEngine({
       // Determine step source and characteristics
       const isDeterministic =
         isStructuralStep(currentStep) ||
-        stepId.startsWith("step-service-primary") ||
-        stepId === "step-pricing-accuracy-consent";
+        isBootstrapStepIdValue(stepId);
       const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
       const totalSteps = state?.steps?.length || 0;
       const stepNumber = (state?.currentStepIndex ?? 0) + 1;
@@ -2319,11 +2412,24 @@ export function StepEngine({
     // If user is on the last currently-known step, trigger JIT batching to fetch more.
     // `generate-steps` expects stepDataSoFar + existingStepIds to generate the next question batch.
     const isLastKnownStep = Boolean(state && state.currentStepIndex >= (state.steps.length - 1));
-    const updatedStepDataSoFar = {
+    const updatedStepDataSoFar: Record<string, any> = {
       ...(state?.stepData || {}),
       [currentStep.id]: data,
       ...(shouldMirrorRefinementSceneUpload ? { [DETERMINISTIC_SCENE_IMAGE_ID]: data } : {}),
     };
+    const nextSelectedServiceId =
+      currentStep.id === DETERMINISTIC_SERVICE_ID && typeof data === "string" && data.trim()
+        ? data.trim()
+        : selectedServiceId;
+    const nextSelectedServiceMeta =
+      nextSelectedServiceId && serviceCatalogSnapshot?.byServiceId
+        ? (serviceCatalogSnapshot.byServiceId as any)[nextSelectedServiceId]
+        : null;
+    const nextDeterministicStyleStep = buildDeterministicStyleStepForService(nextSelectedServiceMeta);
+    const shouldRouteToDeterministicStyleStep =
+      currentStep.id === DETERMINISTIC_SERVICE_ID &&
+      Boolean(nextDeterministicStyleStep) &&
+      !hasMeaningfulAnswer(updatedStepDataSoFar[DETERMINISTIC_STYLE_ID]);
 
     // Persist personalization + lead-gate state into session-scoped FormState.
     if (flowPlan?.sessionId && formState) {
@@ -2393,6 +2499,23 @@ export function StepEngine({
       // Keep answers/state, but never continue loading or advancing question flow until lead capture.
       persistStepAnswer();
       return;
+    }
+
+    if (shouldRouteToDeterministicStyleStep) {
+      const existingStyleIndex = (state?.steps || []).findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_STYLE_ID);
+      persistStepAnswer();
+      markStepComplete(currentStep.id);
+      if (existingStyleIndex >= 0) {
+        goToStep(existingStyleIndex);
+        return;
+      }
+      if (nextDeterministicStyleStep) {
+        addSteps([nextDeterministicStyleStep as any], true, {
+          insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
+          moveExisting: true,
+        });
+        return;
+      }
     }
     
     // Optional lookahead: allow fetching the next batch *after an input* a few steps before the end.
@@ -2562,8 +2685,7 @@ export function StepEngine({
       const meta = stepMetaRef.current.get(stepId);
       const isDeterministic =
         isStructuralStep(currentStep) ||
-        stepId.startsWith("step-service-primary") ||
-        stepId === "step-pricing-accuracy-consent";
+        isBootstrapStepIdValue(stepId);
       const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
       const totalSteps = state?.steps?.length || 0;
       const stepNumber = (state?.currentStepIndex ?? 0) + 1;
@@ -2637,8 +2759,7 @@ export function StepEngine({
         const meta = stepMetaRef.current.get(toStepId);
         const isDeterministic =
           isStructuralStep(toStep) ||
-          toStepId.startsWith("step-service-primary") ||
-          toStepId === "step-pricing-accuracy-consent";
+          isBootstrapStepIdValue(toStepId);
         const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
         const totalSteps = state?.steps?.length || 0;
         const requestPayload = meta?.payloadRequest ?? null;
@@ -2682,8 +2803,7 @@ export function StepEngine({
           const meta = stepMetaRef.current.get(toStepId);
           const isDeterministic =
             isStructuralStep(toStep) ||
-            toStepId.startsWith("step-service-primary") ||
-            toStepId === "step-pricing-accuracy-consent";
+            isBootstrapStepIdValue(toStepId);
           const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
           const totalSteps = state?.steps?.length || 0;
           
@@ -2732,9 +2852,7 @@ export function StepEngine({
   }, [isStepAnsweredForCounts, state?.stepData, state?.steps]);
 
   const isBootstrapStepId = useCallback((stepId: string | null | undefined) => {
-    const id = String(stepId || "");
-    if (!id) return false;
-    return id.startsWith(DETERMINISTIC_SERVICE_ID) || id === DETERMINISTIC_CONSENT_ID;
+    return isBootstrapStepIdValue(stepId);
   }, []);
 
   // If the user resumes a session where steps are already present (e.g. from localStorage),
@@ -3171,6 +3289,7 @@ export function StepEngine({
   const getStepJoggerLabel = (step: any, index: number): string => {
     const stepId = String(step?.id || "");
     if (stepId.startsWith("step-service-primary")) return "Service";
+    if (stepId === DETERMINISTIC_STYLE_ID) return "Style";
     if (stepId.includes("budget")) return "Budget";
     if (stepId.includes("upload-scene")) return "Upload Photo";
     if (stepId.includes("upload-user")) return "Person Photo";

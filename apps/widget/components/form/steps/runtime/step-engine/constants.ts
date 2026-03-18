@@ -1,5 +1,6 @@
 export const DETERMINISTIC_CONSENT_ID = "step-pricing-accuracy-consent";
 export const DETERMINISTIC_SERVICE_ID = "step-service-primary";
+export const DETERMINISTIC_STYLE_ID = "step-style-direction";
 export const DETERMINISTIC_FULL_NAME_ID = "step-user-full-name";
 export const DETERMINISTIC_SCENE_IMAGE_ID = "step-upload-scene-image";
 export const DETERMINISTIC_USER_IMAGE_ID = "step-upload-user-image";

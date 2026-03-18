@@ -43,6 +43,15 @@ function resolveFormServiceBaseUrls(): string[] {
   return Array.from(new Set(urls)).filter(Boolean);
 }
 
+function logSeed(label: string, data: Record<string, unknown>) {
+  try {
+    const text = JSON.stringify(data);
+    console.log(`[subcategory-seed] ${label} ${text.length > 4000 ? `${text.slice(0, 4000)}...` : text}`);
+  } catch {
+    console.log(`[subcategory-seed] ${label}`);
+  }
+}
+
 async function callFormServiceUpstream(params: {
   baseUrls: string[];
   path: string;
@@ -182,10 +191,17 @@ export async function POST(request: NextRequest) {
       storedImages: 0,
     };
 
+    logSeed("start", {
+      baseUrls,
+      instanceId,
+      subcategoryCount: targets.size,
+    });
+
     for (const [subcategoryId, rawSubcategory] of targets.entries()) {
       summary.checked += 1;
       const subcategory = rawSubcategory as any;
       if (!subcategory || !isSystemOwnedSubcategory(subcategory)) {
+        logSeed("skip_custom", { instanceId, subcategoryId });
         summary.skippedCustom += 1;
         continue;
       }
@@ -197,6 +213,11 @@ export async function POST(request: NextRequest) {
         supabase: admin,
       });
       if (existing.length > 0) {
+        logSeed("skip_existing", {
+          existingCount: existing.length,
+          instanceId,
+          subcategoryId,
+        });
         summary.skippedExisting += 1;
         continue;
       }
@@ -226,18 +247,50 @@ export async function POST(request: NextRequest) {
         subcategoryName,
       };
 
+      logSeed("upstream_request", {
+        categoryName,
+        instanceId,
+        serviceSummary,
+        subcategoryId,
+        subcategoryName,
+      });
+
       const upstream = await callFormServiceUpstream({
         baseUrls,
         path: "/v1/api/subcategory-catalog/generate",
         payload,
       });
       if (!upstream.ok || !Array.isArray(upstream.json?.options)) {
+        logSeed("upstream_failed", {
+          error: upstream.error,
+          instanceId,
+          responseKeys: upstream.ok && upstream.json && typeof upstream.json === "object" ? Object.keys(upstream.json) : [],
+          subcategoryId,
+        });
         summary.failures.push({
           error: typeof upstream.error === "string" ? upstream.error : "Failed to generate seed images",
           subcategoryId,
         });
         continue;
       }
+
+      const optionImageCount = upstream.json.options.filter(
+        (item: any) =>
+          item &&
+          typeof item === "object" &&
+          (typeof item.imageUrl === "string" || typeof item.image_url === "string" || typeof item.image === "string"),
+      ).length;
+      logSeed("upstream_response", {
+        imageStats: upstream.json.imageStats ?? null,
+        instanceId,
+        optionCount: Array.isArray(upstream.json.options) ? upstream.json.options.length : 0,
+        optionImageCount,
+        plannerSource: upstream.json.plannerSource ?? null,
+        question: upstream.json.question ?? null,
+        requestId: upstream.json.requestId ?? null,
+        subcategoryId,
+        targetCount: upstream.json.targetCount ?? null,
+      });
 
       const rawSeedOptions = Array.isArray(upstream.json?.concepts)
         ? upstream.json.concepts
@@ -289,9 +342,20 @@ export async function POST(request: NextRequest) {
       });
 
       if (stored > 0) {
+        logSeed("stored_success", {
+          instanceId,
+          stored,
+          subcategoryId,
+        });
         summary.seededSubcategories += 1;
         summary.storedImages += stored;
       } else {
+        logSeed("stored_zero", {
+          generatedOptionCount: Array.isArray(upstream.json.options) ? upstream.json.options.length : 0,
+          instanceId,
+          normalizedSeedOptionCount: seedOptions.length,
+          subcategoryId,
+        });
         summary.failures.push({
           error: "Generation completed but no images were stored",
           subcategoryId,
@@ -299,8 +363,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    logSeed("done", summary);
     return NextResponse.json({ ok: true, ...summary });
   } catch (error: any) {
+    logSeed("fatal", {
+      error: error?.message ? String(error.message) : String(error),
+    });
     return NextResponse.json(
       { error: error?.message ? String(error.message) : "Failed to seed subcategory catalog" },
       { status: 500 },

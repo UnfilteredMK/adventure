@@ -78,9 +78,17 @@ function useIsNarrowViewport(maxWidthPx: number): boolean {
   return isNarrow;
 }
 
-function coerceImageChoiceVariant(raw: unknown): ImageChoiceVariant | null {
-  if (raw === "swipe" || raw === "selectors") return raw;
-  return null;
+function isStyleDirectionStep(step: StepDefinition | MultipleChoiceUI): boolean {
+  const rawId = String((step as any)?.id || (step as any)?.key || "").trim().toLowerCase();
+  return rawId === "style_direction" || rawId === "step-style-direction";
+}
+
+function buildSelectionHint(minSelections: number, maxSelections?: number): string | null {
+  if (!Number.isFinite(minSelections) || minSelections <= 0) return null;
+  if (Number.isFinite(Number(maxSelections)) && Number(maxSelections) > minSelections) {
+    return `Pick ${minSelections} to ${Number(maxSelections)} styles to continue.`;
+  }
+  return `Pick at least ${minSelections} style${minSelections === 1 ? "" : "s"} to continue.`;
 }
 
 export function ImageChoiceGridStep({
@@ -101,15 +109,20 @@ export function ImageChoiceGridStep({
     : (step as StepDefinition).content?.options || (step as StepDefinition).data?.options || [];
   const options = normalizeOptions(optionsRaw as any[]).filter((option) => !isOtherOption(option));
   const multiple = isUIStep ? Boolean((step as MultipleChoiceUI).multi_select) : Boolean((step as StepDefinition).data?.multiple);
+  const isStyleStep = isStyleDirectionStep(step);
   const minSelections =
     isUIStep && multiple && Number.isFinite(Number((step as any)?.min_selections))
       ? Math.max(1, Math.floor(Number((step as any).min_selections)))
+      : isStyleStep && multiple
+        ? 3
       : multiple
         ? 1
         : 1;
   const maxSelections =
     isUIStep && multiple && Number.isFinite(Number((step as any)?.max_selections))
       ? Math.max(1, Math.floor(Number((step as any).max_selections)))
+      : isStyleStep && multiple
+        ? 5
       : undefined;
   const [value, setValue] = React.useState<any>(stepData ?? (multiple ? [] : ""));
   React.useEffect(() => {
@@ -117,22 +130,25 @@ export function ImageChoiceGridStep({
   }, [stepData]);
 
   const isNarrowViewport = useIsNarrowViewport(768);
-  const backendVariant = isUIStep
-    ? coerceImageChoiceVariant((step as any)?.imageChoiceVariant ?? (step as any)?.variant)
-    : coerceImageChoiceVariant((step as any)?.data?.imageChoiceVariant ?? (step as any)?.data?.variant ?? (step as any)?.variant);
   const effectiveVariant: ImageChoiceVariant = guidedThumbnailMode
     ? "selectors"
     : compactInPreview
       ? "selectors"
       : isNarrowViewport
-        ? (backendVariant ?? "swipe")
+        ? "selectors"
         : "selectors";
 
   const columns = isUIStep ? (step as any)?.columns : (step as any)?.data?.columns;
   const normalizedColumns = Number.isFinite(Number(columns)) ? Math.max(1, Math.min(6, Math.floor(Number(columns)))) : undefined;
+  const effectiveColumns =
+    !guidedThumbnailMode && !compactInPreview && isNarrowViewport
+      ? 1
+      : normalizedColumns;
 
   const selectedArray = Array.isArray(value) ? value : value ? [value] : [];
   const canContinue = multiple ? selectedArray.length >= minSelections : Boolean(value);
+  const selectionHint = multiple ? buildSelectionHint(minSelections, maxSelections) : null;
+  const maxReached = Boolean(multiple && Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections));
 
   return (
     <StepLayout
@@ -143,11 +159,20 @@ export function ImageChoiceGridStep({
       isLoading={isLoading}
       canContinue={canContinue}
       headerInlineControl={headerInlineControl}
-      actionsVariant={actionsVariant}
+      actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
       compactInPreview={compactInPreview}
       preferWideLayout={!compactInPreview}
     >
       <div className={compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-5xl min-w-0 flex-col overflow-hidden" : "flex min-h-0 w-full min-w-0 flex-col"}>
+        {selectionHint ? (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/70 px-3 py-2 text-xs sm:text-sm">
+            <span className="text-muted-foreground">{selectionHint}</span>
+            <span className={maxReached ? "font-semibold text-primary" : "font-medium text-muted-foreground"}>
+              {selectedArray.length}
+              {Number.isFinite(Number(maxSelections)) ? ` / ${Number(maxSelections)}` : ""}
+            </span>
+          </div>
+        ) : null}
         <ImageChoiceGrid
           value={value}
           onChange={setValue}
@@ -159,11 +184,10 @@ export function ImageChoiceGridStep({
           multiple={multiple}
           maxSelections={maxSelections}
           variant={effectiveVariant}
-          columns={normalizedColumns}
+          columns={effectiveColumns}
           thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
         />
       </div>
     </StepLayout>
   );
 }
-

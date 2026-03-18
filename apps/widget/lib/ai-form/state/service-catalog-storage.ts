@@ -6,6 +6,14 @@ export type ServiceCatalogItem = {
   industryId: string | null;
   industryName: string | null;
   serviceSummary?: string | null;
+  styleQuestion?: string | null;
+  styleOptions?: Array<{
+    label: string;
+    value: string;
+    imageUrl: string;
+    description?: string | null;
+    priceTier?: string | null;
+  }>;
 };
 
 export type ServiceCatalogSnapshot = {
@@ -49,6 +57,19 @@ export function saveServiceCatalog(sessionId: string, items: ServiceCatalogItem[
         industryId: typeof item?.industryId === "string" ? item.industryId : null,
         industryName: typeof item?.industryName === "string" ? item.industryName : null,
         serviceSummary: typeof (item as any)?.serviceSummary === "string" ? String((item as any).serviceSummary).trim() || null : null,
+        styleQuestion: typeof (item as any)?.styleQuestion === "string" ? String((item as any).styleQuestion).trim() || null : null,
+        styleOptions: Array.isArray((item as any)?.styleOptions)
+          ? (item as any).styleOptions
+              .map((opt: any) => ({
+                label: typeof opt?.label === "string" ? opt.label : "",
+                value: typeof opt?.value === "string" ? opt.value : "",
+                imageUrl: typeof opt?.imageUrl === "string" ? opt.imageUrl : "",
+                description: typeof opt?.description === "string" ? opt.description : null,
+                priceTier: typeof opt?.priceTier === "string" ? opt.priceTier : null,
+              }))
+              .filter((opt: any) => opt.label && opt.value && opt.imageUrl)
+              .slice(0, 20)
+          : undefined,
       };
     }
     const snapshot: ServiceCatalogSnapshot = { v: 1, byServiceId };

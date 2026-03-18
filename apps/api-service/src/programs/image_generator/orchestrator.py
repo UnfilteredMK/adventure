@@ -14,6 +14,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+from programs.common.visual_text_safety import sanitize_visual_context_text
 from programs.image_generator.prompt_builder import build_image_prompt_text, extract_negative_prompt, extract_reference_images
 
 
@@ -55,6 +56,20 @@ def _best_effort_parse_json(text: str) -> Any:
         return json.loads(text)
     except Exception:
         return None
+
+
+def _merge_negative_prompt(primary: str, fallback: str) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw in (primary, fallback):
+        for item in str(raw or "").split(","):
+            token = item.strip()
+            key = token.lower()
+            if not token or key in seen:
+                continue
+            seen.add(key)
+            parts.append(token)
+    return ", ".join(parts)
 
 
 def _tail_lines(text: str, *, max_lines: int = 30, max_chars: int = 1200) -> str:
@@ -107,9 +122,13 @@ def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     def clean(val: Any) -> str:
         if isinstance(val, list):
-            parts = [str(x).strip() for x in val if isinstance(x, str) and not uuid_re.match(str(x).strip()) and not url_re.match(str(x).strip())]
+            parts = [
+                sanitize_visual_context_text(str(x).strip())
+                for x in val
+                if isinstance(x, str) and not uuid_re.match(str(x).strip()) and not url_re.match(str(x).strip())
+            ]
             return ", ".join(p for p in parts if p)
-        t = str(val or "").strip()
+        t = sanitize_visual_context_text(val)
         if uuid_re.match(t) or url_re.match(t):
             return ""
         return t
@@ -118,8 +137,8 @@ def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(ctx, dict):
         ctx = {}
     svc = ctx.get("service") or {}
-    service_name = (svc.get("name") or "") if isinstance(svc, dict) else ""
-    service_summary = str(ctx.get("serviceSummary") or ctx.get("service_summary") or "")[:500]
+    service_name = sanitize_visual_context_text((svc.get("name") or "") if isinstance(svc, dict) else "", max_len=160)
+    service_summary = sanitize_visual_context_text(ctx.get("serviceSummary") or ctx.get("service_summary") or "", max_len=500)
 
     use_case = str(payload.get("useCase") or payload.get("use_case") or "scene").strip().lower()
     # Use normalized extraction so edit-mode follows all usable refs
@@ -152,11 +171,14 @@ def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(style_raw, list):
         style_tags = ", ".join(str(x).strip() for x in style_raw if str(x).strip())
     elif isinstance(style_raw, str):
-        style_tags = style_raw
+        style_tags = sanitize_visual_context_text(style_raw, max_len=240)
 
-    budget = str(step_data.get("budget_range") or step_data.get("budgetRange") or step_data.get("step-budget-range") or "")
-    location_city = str(step_data.get("location_city") or step_data.get("locationCity") or "")
-    location_state = str(step_data.get("location_state") or step_data.get("locationState") or "")
+    budget = sanitize_visual_context_text(
+        step_data.get("budget_range") or step_data.get("budgetRange") or step_data.get("step-budget-range") or "",
+        max_len=120,
+    )
+    location_city = sanitize_visual_context_text(step_data.get("location_city") or step_data.get("locationCity") or "", max_len=80)
+    location_state = sanitize_visual_context_text(step_data.get("location_state") or step_data.get("locationState") or "", max_len=80)
     location = f"{location_city}, {location_state}".strip(", ") if location_city or location_state else ""
 
     return {
@@ -250,18 +272,21 @@ def _extract_scene_placement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
         ctx = {}
     svc = ctx.get("service") or {}
     service_name = (svc.get("name") or "") if isinstance(svc, dict) else ""
-    service_summary = str(ctx.get("serviceSummary") or ctx.get("service_summary") or "")[:500]
-    subject = str(step_data.get("step-service-primary") or step_data.get("service_primary") or service_name or "project").strip()[:140] or "project"
+    service_summary = sanitize_visual_context_text(ctx.get("serviceSummary") or ctx.get("service_summary") or "", max_len=500)
+    subject = sanitize_visual_context_text(
+        step_data.get("step-service-primary") or step_data.get("service_primary") or service_name or "project",
+        max_len=140,
+    ) or "project"
 
     style_raw = step_data.get("style")
     style_tags = ""
     if isinstance(style_raw, list):
         style_tags = ", ".join(str(x).strip() for x in style_raw if str(x).strip())
     elif isinstance(style_raw, str):
-        style_tags = style_raw
+        style_tags = sanitize_visual_context_text(style_raw, max_len=240)
 
-    location_city = str(step_data.get("location_city") or step_data.get("locationCity") or "")
-    location_state = str(step_data.get("location_state") or step_data.get("locationState") or "")
+    location_city = sanitize_visual_context_text(step_data.get("location_city") or step_data.get("locationCity") or "", max_len=80)
+    location_state = sanitize_visual_context_text(step_data.get("location_state") or step_data.get("locationState") or "", max_len=80)
     location = f"{location_city}, {location_state}".strip(", ") if location_city or location_state else ""
 
     reference_images, scene_image, product_image = extract_reference_images(payload)
@@ -319,14 +344,14 @@ def _extract_tryon_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     ctx = payload.get("instanceContext") or payload.get("instance_context") or {}
     if not isinstance(ctx, dict):
         ctx = {}
-    service_summary = str(ctx.get("serviceSummary") or ctx.get("service_summary") or "")[:300]
+    service_summary = sanitize_visual_context_text(ctx.get("serviceSummary") or ctx.get("service_summary") or "", max_len=300)
 
     style_raw = step_data.get("style")
     style_tags = ""
     if isinstance(style_raw, list):
         style_tags = ", ".join(str(x).strip() for x in style_raw if str(x).strip())
     elif isinstance(style_raw, str):
-        style_tags = style_raw
+        style_tags = sanitize_visual_context_text(style_raw, max_len=240)
     style_direction = style_tags.strip() or "photorealistic try-on"
 
     product_or_style_context = service_summary or "Photorealistic virtual try-on."
@@ -446,8 +471,10 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
     if not prompt_text or len(prompt_text) < 20:
         return None
 
-    if not neg_text:
-        neg_text = get_negative_prompt()
+    neg_text = _merge_negative_prompt(
+        neg_text,
+        get_negative_prompt(str(payload.get("modelId") or payload.get("model_id") or "")),
+    )
 
     spec_obj = {
         "prompt": prompt_text,
@@ -584,6 +611,9 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     width = _as_int(payload.get("width"))
     height = _as_int(payload.get("height"))
+    aspect_ratio = (
+        str(payload.get("aspectRatio") or payload.get("aspect_ratio") or "").strip() or None
+    )
     num_inference_steps = _as_int(
         payload.get("numInferenceSteps")
         or payload.get("num_inference_steps")
@@ -605,6 +635,14 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload.get("goFast")
         or payload.get("go_fast")
     )
+    safety_tolerance = _as_int(
+        payload.get("safetyTolerance")
+        or payload.get("safety_tolerance")
+    )
+    prompt_upsampling = _as_bool(
+        payload.get("promptUpsampling")
+        or payload.get("prompt_upsampling")
+    )
 
     # Provider call
     from programs.image_generator.providers.image_generation import generate_images  # local import (keeps module light)
@@ -618,12 +656,15 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
             model_id=model_id,
             use_case=str(payload.get("useCase") or "").strip() or None,
             negative_prompt=negative_prompt,
+            aspect_ratio=aspect_ratio,
             width=width,
             height=height,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             prompt_strength=prompt_strength,
             image_prompt_strength=image_prompt_strength,
+            safety_tolerance=safety_tolerance,
+            prompt_upsampling=prompt_upsampling,
             go_fast=go_fast,
             reference_images=reference_images_list,
             scene_image=scene_image,
