@@ -3049,10 +3049,13 @@ export function ImagePreviewExperience(props: {
 				                    {shouldShowBottomPricingPill ? (
 				                      <div
 				                        data-pricing-pill
-				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[10rem] transition-[max-width,padding] duration-300 ease-out"
+				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out outline outline-1 outline-sky-300/90 bg-sky-300/10"
 			                        style={{
-			                          maxWidth: 'clamp(48%, 70% - 6vw, 58%)',
-			                          padding: 'clamp(0.4rem, 2vw, 0.75rem) clamp(0.6rem, 2.5vw, 0.85rem)',
+                          maxWidth: 'clamp(34%, 50% - 4.3vw, 42%)',
+			                          paddingTop: 'clamp(0.44rem, 1.8vw, 0.64rem)',
+			                          paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
+			                          paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
+			                          paddingRight: 'clamp(0.56rem, 2.1vw, 0.78rem)',
 			                          backgroundColor: pillBg,
 			                          backdropFilter: 'blur(12px)',
 			                          WebkitBackdropFilter: 'blur(12px)',
@@ -3061,7 +3064,7 @@ export function ImagePreviewExperience(props: {
 				                          <PricingExperience
 				                            variant="pill"
 				                            className="w-full border-0"
-				                            containerClassName="w-full min-w-0 px-1 py-0"
+				                            containerClassName="w-full min-w-0 px-0 py-0"
                             transparentBackground
                             label={pillLabel}
                           termsHref="/terms"

@@ -146,28 +146,23 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   const transparentUsesFullWidth = Boolean(
     transparentBackground && /\bw-full\b/.test(`${containerClassName || ""} ${className || ""}`)
   );
-  const labelWidthClass = transparentBackground
-    ? transparentUsesFullWidth
-      ? "w-full"
-      : "w-auto max-w-full"
-    : "w-[clamp(18rem,46vw,24rem)] max-w-[calc(100vw-2.5rem)]";
   const priceWidthClass = transparentBackground
     ? transparentUsesFullWidth
-      ? "w-[min(100%,calc(100%-0.1rem))]"
+      ? "w-full"
       : "w-auto max-w-full"
     : "w-[clamp(19rem,48vw,25rem)] max-w-[calc(100vw-2rem)]";
   const revealedPriceClass = transparentBackground
     ? transparentUsesFullWidth
-      ? "w-full min-w-0 px-[clamp(0.5rem,2vw,0.85rem)]"
-      : "w-auto max-w-[calc(100vw-6rem)] self-center px-[0.85rem]"
+      ? "w-full min-w-0"
+      : "w-full min-w-0"
     : priceWidthClass;
   // When transparentBackground, parent provides the bg - stay fully transparent to avoid double-layer/halo
   const outerBg = transparentBackground ? 'transparent' : tagBg;
-  const pillOverflowClass = transparentBackground && !transparentUsesFullWidth ? "overflow-hidden" : "overflow-visible";
+  const pillOverflowClass = transparentBackground ? "overflow-hidden" : "overflow-visible";
   return (
     <div
       className={cn(
-        "relative w-auto h-full",
+        "relative w-auto h-full outline outline-1 outline-lime-300/90 bg-lime-300/10",
         pillOverflowClass,
         transparentBackground ? "border-0" : "rounded-[12%] border border-white/10",
         containerClassName
@@ -177,8 +172,8 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         backdropFilter: 'none',
         WebkitBackdropFilter: 'none',
         width: transparentBackground ? (transparentUsesFullWidth ? '100%' : 'fit-content') : 'fit-content',
-        minWidth: 'unset',
-        maxWidth: 'calc(100vw - 2rem)',
+        minWidth: 0,
+        maxWidth: transparentUsesFullWidth ? '100%' : 'calc(100vw - 2rem)',
       }}
     >
       <button
@@ -187,10 +182,14 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         disabled={effectiveDisabled}
         onClick={onClick}
         className={cn(
-          'relative h-full rounded-[12%] text-white border-0 bg-white/[0.05] transition-all duration-200',
+          transparentBackground
+            ? 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90'
+            : 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-[12%] border-0 bg-white/[0.05] p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90',
           pillOverflowClass,
           transparentBackground ? (transparentUsesFullWidth ? 'w-full' : 'w-auto max-w-full') : 'w-full',
-          'hover:bg-white/[0.10] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
+          transparentBackground
+            ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent'
+            : 'hover:bg-white/[0.10] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
           'disabled:opacity-60 disabled:cursor-not-allowed',
           className
         )}
@@ -201,78 +200,79 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         }}
         {...props}
       >
-        <div className="flex h-full w-full items-stretch">
-          {!revealed ? (
+        {!revealed ? (
+          <div
+            data-pricing-locked
+            className={cn(
+              "relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.08rem,0.8cqi,0.18rem)] text-center px-[clamp(0.28rem,2.5cqi,0.6rem)] py-[clamp(0.12rem,1.2cqi,0.25rem)] min-h-[clamp(2rem,12cqi,3rem)] outline outline-1 outline-orange-300/90 bg-orange-300/12"
+            )}
+          >
             <div
-              data-pricing-label-reveal
-              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.08rem,0.8cqi,0.18rem)] text-center px-[clamp(0.28rem,2.5cqi,0.6rem)] py-[clamp(0.12rem,1.2cqi,0.25rem)] min-h-[clamp(2rem,12cqi,3rem)]")}
+              data-pricing-label
+              className={cn(
+                "flex w-full min-w-0 items-center justify-center gap-[0.4em] whitespace-nowrap outline outline-1 outline-sky-300/90 bg-sky-300/12",
+                "text-[clamp(0.5rem,3.5cqi,1rem)] font-medium tracking-[0.02em] leading-[1.05] text-white uppercase"
+              )}
+              style={{ fontFamily: pricingFont }}
             >
-              <div
-                data-pricing-label
-                className={cn(
-                  labelWidthClass,
-                  "w-full min-w-0 inline-flex items-center justify-center gap-[0.4em] whitespace-nowrap",
-                  "text-[clamp(0.5rem,3.5cqi,1rem)] font-medium tracking-[0.02em] leading-[1.05] text-white uppercase"
-                )}
-                style={{ fontFamily: pricingFont }}
-              >
-                {pillLabel === 'SHOW PRICING' ? (
-                  <>
-                    <BadgeDollarSign className="size-[0.9em] shrink-0 text-white/90" strokeWidth={2.25} />
-                    {pillLabel}
-                  </>
-                ) : (
-                  pillLabel
-                )}
-              </div>
-              <div
-                data-pricing-reveal
-                className={cn(
-                  "box-border inline-flex min-h-[clamp(1.4rem,10cqi,2.4rem)] w-full min-w-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.2rem,2cqi,0.5rem)] py-[1.5%] text-[clamp(0.5rem,6cqi,1.6rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
-                )}
-                style={{ fontFamily: pricingFont }}
-              >
-                <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
-                  {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
-                  <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
-                    <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
-                  </span>
+              {pillLabel === 'SHOW PRICING' ? (
+                <>
+                  <BadgeDollarSign className="size-[0.9em] shrink-0 text-white/90" strokeWidth={2.25} />
+                  {pillLabel}
+                </>
+              ) : (
+                pillLabel
+              )}
+            </div>
+            <div
+              data-pricing-reveal
+              className={cn(
+                "box-border inline-flex min-h-[clamp(1.4rem,10cqi,2.4rem)] w-full min-w-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.2rem,2cqi,0.5rem)] py-[1.5%] text-[clamp(0.5rem,6cqi,1.6rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden outline outline-1 outline-violet-300/90"
+              )}
+              style={{ fontFamily: pricingFont }}
+            >
+              <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
+                {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
+                <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
+                  <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
                 </span>
-              </div>
+              </span>
             </div>
-          ) : (
+          </div>
+        ) : (
+          <div
+            data-pricing-revealed
+            className={cn(
+              "relative box-border flex h-full w-full min-w-0 flex-1 flex-col items-stretch px-0 pt-0 pb-0 min-h-[clamp(2rem,12cqi,3rem)] outline outline-1 outline-amber-300/90 bg-amber-300/12"
+            )}
+          >
             <div
-              data-pricing-label-reveal
-              className={cn("relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.12rem,1.2cqi,0.28rem)] text-center px-[clamp(0.4rem,3cqi,0.85rem)] py-[clamp(0.18rem,1.5cqi,0.35rem)] min-h-[clamp(2.5rem,14cqi,3.5rem)]")}
+              data-pricing-label
+              className={cn(
+                "block w-full min-w-0 self-start whitespace-nowrap px-0 pb-[clamp(0.18rem,1cqi,0.34rem)] outline outline-1 outline-cyan-300/90 bg-cyan-300/12",
+                "text-[clamp(0.78rem,5.2cqi,1.32rem)] font-normal tracking-[0.02em] leading-none text-white/95"
+              )}
+              style={{ fontFamily: pricingFont }}
             >
-              <div
-                data-pricing-label
-                className={cn(
-                  labelWidthClass,
-                  "w-full min-w-0 whitespace-nowrap",
-                  "text-[clamp(0.65rem,4.5cqi,1.15rem)] font-normal tracking-[0.02em] leading-[1.2] text-white/95"
-                )}
-                style={{ fontFamily: pricingFont }}
-              >
-                {pillLabel}
-              </div>
-              <div
-                data-pricing-reveal
-                className={cn(
-                  revealedPriceClass,
-                  "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] min-w-0 w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
-                )}
-                style={{ fontFamily: pricingFont }}
-              >
-                {loading ? (
-                  <span className="text-white/90 min-w-0">Calculating…</span>
-                ) : (
-                  <span className="min-w-0">{price}</span>
-                )}
-              </div>
+              {pillLabel}
             </div>
-          )}
-        </div>
+            <div
+              data-pricing-reveal
+              className={cn(
+                "mt-auto w-full min-w-0 self-end px-0 pt-[clamp(0.18rem,1cqi,0.34rem)]",
+                revealedPriceClass,
+                "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden outline outline-1 outline-fuchsia-300/90"
+              )}
+              style={{ fontFamily: pricingFont }}
+            >
+              {loading ? (
+                <span className="text-white/90 min-w-0">Calculating…</span>
+              ) : (
+                <span className="min-w-0">{price}</span>
+              )}
+            </div>
+          </div>
+        )}
       </button>
     </div>
   );
