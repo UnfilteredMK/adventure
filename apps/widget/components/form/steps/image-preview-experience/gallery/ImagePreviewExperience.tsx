@@ -2117,16 +2117,68 @@ export function ImagePreviewExperience(props: {
         : hasExplicitPricingConfig ? formattedPricingRange : "$•••-$•••";
   const pillLoading = Boolean(leadGateEnabled && leadCaptured && accuratePricingStatus === "running");
   const hasBudgetOverlayControl = Boolean(hero && canUseLiveBudgetSlider && !hideBudgetInOverlay);
-  const shouldShowCenteredPricingPill = Boolean(
-    shouldShowPricingPill && formattedPricingRange && leadGateEnabled && !leadCaptured
-  );
   const shouldShowBottomPricingPill = Boolean(
-    shouldShowPricingPill && formattedPricingRange && !shouldShowCenteredPricingPill
+    shouldShowPricingPill && formattedPricingRange
+  );
+  const shouldShowCenteredPricingFormOverlay = Boolean(
+    leadGateEnabled && !leadCaptured && showCenteredPricingForm
   );
   const shouldShowBottomControlsRow = Boolean(
-    !shouldShowCenteredPricingPill &&
+    !shouldShowCenteredPricingFormOverlay &&
       (hasBudgetOverlayControl || shouldShowBottomPricingPill)
   );
+  const previewPricingPill = shouldShowBottomPricingPill ? (
+    <div
+      data-pricing-pill
+      className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out outline outline-1 outline-sky-300/90 bg-sky-300/10"
+      style={{
+        maxWidth: 'clamp(34%, 50% - 4.3vw, 42%)',
+        paddingTop: 'clamp(0.44rem, 1.8vw, 0.64rem)',
+        paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
+        paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
+        paddingRight: 'clamp(0.56rem, 2.1vw, 0.78rem)',
+        backgroundColor: pillBg,
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+      }}
+    >
+      <PricingExperience
+        variant="pill"
+        className="w-full border-0"
+        containerClassName="w-full min-w-0 px-0 py-0"
+        transparentBackground
+        label={pillLabel}
+        termsHref="/terms"
+        price={pillPrice}
+        loading={pillLoading}
+        lockedPrice={formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••"}
+        revealed={leadGateEnabled ? leadCaptured : true}
+        allowToggle
+        autoReveal
+        onClick={
+          leadGateEnabled && !leadCaptured
+            ? () => {
+                setCenteredPricingError(null);
+                setCenteredPricingStep("email");
+                setShowCenteredPricingForm(true);
+                upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
+              }
+            : undefined
+        }
+        instanceId={leadGateEnabled && leadCaptured ? instanceId : undefined}
+        sessionId={leadGateEnabled && leadCaptured ? sessionId : undefined}
+        gateContext="design_and_estimate"
+        submissionData={{ surface: "preview_pricing" }}
+        requirePhone
+        onRevealed={() => {
+          setLeadCaptured(true);
+          // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
+        }}
+        accentColor={pillBg}
+        style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
+      />
+    </div>
+  ) : null;
   const uploadControlPositionClass =
     hero && !busy
       ? "top-[calc(env(safe-area-inset-top)+52px)] sm:top-11"
@@ -2793,7 +2845,7 @@ export function ImagePreviewExperience(props: {
 	                </div>
 	              ) : null}
 
-              {!lightboxOpen && shouldShowCenteredPricingPill ? (
+              {!lightboxOpen && shouldShowCenteredPricingFormOverlay ? (
                 <div className="absolute inset-0 z-30 flex items-end justify-end pb-4 pr-4 pointer-events-none">
                   <div
                     className={cn(
@@ -2809,8 +2861,7 @@ export function ImagePreviewExperience(props: {
                       WebkitBackdropFilter: "blur(14px)",
                     }}
                   >
-                    {showCenteredPricingForm ? (
-                      <div className="relative flex w-full px-5 py-4">
+                    <div className="relative flex w-full px-5 py-4">
                         <button
                           type="button"
                           onClick={() => {
@@ -2943,45 +2994,7 @@ export function ImagePreviewExperience(props: {
                             </div>
                           )}
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex w-full items-center justify-center px-[2.5%] py-[1.5%]">
-                        <PricingExperience
-                          variant="pill"
-                          className="w-full border-0"
-                          containerClassName="w-full px-[3%] py-[1%]"
-                          label={pillLabel}
-                          termsHref="/terms"
-                          price={pillPrice}
-                          loading={pillLoading}
-                          lockedPrice={formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••"}
-                          revealed={leadGateEnabled ? leadCaptured : true}
-                          allowToggle
-                          autoReveal
-                          transparentBackground
-                          onClick={() => {
-                            if (leadGateEnabled && !leadCaptured) {
-                              setCenteredPricingError(null);
-                              setCenteredPricingStep("email");
-                              setShowCenteredPricingForm(true);
-                              upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
-                              return;
-                            }
-                          }}
-                          instanceId={instanceId}
-                          sessionId={sessionId}
-                          gateContext="design_and_estimate"
-                          submissionData={{ surface: "inline_pricing" }}
-                          requirePhone
-                          onRevealed={() => {
-                            setLeadCaptured(true);
-                            // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
-                          }}
-                          accentColor={pillBg}
-                          style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
-                        />
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -3046,48 +3059,7 @@ export function ImagePreviewExperience(props: {
 	                        </div>
 	                      </div>
 	                    ) : null}
-				                    {shouldShowBottomPricingPill ? (
-				                      <div
-				                        data-pricing-pill
-				                        className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out outline outline-1 outline-sky-300/90 bg-sky-300/10"
-			                        style={{
-                          maxWidth: 'clamp(34%, 50% - 4.3vw, 42%)',
-			                          paddingTop: 'clamp(0.44rem, 1.8vw, 0.64rem)',
-			                          paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
-			                          paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
-			                          paddingRight: 'clamp(0.56rem, 2.1vw, 0.78rem)',
-			                          backgroundColor: pillBg,
-			                          backdropFilter: 'blur(12px)',
-			                          WebkitBackdropFilter: 'blur(12px)',
-			                        }}
-			                      >
-				                          <PricingExperience
-				                            variant="pill"
-				                            className="w-full border-0"
-				                            containerClassName="w-full min-w-0 px-0 py-0"
-                            transparentBackground
-                            label={pillLabel}
-                          termsHref="/terms"
-                          price={pillPrice}
-                          loading={pillLoading}
-                          lockedPrice={formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••"}
-                          revealed={leadGateEnabled ? leadCaptured : true}
-                          allowToggle
-                          autoReveal
-                          instanceId={leadGateEnabled ? instanceId : undefined}
-                          sessionId={leadGateEnabled ? sessionId : undefined}
-                          gateContext="design_and_estimate"
-                          submissionData={{ surface: "preview_pricing" }}
-                          requirePhone
-                          onRevealed={() => {
-                            setLeadCaptured(true);
-                            // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
-                          }}
-                          accentColor={pillBg}
-                          style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
-                        />
-                      </div>
-                    ) : null}
+				                    {previewPricingPill}
                   </div>
                 </div>
               ) : null}

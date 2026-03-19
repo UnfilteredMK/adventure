@@ -159,10 +159,26 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   // When transparentBackground, parent provides the bg - stay fully transparent to avoid double-layer/halo
   const outerBg = transparentBackground ? 'transparent' : tagBg;
   const pillOverflowClass = transparentBackground ? "overflow-hidden" : "overflow-visible";
+  const stateShellClass =
+    "relative box-border flex h-full w-full min-w-0 flex-1 flex-col items-stretch px-0 pt-0 pb-0 min-h-[clamp(2rem,12cqi,3rem)]";
+  const labelFrameClass =
+    "block w-full min-w-0 self-start whitespace-nowrap px-0 pb-[clamp(0.18rem,1cqi,0.34rem)]";
+  const labelTextClass =
+    "min-w-0 text-[clamp(0.78rem,5.2cqi,1.32rem)] font-normal tracking-[0.02em] leading-none text-white/95";
+  const lockedLabelTextClass =
+    "min-w-0 text-[clamp(1rem,0.92rem+0.38vw,1.14rem)] font-medium tracking-[0.02em] leading-[1.02] text-white uppercase";
+  const lockedValueTextClass =
+    "inline-flex items-center whitespace-nowrap text-[clamp(1.28rem,1.16rem+0.52vw,1.48rem)] font-semibold tracking-[0.01em] leading-none text-white/95";
+  const valueFrameClass = cn(
+    "mt-auto w-full min-w-0 self-end px-0 pt-[clamp(0.18rem,1cqi,0.34rem)]",
+    revealedPriceClass,
+    "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
+  );
   return (
-    <div
-      className={cn(
-        "relative w-auto h-full outline outline-1 outline-lime-300/90 bg-lime-300/10",
+      <div
+        className={cn(
+        "relative h-full ring-1 ring-inset ring-lime-300/90 bg-lime-300/10",
+        transparentBackground ? "w-full min-w-0" : "w-auto",
         pillOverflowClass,
         transparentBackground ? "border-0" : "rounded-[12%] border border-white/10",
         containerClassName
@@ -171,9 +187,9 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         backgroundColor: outerBg,
         backdropFilter: 'none',
         WebkitBackdropFilter: 'none',
-        width: transparentBackground ? (transparentUsesFullWidth ? '100%' : 'fit-content') : 'fit-content',
+        width: transparentBackground ? '100%' : 'fit-content',
         minWidth: 0,
-        maxWidth: transparentUsesFullWidth ? '100%' : 'calc(100vw - 2rem)',
+        maxWidth: transparentBackground ? '100%' : 'calc(100vw - 2rem)',
       }}
     >
       <button
@@ -186,7 +202,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             ? 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90'
             : 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-[12%] border-0 bg-white/[0.05] p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90',
           pillOverflowClass,
-          transparentBackground ? (transparentUsesFullWidth ? 'w-full' : 'w-auto max-w-full') : 'w-full',
+          transparentBackground ? 'w-full min-w-0 max-w-full' : 'w-full',
           transparentBackground
             ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent'
             : 'hover:bg-white/[0.10] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
@@ -200,79 +216,63 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         }}
         {...props}
       >
-        {!revealed ? (
+        <div
+          data-pricing-locked={!revealed ? true : undefined}
+          data-pricing-revealed={revealed ? true : undefined}
+          className={cn(
+            stateShellClass,
+            revealed
+              ? "outline outline-1 outline-amber-300/90 bg-amber-300/12"
+              : "outline outline-1 outline-orange-300/90 bg-orange-300/12"
+          )}
+        >
           <div
-            data-pricing-locked
+            data-pricing-label
             className={cn(
-              "relative box-border flex w-full min-w-0 flex-1 flex-col justify-center items-stretch gap-[clamp(0.08rem,0.8cqi,0.18rem)] text-center px-[clamp(0.28rem,2.5cqi,0.6rem)] py-[clamp(0.12rem,1.2cqi,0.25rem)] min-h-[clamp(2rem,12cqi,3rem)] outline outline-1 outline-orange-300/90 bg-orange-300/12"
+              labelFrameClass,
+              revealed
+                ? "outline outline-1 outline-cyan-300/90 bg-cyan-300/12"
+                : "outline outline-1 outline-sky-300/90 bg-sky-300/12"
             )}
+            style={{ fontFamily: pricingFont }}
           >
-            <div
-              data-pricing-label
-              className={cn(
-                "flex w-full min-w-0 items-center justify-center gap-[0.4em] whitespace-nowrap outline outline-1 outline-sky-300/90 bg-sky-300/12",
-                "text-[clamp(0.5rem,3.5cqi,1rem)] font-medium tracking-[0.02em] leading-[1.05] text-white uppercase"
-              )}
-              style={{ fontFamily: pricingFont }}
-            >
-              {pillLabel === 'SHOW PRICING' ? (
-                <>
-                  <BadgeDollarSign className="size-[0.9em] shrink-0 text-white/90" strokeWidth={2.25} />
-                  {pillLabel}
-                </>
+            {revealed ? (
+              <span className={cn(labelTextClass, "block")}>{pillLabel}</span>
+            ) : pillLabel === 'SHOW PRICING' ? (
+              <span className={cn(lockedLabelTextClass, "flex w-full min-w-0 items-center justify-center gap-[0.34em] overflow-hidden")}>
+                <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
+                <span className="min-w-0 truncate">{pillLabel}</span>
+              </span>
+            ) : (
+              <span className={cn(lockedLabelTextClass, "block text-center")}>{pillLabel}</span>
+            )}
+          </div>
+          <div
+            data-pricing-reveal
+            className={cn(
+              valueFrameClass,
+              revealed
+                ? "outline outline-1 outline-fuchsia-300/90"
+                : "outline outline-1 outline-violet-300/90"
+            )}
+            style={{ fontFamily: pricingFont }}
+          >
+            {revealed ? (
+              loading ? (
+                <span className="text-white/90 min-w-0">Calculating…</span>
               ) : (
-                pillLabel
-              )}
-            </div>
-            <div
-              data-pricing-reveal
-              className={cn(
-                "box-border inline-flex min-h-[clamp(1.4rem,10cqi,2.4rem)] w-full min-w-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.2rem,2cqi,0.5rem)] py-[1.5%] text-[clamp(0.5rem,6cqi,1.6rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden outline outline-1 outline-violet-300/90"
-              )}
-              style={{ fontFamily: pricingFont }}
-            >
-              <span className="inline-flex items-center leading-none px-[0.12em] py-[0.05em]">
+                <span className="min-w-0">{price}</span>
+              )
+            ) : (
+              <span className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em]")}>
                 {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
                 <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
                   <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
                 </span>
               </span>
-            </div>
-          </div>
-        ) : (
-          <div
-            data-pricing-revealed
-            className={cn(
-              "relative box-border flex h-full w-full min-w-0 flex-1 flex-col items-stretch px-0 pt-0 pb-0 min-h-[clamp(2rem,12cqi,3rem)] outline outline-1 outline-amber-300/90 bg-amber-300/12"
             )}
-          >
-            <div
-              data-pricing-label
-              className={cn(
-                "block w-full min-w-0 self-start whitespace-nowrap px-0 pb-[clamp(0.18rem,1cqi,0.34rem)] outline outline-1 outline-cyan-300/90 bg-cyan-300/12",
-                "text-[clamp(0.78rem,5.2cqi,1.32rem)] font-normal tracking-[0.02em] leading-none text-white/95"
-              )}
-              style={{ fontFamily: pricingFont }}
-            >
-              {pillLabel}
-            </div>
-            <div
-              data-pricing-reveal
-              className={cn(
-                "mt-auto w-full min-w-0 self-end px-0 pt-[clamp(0.18rem,1cqi,0.34rem)]",
-                revealedPriceClass,
-                "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden outline outline-1 outline-fuchsia-300/90"
-              )}
-              style={{ fontFamily: pricingFont }}
-            >
-              {loading ? (
-                <span className="text-white/90 min-w-0">Calculating…</span>
-              ) : (
-                <span className="min-w-0">{price}</span>
-              )}
-            </div>
           </div>
-        )}
+        </div>
       </button>
     </div>
   );
