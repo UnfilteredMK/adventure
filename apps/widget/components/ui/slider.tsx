@@ -7,6 +7,7 @@ interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 
   min?: number;
   max?: number;
   step?: number;
+  compact?: boolean;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -28,7 +29,7 @@ function pct(value: number, min: number, max: number) {
 }
 
 const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
-  ({ className, value, onValueChange, min = 0, max = 100, step = 1, ...props }, ref) => {
+  ({ className, value, onValueChange, min = 0, max = 100, step = 1, compact = false, ...props }, ref) => {
     const safeMin = Number.isFinite(Number(min)) ? Number(min) : 0;
     const safeMax = Number.isFinite(Number(max)) ? Number(max) : 100;
     const safeStep = Number.isFinite(Number(step)) && Number(step) > 0 ? Number(step) : 1;
@@ -78,14 +79,22 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
     const maxZ = activeThumb === "max" ? 3 : orderedHigh <= mid ? 3 : 2;
 
     return (
-      <div className={cn("relative w-full min-w-0 h-8 flex items-center", className)}>
+      <div className={cn("relative flex w-full min-w-0 items-center", compact ? "h-6" : "h-8", className)}>
         {/* Track */}
-        <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[6px] rounded-full bg-black/10" />
+        <div
+          className={cn(
+            "pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 rounded-full bg-black/10",
+            compact ? "h-1" : "h-[6px]"
+          )}
+        />
 
         {/* Range highlight (only when using 2 thumbs) */}
         {isRange ? (
           <div
-            className="pointer-events-none absolute top-1/2 -translate-y-1/2 h-[6px] rounded-full"
+            className={cn(
+              "pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full",
+              compact ? "h-1" : "h-[6px]"
+            )}
             style={{
               left: `${pct(orderedLow, safeMin, safeMax)}%`,
               width: `${Math.max(0, pct(orderedHigh, safeMin, safeMax) - pct(orderedLow, safeMin, safeMax))}%`,
@@ -110,7 +119,8 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
             className={cn(
               // `sif-range` is styled in `app/adventure/globals.css` (and can be added elsewhere) to create a larger thumb,
               // making it much easier to grab/drag on mobile.
-              "sif-range absolute inset-0 w-full cursor-pointer",
+              "absolute inset-0 w-full cursor-pointer",
+              compact ? "sif-range sif-range--compact" : "sif-range",
             )}
             ref={ref}
             {...props}
@@ -128,7 +138,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
               onPointerDown={() => setActiveThumb("min")}
               onPointerUp={clearActive}
               onPointerCancel={clearActive}
-              className="sif-range absolute inset-0 w-full cursor-pointer"
+              className={cn("absolute inset-0 w-full cursor-pointer", compact ? "sif-range sif-range--compact" : "sif-range")}
               style={{ zIndex: minZ }}
               {...props}
             />
@@ -143,7 +153,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
               onPointerDown={() => setActiveThumb("max")}
               onPointerUp={clearActive}
               onPointerCancel={clearActive}
-              className="sif-range absolute inset-0 w-full cursor-pointer"
+              className={cn("absolute inset-0 w-full cursor-pointer", compact ? "sif-range sif-range--compact" : "sif-range")}
               style={{ zIndex: maxZ }}
               {...props}
             />

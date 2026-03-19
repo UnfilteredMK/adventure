@@ -18,6 +18,7 @@ import { GalleryStep } from "../image-preview-experience/gallery/GalleryStep";
 import { ImageChoiceGridStep } from "../step-screens/ImageChoiceGridStep";
 import { FunctionCallStep } from "../step-screens/FunctionCallStep";
 import { InitialStep } from "../static/InitialStep";
+import { isDeterministicStyleStep, StyleStep } from "../static/StyleStep";
 
 interface ComponentRendererProps {
   step: StepDefinition | UIStep;
@@ -81,6 +82,10 @@ export function ComponentRenderer(props: ComponentRendererProps) {
     // This preserves backend ordering while allowing mid-flow dynamic actions.
     if ((s as any)?.functionCall) {
       return <FunctionCallStep {...common} allStepData={allStepData} />;
+    }
+
+    if (isDeterministicStyleStep(s)) {
+      return <StyleStep {...common} />;
     }
 
     switch ((s as any).type) {

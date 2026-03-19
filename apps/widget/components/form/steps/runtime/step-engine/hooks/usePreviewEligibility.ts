@@ -20,6 +20,7 @@ interface UsePreviewEligibilityParams {
   progressPercentage?: number | null;
   previewEverEnabled: boolean;
   setPreviewEverEnabled: Dispatch<SetStateAction<boolean>>;
+  suppressDeterministicStepInsert?: boolean;
   state: any;
   updateStepData: (stepId: string, data: any) => void;
   config?: any;
@@ -39,6 +40,7 @@ export function usePreviewEligibility({
   progressPercentage,
   previewEverEnabled,
   setPreviewEverEnabled,
+  suppressDeterministicStepInsert = false,
   state,
   updateStepData,
   config,
@@ -87,6 +89,7 @@ export function usePreviewEligibility({
   );
 
   const deterministicUploadsPending = useMemo(() => {
+    if (suppressDeterministicStepInsert) return false;
     if (!state?.steps || state.steps.length === 0) return false;
     const stepData = state.stepData || {};
     const completed = state.completedSteps;
@@ -106,7 +109,7 @@ export function usePreviewEligibility({
       if (!hasValue && !(completed && typeof (completed as any).has === "function" && (completed as any).has(stepId))) return true;
     }
     return false;
-  }, [desiredDeterministicUploadSteps, state?.completedSteps, state?.stepData, state?.steps]);
+  }, [desiredDeterministicUploadSteps, state?.completedSteps, state?.stepData, state?.steps, suppressDeterministicStepInsert]);
 
   useEffect(() => {
     if (!state || !flowPlanSessionId) return;
@@ -152,6 +155,7 @@ export function usePreviewEligibility({
   }, [deterministicUploadsPending, frontendPreviewEligibleWithoutDeterministicUploads]);
 
   useEffect(() => {
+    if (suppressDeterministicStepInsert) return;
     if (!flowPlanSessionId) return;
     if (!state?.steps || state.steps.length === 0) return;
     if (!frontendPreviewEligibleWithoutDeterministicUploads) return;
@@ -177,17 +181,23 @@ export function usePreviewEligibility({
     flowPlanSessionId,
     frontendPreviewEligibleWithoutDeterministicUploads,
     state,
+    suppressDeterministicStepInsert,
   ]);
 
   useEffect(() => {
     if (frontendPreviewEligible) setPreviewEverEnabled(true);
   }, [frontendPreviewEligible, setPreviewEverEnabled]);
 
-  const previewEnabled =
-    hasReceivedQuestionsFromGenerateSteps &&
-    backendAllowsPreview &&
-    !isBootstrapStepId(currentStepId) &&
-    (previewEverEnabled || frontendPreviewEligible);
+  const previewEnabled = (() => {
+    if (!hasReceivedQuestionsFromGenerateSteps) return false;
+    if (!backendAllowsPreview) return false;
+    // Before preview has ever unlocked, keep bootstrap steps out of the dominant preview layout.
+    // After unlock, preserve the gallery while backtracking so service/style render in the
+    // same compact pane below the preview as every other guided step.
+    if (previewEverEnabled) return true;
+    if (isBootstrapStepId(currentStepId)) return false;
+    return frontendPreviewEligible;
+  })();
 
   return {
     backendAllowsPreview,

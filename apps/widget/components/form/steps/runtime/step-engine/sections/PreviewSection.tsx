@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { ImagePreviewExperience } from "../../../image-preview-experience/ImagePreviewExperience";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +51,28 @@ export function PreviewSection({
   usePreviewDominantLayout,
 }: PreviewSectionProps) {
   void _showQuestionPaneUnderPreview;
+  const stepDataSoFar = useMemo(() => {
+    const base = { ...(stateStepData || {}) };
+    if (previewRefreshNonce > 0) base["__previewRefreshNonce"] = previewRefreshNonce;
+    if (pendingPreviewSceneUploadUrl) base["step-refinement-upload-scene-image"] = pendingPreviewSceneUploadUrl;
+    if (adventureInputMode === "prompt" && promptDraft.trim()) {
+      base["step-promptInput"] = promptDraft.trim();
+      base["__promptSubmitNonce"] = promptSubmitCount;
+    }
+    return base;
+  }, [
+    stateStepData,
+    previewRefreshNonce,
+    pendingPreviewSceneUploadUrl,
+    adventureInputMode,
+    promptDraft,
+    promptSubmitCount,
+  ]);
+  const answeredQuestionCount = useMemo(
+    () =>
+      completedQuestionCount + previewRefreshNonce + (adventureInputMode === "prompt" ? promptSubmitCount : 0),
+    [completedQuestionCount, previewRefreshNonce, adventureInputMode, promptSubmitCount]
+  );
   return (
     <div
       className={cn(
@@ -84,23 +106,9 @@ export function PreviewSection({
             leadGateEnabled={true}
             transparentChrome={true}
             config={config}
-            stepDataSoFar={{
-              ...(stateStepData || {}),
-              ...(previewRefreshNonce > 0 ? { "__previewRefreshNonce": previewRefreshNonce } : {}),
-              ...(pendingPreviewSceneUploadUrl
-                ? { "step-refinement-upload-scene-image": pendingPreviewSceneUploadUrl }
-                : {}),
-              ...(adventureInputMode === "prompt" && promptDraft.trim()
-                ? {
-                    "step-promptInput": promptDraft.trim(),
-                    "__promptSubmitNonce": promptSubmitCount,
-                  }
-                : {}),
-            }}
-            answeredQuestionCount={
-              completedQuestionCount + previewRefreshNonce + (adventureInputMode === "prompt" ? promptSubmitCount : 0)
-            }
-            autoRegenerateEveryNAnsweredQuestions={2}
+            stepDataSoFar={stepDataSoFar}
+            answeredQuestionCount={answeredQuestionCount}
+            autoRegenerateEveryNAnsweredQuestions={3}
             onPreviewVisibleChange={setPreviewVisible}
             onHasImageChange={setPreviewHasImage}
             variant="hero"

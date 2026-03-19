@@ -74,7 +74,7 @@ export function StepLayout({
     : "h-[50%] min-h-[56px] max-h-[100px] w-11 sm:w-12 rounded-lg p-0";
   const compactActionButtonClass = "h-8 min-w-[80px] px-2.5 text-[11px]";
   const compactHeaderLayoutClass = useCompactPane
-    ? "flex flex-col items-center gap-1.5 text-center"
+    ? "flex flex-col items-center gap-1 text-center"
     : headerInlineControl
       ? "flex items-start justify-between gap-2"
       : undefined;
@@ -124,18 +124,18 @@ export function StepLayout({
           ) : (
             <div className={cn(sideNavButtonClass, "shrink-0 self-center")} aria-hidden="true" />
           )}
-          <div
-            className={cn(
-              "min-w-0 min-h-0 flex flex-col overflow-hidden",
-              useCompactPane ? "justify-end gap-1" : isCompact ? "gap-4" : "gap-6"
+            <div
+          className={cn(
+            "min-w-0 min-h-0 flex flex-col overflow-hidden",
+              useCompactPane ? "justify-start gap-0.5" : isCompact ? "gap-4" : "gap-6"
             )}
           >
             <div className={cn("shrink-0 min-w-0", feedbackPrompt ? "pr-14" : null)}>
               <div className={cn("min-w-0 w-full", compactHeaderLayoutClass, useCompactPane ? "max-w-5xl mx-auto" : null)}>
-                {headerInlineControl ? <div className="shrink-0 mb-0.5">{headerInlineControl}</div> : null}
+                {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
                 <h2
                   className={cn(
-                    useCompactPane ? "text-[13px] sm:text-sm leading-tight" : isCompact ? "text-xl" : "text-2xl",
+                    useCompactPane ? "text-[12px] sm:text-[13px] leading-tight" : isCompact ? "text-xl" : "text-2xl",
                     "font-semibold min-w-0 break-words"
                   )}
                   style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
@@ -145,8 +145,8 @@ export function StepLayout({
                 {subtext ? (
                   <p
                     className={cn(
-                      "mt-1 opacity-80",
-                      useCompactPane ? "text-[10px] leading-tight line-clamp-2" : "text-sm"
+                      "opacity-80",
+                      useCompactPane ? "mt-0.5 text-[10px] leading-tight line-clamp-2" : "mt-1 text-sm"
                     )}
                     style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                   >
@@ -159,7 +159,7 @@ export function StepLayout({
               <div
                 className={cn(
                   "flex min-h-full min-w-0 flex-col overflow-hidden",
-                  useCompactPane ? "w-full max-w-5xl mx-auto justify-end" : "justify-start"
+                  useCompactPane ? "mx-auto w-full max-w-5xl min-h-0 justify-start" : "justify-start"
                 )}
               >
                 {children}
@@ -183,13 +183,13 @@ export function StepLayout({
           </Button>
         </div>
       ) : (
-          <div className={cn("flex h-full min-h-0 flex-col", useCompactPane ? "gap-2 justify-end" : isCompact ? "gap-4" : "gap-6")}>
+          <div className={cn("flex h-full min-h-0 flex-col", useCompactPane ? "gap-1 justify-start" : isCompact ? "gap-4" : "gap-6")}>
             <div className={cn("shrink-0 min-w-0", feedbackPrompt ? "pr-14" : null)}>
               <div className={cn("min-w-0 w-full", compactHeaderLayoutClass, useCompactPane ? "max-w-5xl mx-auto" : null)}>
-                {headerInlineControl ? <div className="shrink-0 mb-1">{headerInlineControl}</div> : null}
+                {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
                 <h2
                   className={cn(
-                    useCompactPane ? "text-sm sm:text-base leading-tight" : isCompact ? "text-xl" : "text-2xl",
+                    useCompactPane ? "text-[13px] sm:text-sm leading-tight" : isCompact ? "text-xl" : "text-2xl",
                     "font-semibold min-w-0 break-words",
                     useCompactPane ? "text-center sm:text-left" : null
                   )}
@@ -200,8 +200,8 @@ export function StepLayout({
                 {subtext ? (
                   <p
                     className={cn(
-                      "mt-1 opacity-80",
-                      useCompactPane ? "text-[11px] sm:text-xs leading-tight text-center sm:text-left" : "text-sm"
+                      "opacity-80",
+                      useCompactPane ? "mt-0.5 text-[10px] sm:text-[11px] leading-tight text-center sm:text-left" : "mt-1 text-sm"
                     )}
                     style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                   >
@@ -215,7 +215,7 @@ export function StepLayout({
             <div
               className={cn(
                 "flex min-h-full min-w-0 flex-col overflow-hidden",
-                useCompactPane ? "w-full max-w-5xl mx-auto justify-end" : "justify-start"
+                useCompactPane ? "mx-auto w-full max-w-5xl min-h-0 justify-start" : "justify-start"
               )}
             >
               {children}

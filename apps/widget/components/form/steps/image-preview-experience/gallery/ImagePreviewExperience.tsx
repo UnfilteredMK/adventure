@@ -572,6 +572,7 @@ export function ImagePreviewExperience(props: {
   const pendingBudgetRefineRef = useRef(false);
   const prevBudgetForPricingRef = useRef<number | null>(null);
   const prevRunsLengthRef = useRef(0);
+  const lastAutoRegenAtRef = useRef<number>(0);
   const heroForPricingRef = useRef<string | null>(null);
   const skipNextFetchRef = useRef(false);
   const currentHeroRef = useRef<string | null>(null);
@@ -1151,17 +1152,23 @@ export function ImagePreviewExperience(props: {
 
 		        const endpoint = "/api/generate";
 		        const budgetForRequest = extractBudgetValue(effectiveStepDataSoFar || {});
+            // Always include budget constraint when we have one — backend and prompt both use it for material/finish adherence.
             const promptWithBudgetConstraint =
-              budgetForRequest !== null && isBudgetDrivenRegeneration
-                ? `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Keep the same overall style and layout, but visibly adjust materials, finishes, fixtures, and scope to fit this budget level.`
+              budgetForRequest !== null
+                ? isBudgetDrivenRegeneration
+                  ? `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Keep the same overall style and layout, but visibly adjust materials, finishes, fixtures, and scope to fit this budget level.`
+                  : `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Match materials, finishes, fixtures, and scope to this budget level.`
                 : prompt;
 		        const numOutputs = generationIntent === "initial" ? CONCEPT_GALLERY_COUNT : 1;
 		        const requestBody: any = {
 		          prompt: promptWithBudgetConstraint,
 		          instanceId,
+		          sessionId,
 		          numOutputs,
 		          useCase: normalizedUseCase,
 		          generationIntent,
+		          stepDataSoFar: effectiveStepDataSoFar ?? {},
+		          instanceContext: { ...instanceContext },
 		        };
 		        if (originalReferenceImage) requestBody.originalReferenceImage = originalReferenceImage;
 		        if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
@@ -1514,6 +1521,8 @@ export function ImagePreviewExperience(props: {
     return () => window.clearInterval(timer);
   }, [busy]);
 
+  const AUTO_REGEN_COOLDOWN_MS = 30_000;
+
   // Auto-regenerate every N answered questions, starting after the first successful run.
   useEffect(() => {
     if (!enabled) return;
@@ -1522,10 +1531,15 @@ export function ImagePreviewExperience(props: {
     if (cache?.status === "error") return;
     if (!Number.isFinite(answeredQuestionCount) || answeredQuestionCount <= 0) return;
 
+    // Throttle auto-regen to avoid storms when user answers many questions quickly
+    const now = Date.now();
+    if (lastAutoRegenAtRef.current > 0 && now - lastAutoRegenAtRef.current < AUTO_REGEN_COOLDOWN_MS) return;
+
     const last = cache?.lastGeneratedAnsweredCount ?? runs.at(-1)?.answeredQuestionCount ?? null;
     // If we have never generated a run yet, kick off the first preview once the user has answered enough.
     if (typeof last !== "number" || !Number.isFinite(last)) {
       if (answeredQuestionCount >= autoRegenerateEveryNAnsweredQuestions) {
+        lastAutoRegenAtRef.current = now;
         void runGenerate("auto");
       }
       return;
@@ -1535,6 +1549,7 @@ export function ImagePreviewExperience(props: {
       // If lead capture is required, simply skip auto-regeneration until the user explicitly
       // takes an action (e.g. refresh/download/show pricing) that can open the gate.
       if (leadGateActive) return;
+      lastAutoRegenAtRef.current = now;
       void runGenerate("auto");
     }
   }, [
@@ -1681,6 +1696,7 @@ export function ImagePreviewExperience(props: {
           askedStepIds,
           instanceContext,
           noCache: true,
+          // Send preview image URL for image-based pricing (VLM analyzes the design). Generated images are https CDN URLs.
           ...(hero && (hero.startsWith("http://") || hero.startsWith("https://")) ? { previewImageUrl: hero } : {}),
         }),
       });
@@ -1918,7 +1934,8 @@ export function ImagePreviewExperience(props: {
       ? navigationTransition
       : null;
   const stackedPreviewLayers = useMemo(() => {
-    // Only show stack after at least one real generation and when in single view (not gallery).
+    // Only show stack for isolated runs (separate generations) — never for gallery concepts from the same run.
+    // Stack = previous/next run images only (chronological history of regenerations).
     if (!hero || runs.length < 1 || showConceptPicker || isPlaceholderHero) return [] as PreviewStackLayer[];
 
     const layers: PreviewStackLayer[] = [];
@@ -1933,21 +1950,7 @@ export function ImagePreviewExperience(props: {
       addLayer(activeNavigationTransition.fromImage, `transition-${activeNavigationTransition.key}`, "transition");
     }
 
-    // In single mode with multiple concepts: stack the other concepts from this run (flipbook effect)
-    const inSingleWithMultiple =
-      activeRun?.images &&
-      activeRun.images.length > 1 &&
-      (selectedConceptIndex != null || viewMode === "single");
-    if (inSingleWithMultiple) {
-      const selIdx = selectedConceptIndex != null && Number.isFinite(selectedConceptIndex)
-        ? Math.max(0, Math.min(selectedConceptIndex, activeRun.images.length - 1))
-        : 0;
-      activeRun.images.forEach((src, idx) => {
-        if (idx !== selIdx) addLayer(src, `concept-${idx}`, "history");
-      });
-    }
-
-    // Faded stack on left: previous runs (history) + next runs (upcoming)
+    // Stack only previous/next runs (each run = one generation). Gallery concepts from the same run stay out.
     if (runs.length > 1) {
       const previousRuns = runs.slice(0, activeIndex).reverse();
       const nextRuns = runs.slice(activeIndex + 1);
@@ -1956,7 +1959,7 @@ export function ImagePreviewExperience(props: {
     }
 
     return layers;
-  }, [activeIndex, activeNavigationTransition, activeRun, hero, isPlaceholderHero, runs, selectedConceptIndex, showConceptPicker, viewMode]);
+  }, [activeIndex, activeNavigationTransition, activeRun, hero, isPlaceholderHero, runs, showConceptPicker]);
   const goPrev = () => {
     if (!canPrev) return;
     const nextId = runs[activeIndex - 1]?.id;
@@ -2448,8 +2451,11 @@ export function ImagePreviewExperience(props: {
                       </>
                     ) : null}
 
-                    {activeRun?.images && activeRun.images.length > 1 ? (
-                      showConceptPicker ? (
+                    {(() => {
+                      const hasMultiImageRun = runs.some((r) => r.images && r.images.length > 1);
+                      const activeRunHasMultiple = Boolean(activeRun?.images && activeRun.images.length > 1);
+                      if (!hasMultiImageRun) return null;
+                      return showConceptPicker ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -2479,9 +2485,12 @@ export function ImagePreviewExperience(props: {
                             setCache((prev) => {
                               const base = prev ?? loadCache(instanceId, sessionId);
                               if (!base) return prev;
+                              const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
                               const next: PreviewCacheV3 = {
                                 ...base,
                                 viewMode: "gallery",
+                                activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
+                                selectedConceptIndex: null,
                                 updatedAt: Date.now(),
                               };
                               saveCache(instanceId, sessionId, next);
@@ -2494,8 +2503,8 @@ export function ImagePreviewExperience(props: {
                         >
                           <LayoutGrid className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         </button>
-                      )
-                    ) : null}
+                      );
+                    })()}
                   </div>
                 </div>
               ) : null}
@@ -2966,7 +2975,7 @@ export function ImagePreviewExperience(props: {
                           requirePhone
                           onRevealed={() => {
                             setLeadCaptured(true);
-                            void fetchAccuratePricing();
+                            // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
                           }}
                           accentColor={pillBg}
                           style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
@@ -3069,7 +3078,7 @@ export function ImagePreviewExperience(props: {
                           requirePhone
                           onRevealed={() => {
                             setLeadCaptured(true);
-                            void fetchAccuratePricing();
+                            // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
                           }}
                           accentColor={pillBg}
                           style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}

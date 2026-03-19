@@ -92,6 +92,14 @@ function buildSelectionHint(minSelections: number, maxSelections?: number): stri
   return `Pick at least ${minSelections} style${minSelections === 1 ? "" : "s"} to continue.`;
 }
 
+function buildCompactSelectionHint(minSelections: number, maxSelections?: number): string | null {
+  if (!Number.isFinite(minSelections) || minSelections <= 0) return null;
+  if (Number.isFinite(Number(maxSelections)) && Number(maxSelections) > minSelections) {
+    return `${minSelections}-${Number(maxSelections)} styles`;
+  }
+  return `${minSelections}+ styles`;
+}
+
 export function ImageChoiceGridStep({
   step,
   stepData,
@@ -148,7 +156,11 @@ export function ImageChoiceGridStep({
 
   const selectedArray = Array.isArray(value) ? value : value ? [value] : [];
   const canContinue = multiple ? selectedArray.length >= minSelections : Boolean(value);
-  const selectionHint = multiple ? buildSelectionHint(minSelections, maxSelections) : null;
+  const selectionHint = multiple
+    ? compactInPreview
+      ? buildCompactSelectionHint(minSelections, maxSelections)
+      : buildSelectionHint(minSelections, maxSelections)
+    : null;
   const maxReached = Boolean(multiple && Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections));
 
   return (
@@ -164,12 +176,12 @@ export function ImageChoiceGridStep({
       compactInPreview={compactInPreview}
       preferWideLayout={!compactInPreview}
     >
-      <div className={compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-5xl min-w-0 flex-col overflow-hidden" : "flex min-h-0 w-full min-w-0 flex-col"}>
-        {selectionHint ? (
+      <div className={compactInPreview ? "mx-auto flex w-full max-w-5xl min-w-0 flex-col" : "flex min-h-0 w-full min-w-0 flex-col"}>
+        {selectionHint && !compactInPreview ? (
           <div
             className={cn(
               "flex items-center justify-between gap-2 rounded-lg border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/70",
-              compactInPreview ? "mb-2 shrink-0 px-2 py-1.5 text-[11px]" : "mb-3 px-3 py-2 text-xs sm:text-sm"
+              "mb-3 px-3 py-2 text-xs sm:text-sm"
             )}
           >
             <span className="text-muted-foreground truncate min-w-0">{selectionHint}</span>
@@ -192,6 +204,7 @@ export function ImageChoiceGridStep({
           variant={effectiveVariant}
           columns={effectiveColumns}
           thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
+          compactScroller={Boolean(compactInPreview)}
         />
       </div>
     </StepLayout>

@@ -488,7 +488,8 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     },
   };
 
-  const fetchTimeoutMs = 15000;
+  // AI pricing with image analysis can take 20-30+ seconds; avoid premature timeouts
+  const fetchTimeoutMs = 35000;
   const candidatePaths = [
     // Preferred (matches FastAPI path-param shape)
     `/v1/api/pricing/${encodeURIComponent(instanceId)}`,

@@ -22,6 +22,7 @@ import { usePreviewEligibility } from "./step-engine/hooks/usePreviewEligibility
 import { usePreviewLayout } from "./step-engine/hooks/usePreviewLayout";
 import { PreviewSection } from "./step-engine/sections/PreviewSection";
 import { FormQuestionSection } from "./step-engine/sections/FormQuestionPaneSection";
+import { buildDeterministicStyleStep } from "../static/deterministic-style-step";
 import {
   DETERMINISTIC_BUDGET_ID,
   DETERMINISTIC_CONSENT_ID,
@@ -113,34 +114,6 @@ interface StepEngineProps {
 function isBootstrapStepIdValue(stepId: string | null | undefined): boolean {
   const id = String(stepId || "");
   return id.startsWith(DETERMINISTIC_SERVICE_ID) || id === DETERMINISTIC_CONSENT_ID || id === DETERMINISTIC_STYLE_ID;
-}
-
-function buildDeterministicStyleStepForService(serviceMeta: any): UIStep | null {
-  const styleOptions = Array.isArray(serviceMeta?.styleOptions) ? serviceMeta.styleOptions : [];
-  if (styleOptions.length === 0) return null;
-  const question =
-    typeof serviceMeta?.styleQuestion === "string" && serviceMeta.styleQuestion.trim()
-      ? serviceMeta.styleQuestion.trim()
-      : "Pick 3-5 ideal styles from the grid.";
-  return {
-    id: DETERMINISTIC_STYLE_ID,
-    type: "image_choice_grid",
-    question,
-    options: styleOptions
-      .map((opt: any) => ({
-        label: String(opt?.label || ""),
-        value: String(opt?.value || opt?.label || ""),
-        imageUrl: typeof opt?.imageUrl === "string" ? opt.imageUrl : "",
-        ...(typeof opt?.description === "string" && opt.description ? { description: opt.description } : {}),
-        ...(typeof opt?.priceTier === "string" && opt.priceTier ? { priceTier: opt.priceTier } : {}),
-      }))
-      .filter((opt: any) => opt.label && opt.value && opt.imageUrl)
-      .slice(0, 20),
-    multi_select: true,
-    min_selections: 3,
-    max_selections: 5,
-    metricGain: 0.12,
-  } as any;
 }
 
 export function StepEngine({
@@ -473,7 +446,7 @@ export function StepEngine({
   );
   const selectedServiceMeta = selectedServiceId ? (serviceCatalogSnapshot?.byServiceId as any)?.[selectedServiceId] : null;
   const deterministicStyleStep = useMemo(
-    () => buildDeterministicStyleStepForService(selectedServiceMeta),
+    () => buildDeterministicStyleStep(selectedServiceMeta),
     [selectedServiceMeta]
   );
 
@@ -822,27 +795,30 @@ export function StepEngine({
 
   // Lead-gate should unlock only after an explicit capture in this session.
   const leadCapturedForUI = Boolean(formState?.leadCaptured);
+  const belowPreviewControlStepIds = useMemo(() => {
+    const uploadIds = desiredDeterministicUploadSteps
+      .map((step: any) => String(step?.id || ""))
+      .filter(Boolean);
+    return new Set([
+      DETERMINISTIC_BUDGET_ID,
+      ...uploadIds,
+      REFINEMENT_UPLOAD_STEP_ID,
+    ]);
+  }, [desiredDeterministicUploadSteps]);
 
-  // When lead modal is completed, budget/upload are hidden visually — auto-advance past them
-  // so the user never stops on a hidden step. Steps stay in state for pricing/API data.
-  const hiddenStepIdsWhenLeadCaptured = useMemo(
-    () =>
-      new Set([
-        DETERMINISTIC_BUDGET_ID,
-        DETERMINISTIC_SCENE_IMAGE_ID,
-        DETERMINISTIC_USER_IMAGE_ID,
-        DETERMINISTIC_PRODUCT_IMAGE_ID,
-      ]),
-    []
-  );
+  // After lead capture, budget/upload controls live in the bottom control bar.
+  // Remove their dedicated steps from the guided sequence, but keep their values in stepData
+  // so future image generations and refinements still have the data.
   useEffect(() => {
-    if (!currentStep) return;
     if (!leadCapturedForUI) return;
-    if (!hiddenStepIdsWhenLeadCaptured.has(currentStep.id)) return;
-    const existingValue = state?.stepData?.[currentStep.id];
-    const data = existingValue ?? (currentStep.id === DETERMINISTIC_BUDGET_ID ? budgetValue : undefined);
-    void goToNextStep(data ?? {});
-  }, [budgetValue, currentStep, goToNextStep, hiddenStepIdsWhenLeadCaptured, leadCapturedForUI, state?.stepData]);
+    if (!previewHasImage) return;
+    if (!state?.steps?.length) return;
+    const hasInlineControlSteps = state.steps.some((step: any) =>
+      belowPreviewControlStepIds.has(String((step as any)?.id || ""))
+    );
+    if (!hasInlineControlSteps) return;
+    removeStepsByIds(belowPreviewControlStepIds);
+  }, [belowPreviewControlStepIds, leadCapturedForUI, previewHasImage, removeStepsByIds, state?.steps]);
 
   // When lead is captured: switch to Guided tab so user sees next questions immediately.
   useEffect(() => {
@@ -2457,7 +2433,7 @@ export function StepEngine({
       nextSelectedServiceId && serviceCatalogSnapshot?.byServiceId
         ? (serviceCatalogSnapshot.byServiceId as any)[nextSelectedServiceId]
         : null;
-    const nextDeterministicStyleStep = buildDeterministicStyleStepForService(nextSelectedServiceMeta);
+    const nextDeterministicStyleStep = buildDeterministicStyleStep(nextSelectedServiceMeta);
     const shouldRouteToDeterministicStyleStep =
       currentStep.id === DETERMINISTIC_SERVICE_ID &&
       Boolean(nextDeterministicStyleStep) &&
@@ -2785,6 +2761,7 @@ export function StepEngine({
   }, [currentStep, formState?.batchIndex, instanceId, sessionId, state?.currentStepIndex]);
 
   const handleBack = useCallback(async () => {
+    setAdventureInputMode("questions");
     if (!state || !currentStep) {
       await goToPreviousStep();
       return;
@@ -2828,7 +2805,7 @@ export function StepEngine({
         });
     }
     await goToPreviousStep();
-  }, [currentStep, formState?.batchIndex, goToPreviousStep, instanceId, sessionId, state]);
+  }, [currentStep, formState?.batchIndex, goToPreviousStep, instanceId, sessionId, setAdventureInputMode, state]);
 
   const handleNavigateToStep = useCallback(
     (stepIndex: number) => {
@@ -3014,6 +2991,7 @@ export function StepEngine({
     previewEverEnabled,
     progressPercentage: progress?.percentage ?? null,
     setPreviewEverEnabled,
+    suppressDeterministicStepInsert: Boolean(leadCapturedForUI && previewHasImage),
     state,
     updateStepData,
   });
@@ -3279,7 +3257,7 @@ export function StepEngine({
         order: (state?.currentStepIndex ?? 0) + 1,
       }
     : null;
-  const guidedThumbnailMode = false;
+  const guidedThumbnailMode = Boolean(previewLayoutActive && showQuestionPaneUnderPreview);
   const isRefinementUploadStep = String((stepForRenderer as any)?.id) === REFINEMENT_UPLOAD_STEP_ID;
   const hasPreviewSubsections = showEasePrompt;
   const parseBatchOrder = (batchId: string | null | undefined): number | null => {
@@ -3310,24 +3288,20 @@ export function StepEngine({
     const indexed = state.steps.map((step, index) => ({ step, index }));
     const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
     // After lead modal is completed, budget/upload are hidden visually — hide from jogger only then.
-    const stepsToHideWhenLeadCaptured = new Set([
-      DETERMINISTIC_BUDGET_ID,
-      DETERMINISTIC_SCENE_IMAGE_ID,
-      DETERMINISTIC_USER_IMAGE_ID,
-      DETERMINISTIC_PRODUCT_IMAGE_ID,
-    ]);
     const withoutBudgetUploadWhenLeadCaptured =
-      leadCapturedForUI
-        ? withoutRefinementUpload.filter(({ step }) => !stepsToHideWhenLeadCaptured.has(String((step as any)?.id || "")))
+      leadCapturedForUI && previewHasImage
+        ? withoutRefinementUpload.filter(({ step }) => !belowPreviewControlStepIds.has(String((step as any)?.id || "")))
         : withoutRefinementUpload;
-    if (leadCapturedForUI) return withoutBudgetUploadWhenLeadCaptured;
+    if (leadCapturedForUI && previewHasImage) return withoutBudgetUploadWhenLeadCaptured;
+    // Before lead capture: only show batch-1 and earlier. Hide batch-2+ until lead form is filled.
+    const effectiveRevealBatchOrder = Math.min(stepJoggerRevealBatchOrder ?? 1, 1);
     return withoutBudgetUploadWhenLeadCaptured.filter(({ step }) => {
       const stepId = String((step as any)?.id || "");
       if (!stepId) return true;
       const meta = stepMetaRef.current.get(stepId);
       const order = parseBatchOrder(meta?.batchId);
-      if (order === null || stepJoggerRevealBatchOrder === null) return true;
-      return order <= stepJoggerRevealBatchOrder;
+      if (order === null || effectiveRevealBatchOrder === null) return true;
+      return order <= effectiveRevealBatchOrder;
     });
   })();
   const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1);
@@ -3357,7 +3331,6 @@ export function StepEngine({
     const words = cleaned.split(" ").filter(Boolean);
     return (words.slice(0, 4).join(" ") || `Step ${index + 1}`).replace(/\b\w/g, (c) => c.toUpperCase());
   };
-
   return (
 	  <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent text-foreground" style={{ color: theme.textColor }}>
 	      {/* Header always owns its height budget so the body starts below it. */}
@@ -3402,6 +3375,7 @@ export function StepEngine({
                     disabled={!canNavigate}
                     onClick={() => {
                       if (!canNavigate) return;
+                      setAdventureInputMode("questions");
                       handleNavigateToStep(index);
                     }}
                     title={label}
@@ -3529,6 +3503,8 @@ export function StepEngine({
                       onRegeneratePreview={(uploadedUrl?: string) => {
                         if (uploadedUrl && typeof uploadedUrl === "string") {
                           setPendingPreviewSceneUploadUrl(uploadedUrl);
+                          updateStepData(REFINEMENT_UPLOAD_STEP_ID, uploadedUrl);
+                          updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, uploadedUrl);
                         }
                         setPreviewRefreshNonce((prev) => prev + 1);
                       }}

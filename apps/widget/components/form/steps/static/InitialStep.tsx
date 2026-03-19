@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { cn } from "@/lib/utils";
 import type { IntroUI } from "@/types/ai-form-ui-contract";
 import { useFormTheme } from "../../demo/FormThemeProvider";
 import { Button } from "@/components/ui/button";
@@ -14,9 +15,10 @@ interface InitialStepProps {
   canGoBack: boolean;
   isLoading: boolean;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
+  compactInPreview?: boolean;
 }
 
-export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, actionsVariant }: InitialStepProps) {
+export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, actionsVariant, compactInPreview }: InitialStepProps) {
   const { theme } = useFormTheme();
   const brand = step.brand || null;
   const continueLabel = step.blueprint?.presentation?.continue_label || "Start";
@@ -30,37 +32,43 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
     });
   };
 
+  const compact = Boolean(compactInPreview);
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 py-6 space-y-6">
+    <div
+      className={cn(
+        "w-full mx-auto",
+        compact ? "max-w-2xl px-3 py-2 space-y-2" : "max-w-3xl px-4 py-6 space-y-6"
+      )}
+    >
       <div>
-        <h2 className="text-lg sm:text-xl font-semibold min-w-0 flex-1 break-words" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
+        <h2 className={cn("font-semibold min-w-0 flex-1 break-words", compact ? "text-base" : "text-lg sm:text-xl")} style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
           {step.question || "Let’s get started"}
         </h2>
         {step.humanism ? (
-          <p className="mt-1 text-sm opacity-80" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
+          <p className={cn("opacity-80", compact ? "mt-0.5 text-xs" : "mt-1 text-sm")} style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
             {step.humanism}
           </p>
         ) : null}
       </div>
 
-      <div className="space-y-6">
+      <div className={cn(compact ? "space-y-2" : "space-y-6")}>
         <div
-          className="rounded-2xl border p-4"
+          className={cn("border", compact ? "rounded-xl p-2.5" : "rounded-2xl p-4")}
           style={{
             backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
             borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
             borderRadius: `${theme.borderRadius}px`,
           }}
         >
-          <div className="flex items-start gap-3">
+          <div className={cn("flex items-start", compact ? "gap-2" : "gap-3")}>
             <div
-              className="flex h-10 w-10 items-center justify-center rounded-xl"
+              className={cn("flex items-center justify-center rounded-xl", compact ? "h-8 w-8" : "h-10 w-10")}
               style={{ backgroundColor: `${theme.primaryColor}18` }}
             >
-              <Sparkles className="h-5 w-5" style={{ color: theme.primaryColor }} />
+              <Sparkles className={compact ? "h-4 w-4" : "h-5 w-5"} style={{ color: theme.primaryColor }} />
             </div>
             <div className="min-w-0">
-              <div className="font-semibold text-[15px]">
+              <div className={cn("font-semibold", compact ? "text-[13px]" : "text-[15px]")}>
                 {brand ? `Personalized to ${brand}` : "Personalized to your answers"}
               </div>
               <div className="mt-1 text-xs text-muted-foreground/80 leading-relaxed">
@@ -70,9 +78,9 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={cn("grid sm:grid-cols-3", compact ? "gap-2" : "gap-3")}>
           <div
-            className="rounded-2xl border p-4"
+            className={cn("border", compact ? "rounded-xl p-2" : "rounded-2xl p-4")}
             style={{
               backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
               borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
@@ -83,10 +91,10 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
               <Clock3 className="h-4 w-4" />
               ~2 minutes
             </div>
-            <div className="mt-2 text-sm font-medium">Quick, focused questions</div>
+            <div className={cn("font-medium", compact ? "mt-1 text-xs" : "mt-2 text-sm")}>Quick, focused questions</div>
           </div>
           <div
-            className="rounded-2xl border p-4"
+            className={cn("border", compact ? "rounded-xl p-2" : "rounded-2xl p-4")}
             style={{
               backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
               borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
@@ -97,10 +105,10 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
               <ShieldCheck className="h-4 w-4" />
               No spam
             </div>
-            <div className="mt-2 text-sm font-medium">You control what you share</div>
+            <div className={cn("font-medium", compact ? "mt-1 text-xs" : "mt-2 text-sm")}>You control what you share</div>
           </div>
           <div
-            className="rounded-2xl border p-4"
+            className={cn("border", compact ? "rounded-xl p-2" : "rounded-2xl p-4")}
             style={{
               backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
               borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
@@ -111,7 +119,7 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
               <Sparkles className="h-4 w-4" />
               Better results
             </div>
-            <div className="mt-2 text-sm font-medium">Cleaner inputs → cleaner outputs</div>
+            <div className={cn("font-medium", compact ? "mt-1 text-xs" : "mt-2 text-sm")}>Cleaner inputs → cleaner outputs</div>
           </div>
         </div>
       </div>

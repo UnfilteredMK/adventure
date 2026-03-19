@@ -90,3 +90,28 @@
 .sif-range::-moz-focus-outer {
   border: 0;
 }
+
+.sif-range--compact {
+  height: 24px;
+}
+
+.sif-range--compact::-webkit-slider-runnable-track {
+  height: 4px;
+}
+
+.sif-range--compact::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+  margin-top: -7px;
+}
+
+.sif-range--compact::-moz-range-track {
+  height: 4px;
+}
+
+.sif-range--compact::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}

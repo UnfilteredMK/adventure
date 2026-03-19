@@ -9,7 +9,7 @@ import { Slider as SliderPrimitive } from "@/components/ui/slider";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt, ReflectionFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
-import { ArrowLeft, ArrowRight, ArrowUp, ImagePlus } from "lucide-react";
+import { ArrowLeft, ArrowUp, ImagePlus } from "lucide-react";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 
 interface FormQuestionSectionProps {
@@ -117,7 +117,7 @@ export function FormQuestionSection({
   const showPromptControls = Boolean(
     previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI
   );
-  const usePreviewPaneLayout = Boolean(previewEnabled && previewHasImage && usePreviewDominantLayout);
+  const usePreviewPaneLayout = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview);
   const useBottomDockLayout = Boolean(usePreviewPaneLayout && showQuestionPaneUnderPreview && isMobileViewport);
   const useCompactNav = useBottomDockLayout;
   const promptText = promptDraft.trim();
@@ -125,7 +125,6 @@ export function FormQuestionSection({
   const primary = theme.primaryColor || "#3b82f6";
   const textMuted = theme.textColor ? hexToRgba(theme.textColor, 0.65) : undefined;
   const canUseBudgetMode = Boolean(showPromptControls && leadCapturedForUI);
-  const autoSwitchedToBudgetRef = useRef(false);
   const pricingLocale =
     typeof navigator !== "undefined"
       ? ((navigator.languages && navigator.languages[0]) || navigator.language || undefined)
@@ -153,14 +152,6 @@ export function FormQuestionSection({
     return defaultBudget;
   });
   const [budgetDirty, setBudgetDirty] = useState(false);
-
-  useEffect(() => {
-    if (!leadCapturedForUI) return;
-    if (!showPromptControls) return;
-    if (autoSwitchedToBudgetRef.current) return;
-    autoSwitchedToBudgetRef.current = true;
-    if (adventureInputMode !== "budget") setAdventureInputMode("budget");
-  }, [adventureInputMode, leadCapturedForUI, setAdventureInputMode, showPromptControls]);
 
   useEffect(() => {
     const next = typeof budgetValue === "number" && Number.isFinite(budgetValue) ? budgetValue : defaultBudget;
@@ -358,7 +349,8 @@ export function FormQuestionSection({
             >
               <div
                 className={cn(
-                  "flex min-h-0 flex-1 flex-col overflow-auto",
+                  "flex min-h-0 flex-1 flex-col",
+                  usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
                   useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null,
                   usePreviewPaneLayout ? "px-4" : null
                 )}
@@ -408,6 +400,24 @@ export function FormQuestionSection({
 	                          }}
 	                        />
 	                        <div className="flex w-full max-w-md flex-row flex-wrap items-center justify-center gap-2.5">
+                            {canGoBack ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={refinementUploading}
+                                onClick={handleBack}
+                                className="h-9 min-w-[96px] px-3 text-xs font-medium"
+                                style={{
+                                  borderColor: theme.primaryColor || primary,
+                                  color: theme.primaryColor || primary,
+                                  fontFamily: theme.fontFamily,
+                                  borderRadius: `${theme.borderRadius ?? 12}px`,
+                                }}
+                              >
+                                <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                                <span>Back</span>
+                              </Button>
+                            ) : null}
 	                          <Button
 	                            type="button"
 	                            disabled={refinementUploading}
@@ -579,7 +589,10 @@ export function FormQuestionSection({
 	                              <div className="flex-1 min-w-0">
 	                                <div className="px-1 min-w-0 py-0.5">
                                   <div
-                                    className="pb-0.5 text-center text-lg sm:text-xl font-black leading-tight tabular-nums"
+                                    className={cn(
+                                      "pb-0.5 text-center font-black leading-tight tabular-nums",
+                                      usePreviewPaneLayout ? "text-base sm:text-lg" : "text-lg sm:text-xl"
+                                    )}
                                     style={{ color: primary, fontFamily: theme.fontFamily }}
                                   >
                                     {formatCurrency(localBudget, { locale: pricingLocale, currency: budgetCurrency, compact: true })}
@@ -590,11 +603,12 @@ export function FormQuestionSection({
                                     step={budgetSliderConfig.step}
                                     value={[localBudget]}
                                     onValueChange={(v) => handleBudgetInputChange(v[0] ?? localBudget)}
+                                    compact={usePreviewPaneLayout}
                                     className="w-full min-w-0"
                                     aria-label="Adjust budget and regenerate preview"
                                     disabled={!canUseBudgetMode}
                                   />
-                                  <div className="mt-1 flex items-center justify-between px-1 text-[11px] font-medium">
+                                  <div className={cn("flex items-center justify-between px-1 font-medium", usePreviewPaneLayout ? "mt-0.5 text-[10px]" : "mt-1 text-[11px]")}>
                                     <span style={{ color: textMuted || theme.textColor, fontFamily: theme.fontFamily }}>
                                       {budgetMinLabel}
                                     </span>
@@ -611,7 +625,7 @@ export function FormQuestionSection({
                                 <div
                                   className={cn(
                                     "pb-0.5 pt-0.5 text-center font-black leading-tight tabular-nums",
-                                    usePreviewPaneLayout ? "text-xl" : "text-2xl"
+                                    usePreviewPaneLayout ? "text-base sm:text-lg" : "text-2xl"
                                   )}
                                   style={{ color: primary, fontFamily: theme.fontFamily }}
                                 >
@@ -624,12 +638,13 @@ export function FormQuestionSection({
                                     step={budgetSliderConfig.step}
                                     value={[localBudget]}
                                     onValueChange={(v) => handleBudgetInputChange(v[0] ?? localBudget)}
+                                    compact={usePreviewPaneLayout}
                                     className="w-full min-w-0"
                                     aria-label="Adjust budget and regenerate preview"
                                     disabled={!canUseBudgetMode}
                                   />
                                 </div>
-                                <div className="mt-1 flex shrink-0 items-center justify-between px-1 text-[11px] font-medium">
+                                <div className={cn("flex shrink-0 items-center justify-between px-1 font-medium", usePreviewPaneLayout ? "mt-0.5 text-[10px]" : "mt-1 text-[11px]")}>
                                   <span style={{ color: textMuted || theme.textColor, fontFamily: theme.fontFamily }}>
                                     {budgetMinLabel}
                                   </span>
@@ -743,7 +758,7 @@ export function FormQuestionSection({
                         transition={{ duration: 0.2, ease: "easeOut" }}
                         className="w-full min-h-0 flex flex-1 flex-col"
                       >
-                        <div className="flex-1 min-h-0 overflow-hidden">
+                        <div className={cn("flex-1 min-h-0", usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden")}>
                           <ComponentRenderer
                             step={stepForRenderer}
                             stepData={state?.stepData ? state.stepData[(stepForRenderer as any).id] : undefined}

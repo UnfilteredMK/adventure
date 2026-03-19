@@ -97,22 +97,35 @@ export function SliderStep({
     >
       <div
         className={cn(
-          compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-2xl flex-col justify-end overflow-y-auto py-2 pr-1 space-y-2.5" : null,
+          compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-xl flex-col justify-start overflow-y-auto py-0.5 pr-1 space-y-1.5" : null,
           !compactInPreview && (isCompact ? "py-3 space-y-3" : "py-5 sm:py-8 space-y-4 sm:space-y-6")
         )}
       >
         <div
           className={cn(
             "font-black text-center",
-            compactInPreview ? "text-2xl sm:text-3xl" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
+            compactInPreview ? "text-lg sm:text-xl leading-none" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
           )}
           style={{ color: theme.primaryColor, fontFamily: theme.fontFamily }}
         >
           {formatValue(value)}
         </div>
-        <SliderPrimitive value={[value]} onValueChange={(v) => setValue(v[0])} min={safeMin} max={safeMax} step={safeStep} className="w-full" />
+        <SliderPrimitive
+          value={[value]}
+          onValueChange={(v) => setValue(v[0])}
+          min={safeMin}
+          max={safeMax}
+          step={safeStep}
+          compact={Boolean(compactInPreview)}
+          className="w-full"
+        />
+        {compactInPreview ? (
+          <div className="flex items-center justify-between px-0.5 text-[10px] font-medium opacity-70">
+            <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMin)}</span>
+            <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMax)}</span>
+          </div>
+        ) : null}
       </div>
     </StepLayout>
   );
 }
-

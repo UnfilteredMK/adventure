@@ -2,6 +2,7 @@
 
 // Image Choice Grid Control
 import React from "react";
+import { createPortal } from "react-dom";
 import { useFormTheme } from "../../demo/FormThemeProvider";
 import { cn } from "@/lib/utils";
 import { animate, motion, useMotionValue, useTransform } from "framer-motion";
@@ -22,6 +23,7 @@ interface ImageChoiceGridProps {
   columns?: number;
   className?: string;
   thumbnailMode?: boolean;
+  compactScroller?: boolean;
 }
 
 function clampColumns(raw: unknown): number | undefined {
@@ -69,6 +71,7 @@ export function ImageChoiceGrid({
   columns,
   className,
   thumbnailMode = false,
+  compactScroller = false,
 }: ImageChoiceGridProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
@@ -78,6 +81,50 @@ export function ImageChoiceGrid({
   const isAtSelectionCap = Boolean(multiple && maxSelectionLimit !== null && selectedArray.length >= maxSelectionLimit);
   const isNarrowViewport = useIsNarrowViewport(768);
   const desktopThumbnailMode = thumbnailMode && !isNarrowViewport;
+  const useCompactScroller = Boolean(compactScroller && variant !== "swipe");
+  const scrollViewportRef = React.useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(false);
+  const [hoveredCompactOption, setHoveredCompactOption] = React.useState<null | {
+    label: string;
+    imageUrl?: string;
+    rect: DOMRect;
+  }>(null);
+  const [canPortalPreview, setCanPortalPreview] = React.useState(false);
+
+  React.useEffect(() => {
+    setCanPortalPreview(typeof document !== "undefined");
+  }, []);
+
+  const updateScrollAffordances = React.useCallback(() => {
+    const el = scrollViewportRef.current;
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft < maxLeft - 4);
+  }, []);
+
+  React.useEffect(() => {
+    if (!useCompactScroller) return;
+    updateScrollAffordances();
+    const el = scrollViewportRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updateScrollAffordances());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [options.length, updateScrollAffordances, useCompactScroller]);
+
+  const scrollCompactRail = React.useCallback((direction: "left" | "right") => {
+    const el = scrollViewportRef.current;
+    if (!el) return;
+    const delta = Math.max(160, Math.floor(el.clientWidth * 0.72)) * (direction === "right" ? 1 : -1);
+    el.scrollBy({ left: delta, behavior: "smooth" });
+    window.setTimeout(updateScrollAffordances, 220);
+  }, [updateScrollAffordances]);
 
   const toggle = (val: string) => {
     if (multiple) {
@@ -354,6 +401,132 @@ export function ImageChoiceGrid({
             ))}
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (useCompactScroller) {
+    const compactCardWidth = isNarrowViewport ? 84 : 96;
+
+    return (
+      <div className={cn("relative w-full overflow-visible", className)}>
+        {options.length > 2 ? (
+          <>
+            <button
+              type="button"
+              onClick={() => scrollCompactRail("left")}
+              disabled={!canScrollLeft}
+              className="absolute left-0 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/95 shadow-sm disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="Scroll thumbnails left"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollCompactRail("right")}
+              disabled={!canScrollRight}
+              className="absolute right-0 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/95 shadow-sm disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="Scroll thumbnails right"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </>
+        ) : null}
+        <div
+          ref={scrollViewportRef}
+          onScroll={updateScrollAffordances}
+          className="w-full overflow-x-auto overflow-y-visible px-7 py-1"
+        >
+          <div className="flex min-w-max snap-x snap-mandatory gap-1.5 pr-3">
+            {options.map((opt, index) => {
+              const key = opt.value || opt.label;
+              const picked = selectedArray.includes(key);
+              const disabled = Boolean(multiple && !picked && isAtSelectionCap);
+
+              return (
+                <motion.button
+                  key={key}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.03 }}
+                  disabled={disabled}
+                  onClick={() => toggle(key)}
+                  onMouseEnter={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setHoveredCompactOption({ label: opt.label, imageUrl: opt.imageUrl, rect });
+                  }}
+                  onMouseLeave={() => setHoveredCompactOption((current) => (current?.label === opt.label ? null : current))}
+                  onFocus={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setHoveredCompactOption({ label: opt.label, imageUrl: opt.imageUrl, rect });
+                  }}
+                  onBlur={() => setHoveredCompactOption((current) => (current?.label === opt.label ? null : current))}
+                  aria-disabled={disabled}
+                  className={cn(
+                    "group relative z-0 flex shrink-0 snap-start flex-col overflow-hidden rounded-lg border bg-[var(--form-surface-color)] text-left transition-all duration-150",
+                    picked ? "border-primary shadow-sm" : "border-[color:var(--form-surface-border-color)] hover:border-black/25",
+                    disabled ? "cursor-not-allowed opacity-45" : "hover:z-20 hover:shadow-xl"
+                  )}
+                  style={{ width: compactCardWidth, borderRadius: `${theme.borderRadius}px` }}
+                >
+                  <div className="relative aspect-[7/5] w-full overflow-hidden bg-muted/30">
+                    {opt.imageUrl ? (
+                      <img
+                        src={opt.imageUrl}
+                        alt={opt.label}
+                        loading="eager"
+                        decoding="async"
+                        className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+                      />
+                    ) : (
+                      <div className="h-full w-full animate-pulse bg-muted/40" />
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 p-1">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
+                      <div className="relative z-10 line-clamp-2 text-[9px] font-semibold leading-tight text-white">
+                        {opt.label}
+                      </div>
+                    </div>
+                  </div>
+                  {picked ? (
+                    <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-white shadow">
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </div>
+                  ) : null}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+        {canPortalPreview && hoveredCompactOption?.imageUrl
+          ? createPortal(
+              <div
+                className="pointer-events-none fixed z-[9999] hidden sm:block"
+                style={{
+                  left: Math.max(12, hoveredCompactOption.rect.left + hoveredCompactOption.rect.width / 2 - 110),
+                  top: Math.max(12, hoveredCompactOption.rect.top - 190),
+                  width: 220,
+                }}
+              >
+                <div
+                  className="overflow-hidden border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] shadow-2xl"
+                  style={{ borderRadius: `${theme.borderRadius + 4}px` }}
+                >
+                  <div className="aspect-[4/3] w-full overflow-hidden bg-muted/30">
+                    <img
+                      src={hoveredCompactOption.imageUrl}
+                      alt={hoveredCompactOption.label}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                  <div className="px-2 py-1.5 text-[11px] font-medium leading-tight">
+                    {hoveredCompactOption.label}
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )
+          : null}
       </div>
     );
   }
