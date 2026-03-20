@@ -25,7 +25,7 @@
     "backfill:instance-configs:v2": "node scripts/compact-instance-configs-to-v2.js",
     "update:service-summaries:prompt": "node scripts/update-service-summaries-from-prompt.js",
     "gen-types": "npm run gen-types:all",
-    "gen-types:all": "npx supabase gen types typescript --project-id xvpagpzufitqzoijoalz --schema public > src/types/database.ts && npx supabase gen types typescript --project-id xvpagpzufitqzoijoalz --schema public,graphql_public > src/supabase/types.ts",
+    "gen-types:all": "npm --prefix ../.. run supabase:gen:types",
     "db:update": "node ../../scripts/update-supabase.js",
     "db:pull": "supabase db pull --schema public && cp supabase/migrations/*_schema.sql supabase/rls/policies.sql",
     "db:new": "supabase migration new",

@@ -17,6 +17,7 @@ interface MultipleChoiceStepProps {
   headerInlineControl?: React.ReactNode;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function MultipleChoiceStep({
@@ -30,6 +31,7 @@ export function MultipleChoiceStep({
   headerInlineControl,
   actionsVariant,
   compactInPreview,
+  layoutDebugEnabled,
 }: MultipleChoiceStepProps) {
   const continueLabel = (step as any)?.blueprint?.presentation?.continue_label ?? "Continue";
   const autoAdvanceOverride = (step as any)?.blueprint?.presentation?.auto_advance;
@@ -76,11 +78,12 @@ export function MultipleChoiceStep({
       headerInlineControl={headerInlineControl}
       actionsVariant={actionsVariant}
       compactInPreview={compactInPreview}
+      layoutDebugEnabled={layoutDebugEnabled}
     >
       <div
         className={
           compactInPreview
-            ? "flex h-full min-h-0 min-w-0 w-full flex-col justify-start overflow-y-auto overflow-x-hidden py-0.5 pr-1 [&>div]:mx-auto [&>div]:max-w-5xl [&>div]:w-full [&>div]:min-w-0 [&>div]:text-center [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:min-w-0 [&>div>div:first-child]:justify-center"
+            ? "flex h-full min-h-0 min-w-0 w-full flex-col justify-start overflow-hidden py-0 text-center [&>div]:w-full [&>div]:min-w-0 [&>div>div]:mx-auto"
             : "w-full min-w-0 [&>div]:w-full [&>div]:text-left [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:justify-start"
         }
       >

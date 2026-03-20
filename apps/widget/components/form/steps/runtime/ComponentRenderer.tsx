@@ -38,6 +38,7 @@ interface ComponentRendererProps {
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   guidedThumbnailMode?: boolean;
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function ComponentRenderer(props: ComponentRendererProps) {
@@ -55,6 +56,7 @@ export function ComponentRenderer(props: ComponentRendererProps) {
     actionsVariant,
     guidedThumbnailMode,
     compactInPreview,
+    layoutDebugEnabled,
   } = props;
   const resolvedLeadCaptured =
     typeof props.leadCaptured === "boolean"
@@ -76,6 +78,7 @@ export function ComponentRenderer(props: ComponentRendererProps) {
       actionsVariant,
       guidedThumbnailMode: Boolean(guidedThumbnailMode || compactInPreview),
       compactInPreview,
+      layoutDebugEnabled,
       instanceId: props.instanceId,
     };
     // If a UIStep carries a backend function call hint, render a dedicated UI.
@@ -115,8 +118,8 @@ export function ComponentRenderer(props: ComponentRendererProps) {
           />
         );
       case "image_choice_grid":
-      return <ImageChoiceGridStep {...common} />;
-    default:
+        return <ImageChoiceGridStep {...common} />;
+      default:
         return (
           <div className="p-6 text-sm opacity-70">
             Unsupported UIStep type: {(s as any).type}
@@ -151,6 +154,7 @@ export function ComponentRenderer(props: ComponentRendererProps) {
     actionsVariant,
     guidedThumbnailMode: Boolean(guidedThumbnailMode || compactInPreview),
     compactInPreview,
+    layoutDebugEnabled,
   };
 
   switch (effectiveComponentType) {

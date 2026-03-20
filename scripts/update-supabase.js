@@ -97,36 +97,26 @@ async function main() {
   log("🚀 Starting Supabase Update Process...");
 
   const root = repoRoot();
-  const projectId = "xvpagpzufitqzoijoalz";
-  const schema = "public";
-
   const designerDir = path.join(root, "apps", "designer");
   const widgetDir = path.join(root, "apps", "widget");
 
   try {
-    logStep(1, "Updating Designer app Supabase types...");
+    logStep(1, "Updating shared Supabase types...");
     execSync(
-      `cd "${designerDir}" && npx supabase gen types typescript --project-id ${projectId} --schema ${schema} > src/types/database.ts`,
+      `cd "${root}" && npm run supabase:gen:types`,
       { stdio: "inherit" }
     );
-    logSuccess("Designer types updated");
+    logSuccess("Shared Supabase types updated");
 
-    logStep(2, "Updating Widget app Supabase types...");
-    execSync(
-      `cd "${widgetDir}" && npx supabase gen types typescript --project-id ${projectId} --schema ${schema} > types/database.ts`,
-      { stdio: "inherit" }
-    );
-    logSuccess("Widget types updated");
-
-    logStep(3, "Sorting config objects alphabetically in Designer app...");
+    logStep(2, "Sorting config objects alphabetically in Designer app...");
     sortConfigsInDirectory(path.join(designerDir, "src"));
     logSuccess("Designer configs sorted");
 
-    logStep(4, "Sorting config objects alphabetically in Widget app...");
+    logStep(3, "Sorting config objects alphabetically in Widget app...");
     sortConfigsInDirectory(widgetDir);
     logSuccess("Widget configs sorted");
 
-    logStep(5, "Ensuring package.json scripts exist...");
+    logStep(4, "Ensuring package.json scripts exist...");
 
     // Designer package.json
     const designerPackagePath = path.join(designerDir, "package.json");
@@ -164,4 +154,3 @@ if (require.main === module) {
 }
 
 module.exports = { main, sortObjectKeys };
-

@@ -6,6 +6,7 @@ import type { StepDefinition } from "@/types/ai-form";
 import type { MultipleChoiceUI } from "@/types/ai-form-ui-contract";
 import { StepLayout } from "../ui-layout/StepLayout";
 import { ImageChoiceGrid } from "../input-controls/ImageChoiceGridControl";
+import { layoutDebugClassName, withLayoutDebugStyle } from "../runtime/step-engine/debug-layout";
 
 interface ImageChoiceGridStepProps {
   step: StepDefinition | MultipleChoiceUI;
@@ -18,6 +19,7 @@ interface ImageChoiceGridStepProps {
   guidedThumbnailMode?: boolean;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 type PriceTier = "$" | "$$" | "$$$" | "$$$$";
@@ -111,6 +113,7 @@ export function ImageChoiceGridStep({
   guidedThumbnailMode,
   actionsVariant,
   compactInPreview,
+  layoutDebugEnabled = false,
 }: ImageChoiceGridStepProps) {
   const isUIStep = "type" in (step as any) && !("componentType" in (step as any));
   const optionsRaw = isUIStep
@@ -175,8 +178,17 @@ export function ImageChoiceGridStep({
       actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
       compactInPreview={compactInPreview}
       preferWideLayout={!compactInPreview}
+      layoutDebugEnabled={layoutDebugEnabled}
     >
-      <div className={compactInPreview ? "mx-auto flex w-full max-w-5xl min-w-0 flex-col" : "flex min-h-0 w-full min-w-0 flex-col"}>
+      <div
+        className={layoutDebugClassName(
+          layoutDebugEnabled,
+          compactInPreview
+            ? "mx-auto flex h-full min-h-0 w-full max-w-none min-w-0 flex-1 flex-col"
+            : "flex min-h-0 w-full min-w-0 flex-col"
+        )}
+        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "emerald")}
+      >
         {selectionHint && !compactInPreview ? (
           <div
             className={cn(
@@ -191,21 +203,27 @@ export function ImageChoiceGridStep({
             </span>
           </div>
         ) : null}
-        <ImageChoiceGrid
-          value={value}
-          onChange={setValue}
-          onSwipeComplete={(finalValue) => {
-            if (isLoading) return;
-            onComplete(finalValue);
-          }}
-          options={options}
-          multiple={multiple}
-          maxSelections={maxSelections}
-          variant={effectiveVariant}
-          columns={effectiveColumns}
-          thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
-          compactScroller={Boolean(compactInPreview)}
-        />
+        <div
+          className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex-1 flex flex-col")}
+          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}
+        >
+          <ImageChoiceGrid
+            value={value}
+            onChange={setValue}
+            onSwipeComplete={(finalValue) => {
+              if (isLoading) return;
+              onComplete(finalValue);
+            }}
+            options={options}
+            multiple={multiple}
+            maxSelections={maxSelections}
+            variant={effectiveVariant}
+            columns={effectiveColumns}
+            thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
+            compactScroller={Boolean(compactInPreview)}
+            className={compactInPreview ? "h-full min-h-0 flex-1" : undefined}
+          />
+        </div>
       </div>
     </StepLayout>
   );

@@ -6,6 +6,7 @@ import { useFormTheme } from "../../demo/FormThemeProvider";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { layoutDebugClassName, withLayoutDebugStyle } from "../runtime/step-engine/debug-layout";
 
 type FunctionCallOutput =
   | {
@@ -44,6 +45,7 @@ interface FunctionCallStepProps {
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   headerInlineControl?: React.ReactNode;
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function FunctionCallStep({
@@ -56,6 +58,7 @@ export function FunctionCallStep({
   actionsVariant,
   headerInlineControl,
   compactInPreview = false,
+  layoutDebugEnabled = false,
 }: FunctionCallStepProps) {
   const { theme } = useFormTheme();
   const stepId = (step as any)?.id as string;
@@ -69,7 +72,13 @@ export function FunctionCallStep({
   const iconButtonClass = "h-8 w-10 rounded-full p-0 shrink-0";
 
   return (
-    <div className={cn("w-full max-w-5xl mx-auto h-full min-h-0", compactInPreview ? "px-2 py-2" : "px-3 sm:px-4 py-3 sm:py-4")}>
+    <div
+      className={layoutDebugClassName(
+        layoutDebugEnabled,
+        cn("w-full max-w-5xl mx-auto h-full min-h-0", compactInPreview ? "px-2 py-2" : "px-3 sm:px-4 py-3 sm:py-4")
+      )}
+      style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
+    >
       {actionsVariant === "icon_only" ? (
         <div className="flex h-full min-h-0 items-start gap-3 min-w-0">
           {canGoBack && onBack ? (
@@ -89,9 +98,16 @@ export function FunctionCallStep({
           ) : (
             <div className="h-8 w-10 shrink-0" aria-hidden="true" />
           )}
-          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-2 sm:space-y-3">
-            <div className={headerInlineControl ? "flex items-start justify-between gap-2" : undefined}>
-              <div className="min-w-0 flex-1">
+          <div
+            className="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-2 sm:space-y-3"
+            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneAnswer")}
+          >
+            <div
+              className={cn("min-w-0", compactInPreview ? "space-y-1.5" : undefined)}
+              style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}
+            >
+              {headerInlineControl ? <div className="flex justify-center">{headerInlineControl}</div> : null}
+              <div className={cn("min-w-0 flex-1", compactInPreview ? "text-center" : undefined)}>
                 <h2
                   className={cn(
                     "font-semibold min-w-0 break-words mb-1",
@@ -112,16 +128,19 @@ export function FunctionCallStep({
                     ? "Working in the background — you can continue anytime."
                     : status === "complete"
                       ? "Preview ready."
-                      : status === "error"
+                    : status === "error"
                         ? "We couldn't generate this preview yet."
                         : "Preparing…"}
                 </p>
               </div>
-              {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
             </div>
             <div
               className="rounded-lg border bg-white/60 p-3"
-              style={{ borderRadius: `${theme.borderRadius}px`, borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))" }}
+              style={{
+                ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber"),
+                borderRadius: `${theme.borderRadius}px`,
+                borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
+              }}
             >
               {status === "running" || status === "idle" ? (
                 <div className="flex items-center gap-3">
@@ -176,9 +195,16 @@ export function FunctionCallStep({
           </Button>
         </div>
       ) : (
-        <div className="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-          <div className={headerInlineControl ? "flex items-start justify-between gap-2" : undefined}>
-            <div className="min-w-0 flex-1">
+        <div
+          className="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4"
+          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneAnswer")}
+        >
+          <div
+            className={cn("min-w-0", compactInPreview ? "space-y-1.5" : undefined)}
+            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}
+          >
+            {headerInlineControl ? <div className="flex justify-center">{headerInlineControl}</div> : null}
+            <div className={cn("min-w-0 flex-1", compactInPreview ? "text-center" : undefined)}>
               <h2
             className="text-base sm:text-lg font-semibold min-w-0 flex-1 break-words mb-1"
             style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
@@ -190,18 +216,21 @@ export function FunctionCallStep({
               ? "Working in the background — you can continue anytime."
               : status === "complete"
                 ? "Preview ready."
-                : status === "error"
+              : status === "error"
                   ? "We couldn’t generate this preview yet."
                   : "Preparing…"}
           </p>
             </div>
-            {headerInlineControl ? <div className="shrink-0">{headerInlineControl}</div> : null}
           </div>
 
           <div
             className="rounded-lg border bg-white/60 p-3 shrink-0"
-          style={{ borderRadius: `${theme.borderRadius}px`, borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))" }}
-        >
+            style={{
+              ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber"),
+              borderRadius: `${theme.borderRadius}px`,
+              borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
+            }}
+          >
           {status === "running" || status === "idle" ? (
             <div className="flex items-center gap-3">
               <div

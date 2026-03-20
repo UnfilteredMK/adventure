@@ -52,6 +52,7 @@ interface GalleryStepProps {
   sessionId?: string;
   config?: { businessContext?: string; industry?: string; useCase?: string };
   instanceData?: any;
+  layoutDebugEnabled?: boolean;
 }
 
 export function GalleryStep({
@@ -66,6 +67,7 @@ export function GalleryStep({
   instanceId,
   sessionId,
   config,
+  layoutDebugEnabled = false,
 }: GalleryStepProps) {
   const { theme, config: designConfig } = useFormTheme();
   const layoutVariant = (step as any)?.blueprint?.validation?.layout_variant;
@@ -608,6 +610,7 @@ export function GalleryStep({
         canContinue={true}
         continueLabel={continueLabel}
         className="max-w-2xl"
+        layoutDebugEnabled={layoutDebugEnabled}
       >
         <div className="space-y-3">
           {generationError && (
@@ -664,6 +667,7 @@ export function GalleryStep({
       canContinue={true}
       continueLabel={continueLabel}
       className="max-w-6xl"
+      layoutDebugEnabled={layoutDebugEnabled}
     >
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
         {/* Left: uploads + simple controls */}

@@ -2,21 +2,27 @@
 
 import React, { useState } from "react";
 import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { layoutDebugClassName, withLayoutDebugStyle } from "../steps/runtime/step-engine/debug-layout";
 
 interface EaseFeedbackPromptProps {
   visible: boolean;
   onSelect: (vote: "up" | "down") => void;
+  layoutDebugEnabled?: boolean;
 }
 
-export function EaseFeedbackPrompt({ visible, onSelect }: EaseFeedbackPromptProps) {
+export function EaseFeedbackPrompt({ visible, onSelect, layoutDebugEnabled = false }: EaseFeedbackPromptProps) {
   if (!visible) return null;
   return (
-    <div className="flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+    <div
+      className={layoutDebugClassName(layoutDebugEnabled, "flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground")}
+      style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky")}
+    >
       <span className="whitespace-nowrap hidden sm:inline">Easy to answer?</span>
       <button
         type="button"
         onClick={() => onSelect("up")}
         className="flex items-center justify-center w-7 h-7 rounded-full border border-border/70 bg-background/90 hover:bg-emerald-50/70 hover:border-emerald-300 transition-colors"
+        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
         aria-label="Yes, easy to answer"
       >
         <ThumbsUp className="w-3.5 h-3.5 text-foreground/80" />
@@ -25,6 +31,7 @@ export function EaseFeedbackPrompt({ visible, onSelect }: EaseFeedbackPromptProp
         type="button"
         onClick={() => onSelect("down")}
         className="flex items-center justify-center w-7 h-7 rounded-full border border-border/70 bg-background/90 hover:bg-rose-50/70 hover:border-rose-300 transition-colors"
+        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
         aria-label="Not really, difficult to answer"
       >
         <ThumbsDown className="w-3.5 h-3.5 text-foreground/80" />

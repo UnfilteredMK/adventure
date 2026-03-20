@@ -1,7 +1,9 @@
 import type { Json } from "@/types/database";
 import { IMAGES_BUCKET, IMAGE_STORAGE_PREFIXES } from "@/storage/prefixes";
 
-export const SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR = "subcategory_catalog";
+export const STYLE_SEED_GENERATED_FOR = "style_seed";
+export const LEGACY_STYLE_SEED_GENERATED_FOR = "subcategory_catalog";
+export const SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR = STYLE_SEED_GENERATED_FOR;
 export const SUBCATEGORY_IMAGE_CATALOG_MODEL_ID = "black-forest-labs/flux-schnell";
 export const SUBCATEGORY_IMAGE_CATALOG_SEED_COUNT = 20;
 export const SUBCATEGORY_IMAGE_CATALOG_MAX_IMAGES = 50;
@@ -68,17 +70,22 @@ function isHttpImageUrl(value: unknown): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function isStyleSeedGeneratedFor(value: unknown): boolean {
+  const generatedFor = String(value || "").trim();
+  return generatedFor === STYLE_SEED_GENERATED_FOR || generatedFor === LEGACY_STYLE_SEED_GENERATED_FOR;
+}
+
 function isCatalogImage(row: CatalogImageRow): boolean {
   const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : null;
-  return String(meta?.generated_for || "") === SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR;
+  return isStyleSeedGeneratedFor(meta?.generated_for);
 }
 
 function logCatalog(label: string, data: Record<string, unknown>) {
   try {
     const text = JSON.stringify(data);
-    console.log(`[subcategory-catalog] ${label} ${text.length > 4000 ? `${text.slice(0, 4000)}...` : text}`);
+    console.log(`[style-seed] ${label} ${text.length > 4000 ? `${text.slice(0, 4000)}...` : text}`);
   } catch {
-    console.log(`[subcategory-catalog] ${label}`);
+    console.log(`[style-seed] ${label}`);
   }
 }
 
@@ -324,7 +331,7 @@ export async function persistGeneratedCatalogImages(params: {
           catalog_key: key,
           catalog_scope: params.scope,
           category_name: String(params.categoryName || "").trim() || null,
-          generated_for: SUBCATEGORY_IMAGE_CATALOG_GENERATED_FOR,
+          generated_for: STYLE_SEED_GENERATED_FOR,
           image_prompt_source: String(option.imagePrompt || "").trim() || null,
           model_name: "Flux Schnell",
           model_provider: "Replicate",

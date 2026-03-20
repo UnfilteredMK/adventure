@@ -94,7 +94,7 @@ export function PreviewSection({
               : isAdventureSurface
                 ? "max-w-6xl px-4"
                 : "max-w-4xl px-4",
-          usePreviewDominantLayout ? "py-2" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
+          usePreviewDominantLayout ? "py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
         <div className="h-full min-h-0">

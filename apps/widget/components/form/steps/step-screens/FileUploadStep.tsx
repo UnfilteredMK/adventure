@@ -17,6 +17,7 @@ interface FileUploadStepProps {
   headerInlineControl?: React.ReactNode;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function FileUploadStep({
@@ -30,6 +31,7 @@ export function FileUploadStep({
   headerInlineControl,
   actionsVariant,
   compactInPreview,
+  layoutDebugEnabled,
 }: FileUploadStepProps) {
   const continueLabel = (step as any)?.blueprint?.presentation?.continue_label;
   const isUIStep = "type" in (step as any) && !(step as any).componentType;
@@ -79,30 +81,34 @@ export function FileUploadStep({
       headerInlineControl={headerInlineControl}
       continueLabel={resolvedContinueLabel}
       compactInPreview={compactInPreview}
+      layoutDebugEnabled={layoutDebugEnabled}
     >
       <div
         className={
           compactInPreview && !required && allowSkip && !hasUpload
-            ? "flex items-stretch gap-3 min-h-0"
+            ? "mx-auto flex w-full min-w-0 min-h-0 max-w-[68%] items-center justify-center gap-2 flex-wrap sm:flex-nowrap"
             : compactInPreview
-              ? "h-full min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-2"
+              ? "mx-auto flex h-full min-h-0 w-full min-w-0 max-w-[68%] flex-col items-stretch justify-center gap-1 overflow-visible"
               : "space-y-3"
         }
       >
         {showUploader ? (
-          <FilePicker
-            value={value}
-            onChange={(nextValue) => {
-              setValue(nextValue);
-            }}
-            onUploadingChange={setIsUploading}
-            maxFiles={maxFiles}
-            accept={accept}
-            uploadRole={uploadRole}
-            cameraEnabled={cameraEnabled}
-            instanceId={instanceId}
-            compactDock={compactInPreview && !required && allowSkip && !hasUpload}
-          />
+          <div className={compactInPreview ? "w-full min-w-0" : "w-full"}>
+            <FilePicker
+              value={value}
+              onChange={(nextValue) => {
+                setValue(nextValue);
+              }}
+              onUploadingChange={setIsUploading}
+              maxFiles={maxFiles}
+              accept={accept}
+              uploadRole={uploadRole}
+              cameraEnabled={cameraEnabled}
+              instanceId={instanceId}
+              compactDock={compactInPreview && !required && allowSkip && !hasUpload}
+              layoutVariant={compactInPreview ? "choice_compact" : "default"}
+            />
+          </div>
         ) : null}
 
         {!required && allowSkip && !hasUpload ? (
@@ -111,7 +117,7 @@ export function FileUploadStep({
               type="button"
               onClick={() => onComplete(null)}
               disabled={isLoading || isUploading}
-              className="shrink-0 h-12 px-4 rounded-xl text-sm font-semibold border-2 transition-colors border-[color:var(--form-surface-border-color)] hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 self-center h-9 px-3 rounded-xl text-[12px] font-semibold border-2 transition-colors border-[color:var(--form-surface-border-color)] hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ fontFamily: "inherit", color: "var(--form-text-color, inherit)" }}
             >
               Skip and generate

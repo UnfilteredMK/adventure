@@ -393,11 +393,11 @@ export function FilePicker({
         style={{ borderRadius: `${baseRadius * 1.5}px` }}
       >
         <input {...getInputProps({ className: "hidden" })} />
-        <div className="flex items-center gap-2.5 w-full min-w-0">
+        <div className="flex items-center justify-center gap-2.5 w-full min-w-0">
           <div className={cn("p-1.5 rounded-full transition-colors duration-200", isDragActive ? "bg-[color:var(--fp-primary-tint-active)]" : "bg-[color:var(--fp-primary-tint)] group-hover:bg-[color:var(--fp-primary-tint-hover)]")}>
             <UploadIcon className={cn("w-4 h-4 transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")} />
           </div>
-          <div className="min-w-0 text-left">
+          <div className="min-w-0 text-center">
             <p className="text-sm font-semibold tracking-tight leading-tight truncate" style={{ color: theme.textColor }}>
               {isDragActive ? "Drop here" : dropzoneHeadline}
             </p>
@@ -439,7 +439,7 @@ export function FilePicker({
   // ── Compact dock: slim horizontal dropzone for bottom-strip layout (upload + skip side-by-side) ──
   if (compactDock) {
     return (
-      <div className={cn("flex-1 min-w-0 flex items-stretch", className)} style={dropzoneVars}>
+      <div className={cn("w-full min-w-0 flex items-stretch overflow-visible", className)} style={dropzoneVars}>
         <input
           ref={cameraInputRef}
           type="file"
@@ -457,7 +457,7 @@ export function FilePicker({
           {...getRootProps()}
           data-upload-role={uploadRole || undefined}
           className={cn(
-            "group relative min-w-0 flex-1 border-2 border-dashed cursor-pointer transition-colors duration-200 ease-out flex items-center px-3 overflow-hidden min-h-[48px]",
+            "group relative min-w-0 flex-1 border-2 border-dashed cursor-pointer transition-colors duration-200 ease-out flex items-center px-2.5 overflow-hidden min-h-[42px]",
             isDragActive
               ? "border-[color:var(--fp-primary)] bg-[color:var(--fp-primary-tint-active)]"
               : "border-[color:var(--fp-border-idle)] hover:border-[color:var(--fp-primary)] hover:bg-[color:var(--fp-primary-tint)] bg-background/60"
@@ -465,22 +465,22 @@ export function FilePicker({
           style={{ borderRadius: `${baseRadius}px` }}
         >
           <input {...getInputProps({ className: "hidden" })} />
-          <div className="flex items-center gap-2.5 w-full min-w-0">
+          <div className="flex items-center justify-center gap-2 w-full min-w-0">
             <div
               className={cn(
-                "p-1.5 rounded-full shrink-0 transition-colors duration-200",
+                "p-1 rounded-full shrink-0 transition-colors duration-200",
                 isDragActive ? "bg-[color:var(--fp-primary-tint-active)]" : "bg-[color:var(--fp-primary-tint)] group-hover:bg-[color:var(--fp-primary-tint-hover)]"
               )}
             >
               <UploadIcon
-                className={cn("w-4 h-4 transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")}
+                className={cn("w-3.5 h-3.5 transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")}
               />
             </div>
-            <div className="min-w-0 text-left">
-              <p className="text-sm font-semibold tracking-tight leading-tight truncate" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
+            <div className="min-w-0 text-center">
+              <p className="text-[12px] font-semibold tracking-tight leading-tight truncate" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
                 {isDragActive ? "Drop here" : dropzoneHeadline}
               </p>
-              <p className="text-[10px] font-medium truncate" style={{ color: mutedText }}>
+              <p className="text-[9px] font-medium truncate" style={{ color: mutedText }}>
                 {isDragActive ? "Release to upload" : dropzoneSubhead}
               </p>
             </div>
@@ -490,7 +490,7 @@ export function FilePicker({
           <Button
             type="button"
             size="icon"
-            className="h-12 w-12 shrink-0"
+            className="h-[42px] w-[42px] shrink-0"
             style={{ borderRadius: `${baseRadius}px`, backgroundColor: primaryTint, color: primary, borderColor: hexToRgba(primary, 0.3) }}
             onClick={(e) => {
               e.preventDefault();
@@ -500,7 +500,7 @@ export function FilePicker({
             aria-label="Use camera"
             title="Use camera"
           >
-            <Camera className="h-4 w-4" />
+            <Camera className="h-3.5 w-3.5" />
           </Button>
         ) : null}
       </div>
@@ -509,7 +509,7 @@ export function FilePicker({
 
   return (
     <div
-      className={cn(isCompact ? (compactInline ? "space-y-2" : "space-y-4") : "space-y-4", isChoiceCompact ? "h-full" : null, className)}
+      className={cn(isCompact ? (compactInline ? "space-y-2" : "space-y-4") : "space-y-4", isChoiceCompact ? "h-full overflow-visible" : null, className)}
       style={dropzoneVars}
     >
       {/* Hidden camera input (shared across layouts) */}
@@ -558,7 +558,7 @@ export function FilePicker({
                     className={cn("w-5 h-5 transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")}
                   />
                 </div>
-                <div className="min-w-0 text-left space-y-0">
+              <div className="min-w-0 text-center space-y-0">
                   <p className="text-sm font-semibold tracking-tight leading-tight truncate" style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
                     {isDragActive ? "Drop here" : dropzoneHeadline}
                   </p>
@@ -717,7 +717,7 @@ export function FilePicker({
             data-upload-role={uploadRole || undefined}
             className={cn(
               "group relative text-center cursor-pointer transition-all duration-200 ease-out",
-              isChoiceCompact ? "h-full min-h-[220px] p-4 sm:p-5 flex items-center" : isCompact ? "p-5 sm:p-6" : "p-9 sm:p-10",
+              isChoiceCompact ? "h-full min-h-[140px] p-2.5 sm:p-3 flex items-center overflow-visible" : isCompact ? "p-5 sm:p-6" : "p-9 sm:p-10",
               isDragActive
                 ? "border-2 border-dashed border-[color:var(--fp-primary)] bg-[color:var(--fp-primary-tint-active)]"
                 : "border-2 border-dashed border-[color:var(--fp-border-idle)] hover:border-[color:var(--fp-primary)] hover:bg-[color:var(--fp-primary-tint)] bg-background/60"
@@ -725,21 +725,21 @@ export function FilePicker({
             style={{ borderRadius: `${baseRadius * 2}px` }}
           >
             <input {...getInputProps({ className: "hidden" })} />
-            <div className={cn("flex items-center justify-center", isChoiceCompact ? "gap-2.5" : "gap-4")}>
+            <div className={cn("flex items-center justify-center", isChoiceCompact ? "gap-2" : "gap-4")}>
               <div className={cn(isChoiceCompact ? "" : "p-3.5 rounded-full transition-colors duration-200", isDragActive ? "bg-[color:var(--fp-primary-tint-active)]" : "bg-[color:var(--fp-primary-tint)] group-hover:bg-[color:var(--fp-primary-tint-hover)]")}>
-                <UploadIcon className={cn(isChoiceCompact ? "w-5 h-5" : "w-8 h-8", "transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")} />
+                <UploadIcon className={cn(isChoiceCompact ? "w-4 h-4" : "w-8 h-8", "transition-colors duration-200", isDragActive ? "text-[color:var(--fp-primary)]" : "text-[color:var(--fp-muted-text)] group-hover:text-[color:var(--fp-primary)]")} />
               </div>
               <div className={cn("min-w-0 space-y-1", isChoiceCompact ? "text-center" : "text-left")}>
                 <p
                   className={cn(
-                    isChoiceCompact ? "text-sm sm:text-base" : "text-base sm:text-lg",
+                    isChoiceCompact ? "text-[13px] sm:text-sm" : "text-base sm:text-lg",
                     "font-semibold tracking-tight leading-tight"
                   )}
                   style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                 >
                   {isDragActive ? "Drop files here" : dropzoneHeadline}
                 </p>
-                <p className={cn(isChoiceCompact ? "text-xs" : "text-sm", "font-medium truncate")} style={{ color: mutedText }}>
+                <p className={cn(isChoiceCompact ? "text-[10px]" : "text-sm", "font-medium truncate")} style={{ color: mutedText }}>
                   {isDragActive ? "Release to upload" : isChoiceCompact ? "JPG/PNG" : dropzoneSubhead}
                 </p>
               </div>

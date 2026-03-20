@@ -11,6 +11,7 @@ import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt, ReflectionFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
 import { ArrowLeft, ArrowUp, ImagePlus } from "lucide-react";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
+import { layoutDebugClassName, withLayoutDebugStyle } from "../debug-layout";
 
 interface FormQuestionSectionProps {
   config?: any;
@@ -64,6 +65,7 @@ interface FormQuestionSectionProps {
   };
   usePreviewDominantLayout: boolean;
   guidedThumbnailMode: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function FormQuestionSection({
@@ -111,15 +113,19 @@ export function FormQuestionSection({
   theme,
   usePreviewDominantLayout,
   guidedThumbnailMode,
+  layoutDebugEnabled = false,
 }: FormQuestionSectionProps) {
   const uploadsInputRef = useRef<HTMLInputElement>(null);
   // Only show prompt/budget/uploads bar AFTER lead capture (pricing opt-in) is completed.
   const showPromptControls = Boolean(
     previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI
   );
-  const usePreviewPaneLayout = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview);
-  const useBottomDockLayout = Boolean(usePreviewPaneLayout && showQuestionPaneUnderPreview && isMobileViewport);
+  const usePreviewPaneLayout = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
+  const useBottomDockLayout = Boolean(usePreviewPaneLayout && isMobileViewport);
   const useCompactNav = useBottomDockLayout;
+  const compactPreviewActive = Boolean(usePreviewPaneLayout);
+  const useIconOnlyActions = Boolean(useCompactNav || usePreviewPaneLayout);
+  const useWideQuestionContent = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
   const promptText = promptDraft.trim();
   const canGoBack = (state?.currentStepIndex || 0) > 0;
   const primary = theme.primaryColor || "#3b82f6";
@@ -236,16 +242,22 @@ export function FormQuestionSection({
   }, [currentUploadedReferenceUrl, handlePromptSubmit, promptText]);
 
   const inputModeToggle = showPromptControls ? (
-      <div className={cn(
-        "inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5 shrink-0 max-w-full",
-        useCompactNav && "h-7"
-      )}>
+      <div
+        className={layoutDebugClassName(
+          layoutDebugEnabled,
+          cn(
+            "inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5 shrink-0 max-w-full",
+            useCompactNav && "h-[clamp(20px,2.8vh,28px)]"
+          )
+        )}
+        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
+      >
 	        <button
 	          type="button"
 	          onClick={() => setAdventureInputMode("questions")}
 	          className={cn(
 	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
+	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
 	            adventureInputMode === "questions" ? "bg-primary/10 text-foreground" : ""
 	          )}
           style={
@@ -261,7 +273,7 @@ export function FormQuestionSection({
 	          onClick={() => setAdventureInputMode("prompt")}
 	          className={cn(
 	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
+	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
 	            adventureInputMode === "prompt" ? "bg-primary/10 text-foreground" : ""
 	          )}
           style={
@@ -278,7 +290,7 @@ export function FormQuestionSection({
 	          onClick={() => setAdventureInputMode("budget")}
 	          className={cn(
 	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
+	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
 	            adventureInputMode === "budget" ? "bg-primary/10 text-foreground" : "",
 	            !canUseBudgetMode ? "opacity-50 cursor-not-allowed" : ""
 	          )}
@@ -295,7 +307,7 @@ export function FormQuestionSection({
 	          onClick={() => setAdventureInputMode("uploads")}
 	          className={cn(
 	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-6 px-2 text-[11px]" : "h-6 px-2.5",
+	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
 	            adventureInputMode === "uploads" ? "bg-primary/10 text-foreground" : ""
 	          )}
 	          style={
@@ -308,6 +320,35 @@ export function FormQuestionSection({
 	        </button>
 	      </div>
 	  ) : undefined;
+  const sharedQuestionControls = showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
+    <div
+      className={layoutDebugClassName(
+        layoutDebugEnabled,
+        cn(
+          "shrink-0 px-2 pb-1 pt-1 sm:px-2.5",
+          usePreviewPaneLayout ? "pt-1" : "pt-0.5"
+        )
+      )}
+      style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+    >
+      <div
+        className={layoutDebugClassName(
+          layoutDebugEnabled,
+          "flex min-h-8 w-full min-w-0 items-center justify-center gap-2"
+        )}
+        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
+      >
+        <div className="flex min-w-0 items-center justify-center overflow-hidden">
+          {inputModeToggle}
+        </div>
+        <div className="flex min-w-0 items-center justify-center">
+          {showEasePrompt && adventureInputMode === "questions" ? (
+            <EaseFeedbackPrompt visible={true} onSelect={handleEaseFeedback} layoutDebugEnabled={layoutDebugEnabled} />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <AnimatePresence initial={false}>
@@ -319,49 +360,55 @@ export function FormQuestionSection({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.08, ease: "easeOut" }}
-          className={cn(
-            "relative flex w-full min-h-0 flex-col overflow-hidden",
-            usePreviewPaneLayout
-              ? (
-                  useBottomDockLayout
-                    ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
-                    : "min-h-0 flex-1"
-                )
-              : "flex-1"
+          className={layoutDebugClassName(
+            layoutDebugEnabled,
+            cn(
+              "relative flex w-full min-h-0 flex-col overflow-hidden",
+              usePreviewPaneLayout
+                ? (
+                    useBottomDockLayout
+                      ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
+                      : "min-h-0 flex-1"
+                  )
+                : "flex-1",
+              usePreviewPaneLayout && !showQuestionPaneUnderPreview ? "max-h-0" : null
+            )
           )}
-          style={undefined}
+          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
         >
           <div
-            className={cn(
-              useBottomDockLayout ? "flex h-full min-h-0 flex-col overflow-hidden" : "flex h-full min-h-0 flex-col overflow-hidden",
-              useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null,
-              usePreviewPaneLayout && !showQuestionPaneUnderPreview ? "max-h-0" : null
-            )}
+            ref={questionContentRef}
+                className={layoutDebugClassName(
+                  layoutDebugEnabled,
+                  cn(
+                    "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
+                    useWideQuestionContent ? "max-w-none" : "max-w-6xl"
+                  )
+                )}
+            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}
           >
-            <div
-              ref={questionContentRef}
-              className={cn(
-                useBottomDockLayout
-                  ? "mx-auto flex h-full min-h-0 w-full flex-col overflow-hidden"
-                  : "mx-auto flex h-full min-h-0 w-full flex-col overflow-hidden",
-                usePreviewPaneLayout ? "max-w-5xl" : "max-w-6xl"
-              )}
-            >
+              {sharedQuestionControls}
               <div
-                className={cn(
-                  "flex min-h-0 flex-1 flex-col",
-                  usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
-                  useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null,
-                  usePreviewPaneLayout ? "px-4" : null
+                className={layoutDebugClassName(
+                  layoutDebugEnabled,
+                  cn(
+                    "flex min-h-0 flex-1 flex-col",
+                    usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+                    useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null
+                  )
                 )}
                 style={
-                  !usePreviewPaneLayout && questionScale < 0.999
-                    ? {
-                        transform: `scale(${questionScale})`,
-                        transformOrigin: "top center",
-                        width: `${100 / questionScale}%`,
-                      }
-                    : undefined
+                  withLayoutDebugStyle(
+                    !usePreviewPaneLayout && questionScale < 0.999
+                      ? {
+                          transform: `scale(${questionScale})`,
+                          transformOrigin: "top center",
+                          width: `${100 / questionScale}%`,
+                        }
+                      : undefined,
+                    layoutDebugEnabled,
+                    "darkYellow"
+                  )
                 }
 	              >
 	                <AnimatePresence mode="wait">
@@ -484,10 +531,19 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -16 }}
                         transition={{ duration: 0.18, ease: "easeOut" }}
-                        className="w-full min-h-0 flex flex-1 flex-col"
+                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col")}
+                        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
                       >
-                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5 flex min-h-0 flex-1 flex-col">
-                          {inputModeToggle ? <div className="mb-1.5 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
+                        <div
+                          className={layoutDebugClassName(
+                            layoutDebugEnabled,
+                            cn(
+                              "w-full py-2 flex min-h-0 flex-1 flex-col sm:py-2.5",
+                              usePreviewPaneLayout ? "px-2" : "px-2.5 sm:px-3"
+                            )
+                          )}
+                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+                        >
                           {useCompactNav ? (
                             <div className="min-w-0 min-h-0 flex flex-1 flex-col">
                               <div
@@ -580,10 +636,19 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, x: 0 }}
 	                        exit={{ opacity: 0, x: -16 }}
 	                        transition={{ duration: 0.18, ease: "easeOut" }}
-	                        className="w-full min-h-0 flex flex-1 flex-col"
+	                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col")}
+                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
 	                      >
-	                        <div className="w-full max-w-[68rem] mx-auto px-2.5 py-2 sm:px-3 sm:py-2.5 flex min-h-0 flex-1 flex-col">
-	                          {inputModeToggle ? <div className="mb-1.5 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
+	                        <div
+                            className={layoutDebugClassName(
+                              layoutDebugEnabled,
+                              cn(
+                                "w-full py-2 flex min-h-0 flex-1 flex-col sm:py-2.5",
+                                usePreviewPaneLayout ? "px-2" : "px-2.5 sm:px-3"
+                              )
+                            )}
+                            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+                          >
 	                          {useCompactNav ? (
 	                            <div className="flex items-center min-w-0 min-h-0 flex-1">
 	                              <div className="flex-1 min-w-0">
@@ -664,7 +729,8 @@ export function FormQuestionSection({
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: -16 }}
                           transition={{ duration: 0.18, ease: "easeOut" }}
-                          className="w-full min-w-0 min-h-0 flex flex-1 flex-col overflow-hidden"
+                          className={layoutDebugClassName(layoutDebugEnabled, "w-full min-w-0 min-h-0 flex flex-1 flex-col overflow-hidden")}
+                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
                         >
                           <input
                             ref={uploadsInputRef}
@@ -678,11 +744,20 @@ export function FormQuestionSection({
                               await handleUploadAndRegenerate(file);
                             }}
                           />
-                          <div className={cn(
-                            "flex w-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden",
-                            useCompactNav ? "px-2 py-1" : "px-2 py-1.5 sm:px-3 sm:py-2 md:px-4 md:py-2.5"
-                          )}>
-                            {inputModeToggle ? <div className="mb-1 flex shrink-0 justify-center min-w-0 overflow-hidden">{inputModeToggle}</div> : null}
+                          <div
+                            className={layoutDebugClassName(
+                              layoutDebugEnabled,
+                              cn(
+                                "flex w-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden",
+                                usePreviewPaneLayout
+                                  ? "px-2 py-1.5 sm:py-2"
+                                  : useCompactNav
+                                    ? "px-2 py-1"
+                                    : "px-2 py-1.5 sm:px-3 sm:py-2 md:px-4 md:py-2.5"
+                              )
+                            )}
+                            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+                          >
                             <div className="flex min-w-0 min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden">
                               <div className={cn(
                                 "flex w-full min-w-0 max-w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]",
@@ -756,9 +831,16 @@ export function FormQuestionSection({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -20 }}
                         transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="w-full min-h-0 flex flex-1 flex-col"
+                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col")}
+                        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
                       >
-                        <div className={cn("flex-1 min-h-0", usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden")}>
+                        <div
+                          className={layoutDebugClassName(
+                            layoutDebugEnabled,
+                            cn("flex-1 min-h-0 overflow-hidden")
+                          )}
+                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}
+                        >
                           <ComponentRenderer
                             step={stepForRenderer}
                             stepData={state?.stepData ? state.stepData[(stepForRenderer as any).id] : undefined}
@@ -772,11 +854,10 @@ export function FormQuestionSection({
                             sessionId={sessionId}
                             config={config}
                             leadCaptured={leadCapturedForUI}
-                            feedbackPrompt={showEasePrompt ? <EaseFeedbackPrompt visible={true} onSelect={handleEaseFeedback} /> : undefined}
-                            headerInlineControl={inputModeToggle}
-                            actionsVariant={useCompactNav || usePreviewPaneLayout ? "icon_only" : "default"}
+                            actionsVariant={useIconOnlyActions ? "icon_only" : "default"}
                             guidedThumbnailMode={guidedThumbnailMode}
-                            compactInPreview={usePreviewPaneLayout}
+                            compactInPreview={compactPreviewActive}
+                            layoutDebugEnabled={layoutDebugEnabled}
                           />
                         </div>
                       </motion.div>
@@ -791,11 +872,12 @@ export function FormQuestionSection({
                   )}
                 </AnimatePresence>
               </div>
-              <div className="shrink-0">
-                <ReflectionFeedbackPrompt visible={flowCompleted && !reflectionFeedbackSent} onSubmit={handleReflectionFeedback} />
-              </div>
-            </div>
           </div>
+          {flowCompleted && !reflectionFeedbackSent ? (
+            <div className="shrink-0">
+              <ReflectionFeedbackPrompt visible={true} onSubmit={handleReflectionFeedback} />
+            </div>
+          ) : null}
         </motion.div>
       ) : null}
     </AnimatePresence>

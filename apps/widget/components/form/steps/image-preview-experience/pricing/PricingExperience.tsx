@@ -166,18 +166,20 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   const labelTextClass =
     "min-w-0 text-[clamp(0.78rem,5.2cqi,1.32rem)] font-normal tracking-[0.02em] leading-none text-white/95";
   const lockedLabelTextClass =
-    "min-w-0 text-[clamp(1rem,0.92rem+0.38vw,1.14rem)] font-medium tracking-[0.02em] leading-[1.02] text-white uppercase";
+    "min-w-0 font-medium tracking-[0.02em] leading-[1.02] text-white uppercase";
   const lockedValueTextClass =
-    "inline-flex items-center whitespace-nowrap text-[clamp(1.28rem,1.16rem+0.52vw,1.48rem)] font-semibold tracking-[0.01em] leading-none text-white/95";
+    "inline-flex items-center whitespace-nowrap font-semibold tracking-[0.01em] leading-none text-white/95";
+  const lockedLabelStyle: React.CSSProperties = { fontSize: '0.98rem', lineHeight: 1.02 };
+  const lockedValueStyle: React.CSSProperties = { fontSize: '1.28rem', lineHeight: 1 };
   const valueFrameClass = cn(
     "mt-auto w-full min-w-0 self-end px-0 pt-[clamp(0.18rem,1cqi,0.34rem)]",
     revealedPriceClass,
-    "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-hidden"
+    "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-visible"
   );
   return (
       <div
         className={cn(
-        "relative h-full ring-1 ring-inset ring-lime-300/90 bg-lime-300/10",
+        "relative h-full",
         transparentBackground ? "w-full min-w-0" : "w-auto",
         pillOverflowClass,
         transparentBackground ? "border-0" : "rounded-[12%] border border-white/10",
@@ -199,8 +201,8 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         onClick={onClick}
         className={cn(
           transparentBackground
-            ? 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90'
-            : 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-[12%] border-0 bg-white/[0.05] p-0 text-white transition-all duration-200 outline outline-1 outline-rose-300/90',
+            ? 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200'
+            : 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-[12%] border-0 bg-white/[0.05] p-0 text-white transition-all duration-200',
           pillOverflowClass,
           transparentBackground ? 'w-full min-w-0 max-w-full' : 'w-full',
           transparentBackground
@@ -219,42 +221,30 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         <div
           data-pricing-locked={!revealed ? true : undefined}
           data-pricing-revealed={revealed ? true : undefined}
-          className={cn(
-            stateShellClass,
-            revealed
-              ? "outline outline-1 outline-amber-300/90 bg-amber-300/12"
-              : "outline outline-1 outline-orange-300/90 bg-orange-300/12"
-          )}
+          className={stateShellClass}
         >
           <div
             data-pricing-label
-            className={cn(
-              labelFrameClass,
-              revealed
-                ? "outline outline-1 outline-cyan-300/90 bg-cyan-300/12"
-                : "outline outline-1 outline-sky-300/90 bg-sky-300/12"
-            )}
+            className={labelFrameClass}
             style={{ fontFamily: pricingFont }}
           >
             {revealed ? (
               <span className={cn(labelTextClass, "block")}>{pillLabel}</span>
             ) : pillLabel === 'SHOW PRICING' ? (
-              <span className={cn(lockedLabelTextClass, "flex w-full min-w-0 items-center justify-center gap-[0.34em] overflow-hidden")}>
+              <span
+                className={cn(lockedLabelTextClass, "flex w-full min-w-0 items-center justify-center gap-[0.34em] overflow-visible")}
+                style={lockedLabelStyle}
+              >
                 <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
-                <span className="min-w-0 truncate">{pillLabel}</span>
+                <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
               </span>
             ) : (
-              <span className={cn(lockedLabelTextClass, "block text-center")}>{pillLabel}</span>
+              <span className={cn(lockedLabelTextClass, "block text-center")} style={lockedLabelStyle}>{pillLabel}</span>
             )}
           </div>
           <div
             data-pricing-reveal
-            className={cn(
-              valueFrameClass,
-              revealed
-                ? "outline outline-1 outline-fuchsia-300/90"
-                : "outline outline-1 outline-violet-300/90"
-            )}
+            className={valueFrameClass}
             style={{ fontFamily: pricingFont }}
           >
             {revealed ? (
@@ -264,10 +254,10 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 <span className="min-w-0">{price}</span>
               )
             ) : (
-              <span className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em]")}>
+              <span className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em]")} style={lockedValueStyle}>
                 {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
                 <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
-                  <span className="inline-block px-[0.03em] blur-[0.22em] opacity-90 leading-none">{lockedMask.masked}</span>
+                  <span className="inline-block px-[0.03em] blur-[0.34em] opacity-90 leading-none">{lockedMask.masked}</span>
                 </span>
               </span>
             )}

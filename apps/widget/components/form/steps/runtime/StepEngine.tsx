@@ -3,6 +3,7 @@
 // Step Engine - Main component that orchestrates the form flow
 import React, { useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useSearchParams } from "next/navigation";
 import { useStepEngine } from '@/hooks/use-step-engine';
 import { useFormMetrics } from '@/hooks/use-form-metrics';
 import { FlowPlan, FormState, StepDefinition, UIStep } from '@/types/ai-form';
@@ -132,6 +133,7 @@ export function StepEngine({
 }: StepEngineProps) {
   const REFINEMENT_UPLOAD_STEP_ID = "step-refinement-upload-scene-image";
   const { setFacts } = useExperienceState();
+  const searchParams = useSearchParams();
   const { theme, config: designConfig } = useFormTheme();
   const effectiveSessionScopeKey = sessionScopeKey || instanceId;
   const normalizeBool = (value: any): boolean | null => {
@@ -203,6 +205,10 @@ export function StepEngine({
   const [budgetApiRange, setBudgetApiRange] = useState<{ min: number; max: number; currency: string } | null>(null);
   const budgetApiLoadedSessionRef = useRef<string | null>(null);
   const devModeEnabled = useMemo(() => isDevModeEnabled(), []);
+  const layoutDebugEnabled = useMemo(() => {
+    const v = (searchParams.get("layout_debug") || "").trim().toLowerCase();
+    return v === "1" || v === "true" || v === "yes" || v === "on";
+  }, [searchParams]);
   const previousSelectedServiceIdRef = useRef<string | null>(null);
   
   const { trackStepStart, trackStepComplete } = useFormMetrics({
@@ -3258,6 +3264,9 @@ export function StepEngine({
       }
     : null;
   const guidedThumbnailMode = Boolean(previewLayoutActive && showQuestionPaneUnderPreview);
+  const compactQuestionHost = Boolean(previewLayoutActive && showQuestionPaneUnderPreview && previewHasImage);
+  const compactStepType = String((stepForRenderer as any)?.type || (stepForRenderer as any)?.componentType || "").toLowerCase();
+  const compactLargeQuestionHost = compactStepType === "image_choice_grid";
   const isRefinementUploadStep = String((stepForRenderer as any)?.id) === REFINEMENT_UPLOAD_STEP_ID;
   const hasPreviewSubsections = showEasePrompt;
   const parseBatchOrder = (batchId: string | null | undefined): number | null => {
@@ -3418,7 +3427,7 @@ export function StepEngine({
 				              className={cn(
 				                "relative flex h-full min-h-0 max-h-full flex-col overflow-hidden",
 				                previewLayoutActive
-                              ? (isMobileViewport ? "gap-0" : "gap-3")
+                              ? (isMobileViewport ? "gap-0" : "gap-1.5")
                               : usePreviewDominantLayout
                                 ? "gap-2"
                                 : previewRailOpen
@@ -3462,10 +3471,16 @@ export function StepEngine({
                   {!hideQuestionPane ? (
                   <div
                     className={cn(
-                      previewLayoutActive
+                      compactQuestionHost
                         ? isMobileViewport
-                          ? "flex h-[19vh] shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden"
-                          : "flex h-[17vh] shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden"
+                          ? cn(
+                              "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden",
+                              compactLargeQuestionHost ? "h-[22vh] max-h-[22vh]" : "h-[10vh] max-h-[10vh]"
+                            )
+                          : cn(
+                              "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden",
+                              compactLargeQuestionHost ? "h-[20vh] max-h-[20vh]" : "h-[10vh] max-h-[10vh]"
+                            )
                         : "flex flex-col flex-1 min-h-0"
                     )}
                   >
@@ -3536,6 +3551,7 @@ export function StepEngine({
                         secondaryColor: theme.secondaryColor,
                         textColor: theme.textColor,
                       }}
+                      layoutDebugEnabled={layoutDebugEnabled}
                       usePreviewDominantLayout={previewLayoutActive}
                     />
                   </div>

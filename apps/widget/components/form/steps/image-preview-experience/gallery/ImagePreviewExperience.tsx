@@ -2078,6 +2078,22 @@ export function ImagePreviewExperience(props: {
     ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
     ["--sif-lead-gen-ring" as any]: leadGenRing,
   } as React.CSSProperties;
+  const centeredPricingOverlayInset = "clamp(0.7rem, 3cqi, 1rem)";
+  const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(16.5rem, 52cqi, 24.5rem))";
+  const centeredPricingPanelRadius = "clamp(1rem, 4cqi, 1.5rem)";
+  const centeredPricingPanelPadding = "clamp(0.65rem, 2.5cqi, 0.95rem)";
+  const centeredPricingPanelGap = "clamp(0.4rem, 1.45cqi, 0.62rem)";
+  const centeredPricingHeaderGap = "clamp(0.38rem, 1.2cqi, 0.58rem)";
+  const centeredPricingIconButtonSize = "clamp(1.8rem, 6cqi, 2.1rem)";
+  const centeredPricingIconSize = "clamp(0.9rem, 3.1cqi, 1rem)";
+  const centeredPricingTitleSize = "clamp(0.88rem, 2.5cqi, 1rem)";
+  const centeredPricingInputHeight = "clamp(2.25rem, 7.4cqi, 2.7rem)";
+  const centeredPricingInputTextSize = "clamp(0.84rem, 2.55cqi, 0.95rem)";
+  const centeredPricingActionHeight = "clamp(1.85rem, 6.1cqi, 2.15rem)";
+  const centeredPricingActionPadX = "clamp(0.7rem, 2.35cqi, 0.88rem)";
+  const centeredPricingMetaSize = "clamp(0.72rem, 1.95cqi, 0.8rem)";
+  const centeredPricingIconInset = "clamp(0.8rem, 2.9cqi, 0.95rem)";
+  const centeredPricingInputPadLeft = "clamp(2.3rem, 8.2cqi, 2.7rem)";
 
   // Pricing pill: show only in single mode (user has chosen one image), not while picking from the 4-tile gallery.
   const shouldShowPricingPill = Boolean(hero && variant === "hero" && previewPricing && !showConceptPicker);
@@ -2127,12 +2143,17 @@ export function ImagePreviewExperience(props: {
     !shouldShowCenteredPricingFormOverlay &&
       (hasBudgetOverlayControl || shouldShowBottomPricingPill)
   );
+  const previewPricingPillMaxWidth =
+    leadGateEnabled && !leadCaptured
+      ? 'clamp(31%, 44% - 2.8vw, 38%)'
+      : 'clamp(40%, 57% - 4vw, 49%)';
   const previewPricingPill = shouldShowBottomPricingPill ? (
     <div
       data-pricing-pill
-      className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out outline outline-1 outline-sky-300/90 bg-sky-300/10"
+      className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out"
       style={{
-        maxWidth: 'clamp(34%, 50% - 4.3vw, 42%)',
+        maxWidth: previewPricingPillMaxWidth,
+        minWidth: leadGateEnabled && !leadCaptured ? '11.75rem' : '14rem',
         paddingTop: 'clamp(0.44rem, 1.8vw, 0.64rem)',
         paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
         paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
@@ -2250,6 +2271,7 @@ export function ImagePreviewExperience(props: {
 				                maxWidth: "100%",
 				                aspectRatio: "1 / 1",
 				                maxHeight: effectivePreviewSize,
+                        containerType: "inline-size",
 				                // Prevent "starts small then grows" when parent layout hasn't settled yet
 				                ...((showLoader || busy) && { minWidth: 180, minHeight: 180 }),
 				              }}
@@ -2846,133 +2868,213 @@ export function ImagePreviewExperience(props: {
 	              ) : null}
 
               {!lightboxOpen && shouldShowCenteredPricingFormOverlay ? (
-                <div className="absolute inset-0 z-30 flex items-end justify-end pb-4 pr-4 pointer-events-none">
+                <div
+                  className="absolute inset-0 z-30 flex items-end justify-end pointer-events-none"
+                  style={{ padding: centeredPricingOverlayInset }}
+                >
                   <div
                     className={cn(
-                      "pointer-events-auto overflow-visible backdrop-blur-xl transition-[width] duration-200",
-                      showCenteredPricingForm
-                        ? "w-[min(26rem,calc(100vw-1.5rem))] rounded-2xl"
-                        : "w-[min(11.25rem,calc(100vw-1.5rem))] rounded-xl",
-                      showCenteredPricingForm ? "min-h-0" : "h-auto",
-                      "shadow-[0_10px_28px_rgba(15,23,42,0.24)]"
+                      "pointer-events-auto overflow-visible shadow-[0_10px_28px_rgba(15,23,42,0.24)] transition-[width,transform] duration-200",
+                      showCenteredPricingForm ? "min-h-0" : "h-auto"
                     )}
                     style={{
+                      width: centeredPricingPanelWidth,
+                      maxWidth: "100%",
+                      borderRadius: centeredPricingPanelRadius,
                       backgroundColor: pillBg,
                       WebkitBackdropFilter: "blur(14px)",
+                      backdropFilter: "blur(14px)",
+                      containerType: "inline-size",
                     }}
                   >
-                    <div className="relative flex w-full px-5 py-4">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCenteredPricingError(null);
-                            if (centeredPricingStep === "phone") {
-                              setCenteredPricingStep("name");
-                              return;
-                            }
-                            if (centeredPricingStep === "name") {
-                              setCenteredPricingStep("email");
-                              return;
-                            }
-                            setShowCenteredPricingForm(false);
-                          }}
-                          className="absolute top-2.5 right-2.5 z-10 flex size-9 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
-                          aria-label="Back"
+                    <div
+                      className="relative flex w-full flex-col"
+                      style={{
+                        padding: centeredPricingPanelPadding,
+                        gap: centeredPricingPanelGap,
+                      }}
+                    >
+                        <div
+                          className="box-border flex w-full flex-col"
+                          style={{ fontFamily: theme.fontFamily, gap: centeredPricingPanelGap, ...pricingPillVars }}
                         >
-                          <ArrowLeft className="size-4" strokeWidth={2.5} />
-                        </button>
-                        <div className="box-border flex w-full flex-col gap-1.5 pr-12" style={{ fontFamily: theme.fontFamily, ...pricingPillVars }}>
-                          <div className="text-[0.9375rem] font-semibold leading-snug text-[var(--sif-lead-gen-fg)]">
-                            {centeredPricingStep === "email"
-                              ? "Where should we send the pricing to?"
-                              : centeredPricingStep === "name"
-                                ? "What's your name?"
-                                : "Best phone number?"}
+                          <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCenteredPricingError(null);
+                                if (centeredPricingStep === "phone") {
+                                  setCenteredPricingStep("name");
+                                  return;
+                                }
+                                if (centeredPricingStep === "name") {
+                                  setCenteredPricingStep("email");
+                                  return;
+                                }
+                                setShowCenteredPricingForm(false);
+                              }}
+                              className="flex shrink-0 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                              style={{
+                                width: centeredPricingIconButtonSize,
+                                height: centeredPricingIconButtonSize,
+                              }}
+                              aria-label={centeredPricingStep === "email" ? "Close pricing form" : "Back"}
+                            >
+                              <ArrowLeft style={{ width: centeredPricingIconSize, height: centeredPricingIconSize }} strokeWidth={2.5} />
+                            </button>
+                            <div
+                              className="min-w-0 flex-1 font-semibold leading-tight text-[var(--sif-lead-gen-fg)]"
+                              style={{ fontSize: centeredPricingTitleSize }}
+                            >
+                              {centeredPricingStep === "email"
+                                ? "Where should we send the pricing to?"
+                                : centeredPricingStep === "name"
+                                  ? "What's your name?"
+                                  : "Best phone number?"}
+                            </div>
                           </div>
 
                           {centeredPricingStep === "email" ? (
-                            <div className="relative">
-                              <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
-                              <Input
-                                autoFocus
-                                value={centeredPricingEmail}
-                                onChange={(e) => setCenteredPricingEmail(e.target.value)}
-                                placeholder="you@company.com"
-                                inputMode="email"
-                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-10 pr-[36%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
-                                style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") void handleCenteredPricingEmailSubmit();
-                                }}
-                              />
+                            <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
+                              <div className="relative min-w-0 flex-1">
+                                <Mail
+                                  className="absolute top-1/2 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]"
+                                  style={{ left: centeredPricingIconInset, width: centeredPricingIconSize, height: centeredPricingIconSize }}
+                                />
+                                <Input
+                                  autoFocus
+                                  value={centeredPricingEmail}
+                                  onChange={(e) => setCenteredPricingEmail(e.target.value)}
+                                  placeholder="you@company.com"
+                                  inputMode="email"
+                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  style={{
+                                    height: centeredPricingInputHeight,
+                                    paddingLeft: centeredPricingInputPadLeft,
+                                    paddingRight: "clamp(0.95rem, 3cqi, 1rem)",
+                                    fontSize: centeredPricingInputTextSize,
+                                    fontFamily: theme.fontFamily,
+                                    ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void handleCenteredPricingEmailSubmit();
+                                  }}
+                                />
+                              </div>
                               <Button
                                 type="button"
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidEmail(centeredPricingEmail)}
                                 onClick={() => void handleCenteredPricingEmailSubmit()}
-                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
-                                style={{ fontFamily: theme.fontFamily }}
+                                className="flex shrink-0 whitespace-nowrap items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                style={{
+                                  height: centeredPricingActionHeight,
+                                  paddingLeft: centeredPricingActionPadX,
+                                  paddingRight: centeredPricingActionPadX,
+                                  fontSize: centeredPricingMetaSize,
+                                  fontFamily: theme.fontFamily,
+                                }}
                               >
                                 Continue
                               </Button>
                             </div>
                           ) : centeredPricingStep === "name" ? (
-                            <div className="relative">
-                              <Input
-                                autoFocus
-                                value={centeredPricingName}
-                                onChange={(e) => setCenteredPricingName(e.target.value)}
-                                placeholder="Jane Appleseed"
-                                autoComplete="name"
-                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 pr-[36%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
-                                style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") void handleCenteredPricingNameSubmit();
-                                }}
-                              />
+                            <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
+                              <div className="min-w-0 flex-1">
+                                <Input
+                                  autoFocus
+                                  value={centeredPricingName}
+                                  onChange={(e) => setCenteredPricingName(e.target.value)}
+                                  placeholder="Jane Appleseed"
+                                  autoComplete="name"
+                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  style={{
+                                    height: centeredPricingInputHeight,
+                                    fontSize: centeredPricingInputTextSize,
+                                    fontFamily: theme.fontFamily,
+                                    ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void handleCenteredPricingNameSubmit();
+                                  }}
+                                />
+                              </div>
                               <Button
                                 type="button"
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead || !isValidFullName(centeredPricingName)}
                                 onClick={() => void handleCenteredPricingNameSubmit()}
-                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
-                                style={{ fontFamily: theme.fontFamily }}
+                                className="flex shrink-0 whitespace-nowrap items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                style={{
+                                  height: centeredPricingActionHeight,
+                                  paddingLeft: centeredPricingActionPadX,
+                                  paddingRight: centeredPricingActionPadX,
+                                  fontSize: centeredPricingMetaSize,
+                                  fontFamily: theme.fontFamily,
+                                }}
                               >
                                 Continue
                               </Button>
                             </div>
                           ) : (
-                            <div className="relative">
-                              <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]" />
-                              <Input
-                                autoFocus
-                                value={centeredPricingPhone}
-                                onChange={(e) => setCenteredPricingPhone(formatPhoneInput(e.target.value).display)}
-                                placeholder="(555) 123-4567"
-                                inputMode="tel"
-                                className="h-10 rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] pl-10 pr-[42%] text-[0.875rem] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
-                                style={{ fontFamily: theme.fontFamily, ["--tw-ring-color" as any]: "var(--sif-lead-gen-ring)" }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") void handleCenteredPricingPhoneSubmit();
-                                }}
-                              />
+                            <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
+                              <div className="relative min-w-0 flex-1">
+                                <Phone
+                                  className="absolute top-1/2 -translate-y-1/2 text-[var(--sif-lead-gen-muted)]"
+                                  style={{ left: centeredPricingIconInset, width: centeredPricingIconSize, height: centeredPricingIconSize }}
+                                />
+                                <Input
+                                  autoFocus
+                                  value={centeredPricingPhone}
+                                  onChange={(e) => setCenteredPricingPhone(formatPhoneInput(e.target.value).display)}
+                                  placeholder="(555) 123-4567"
+                                  inputMode="tel"
+                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  style={{
+                                    height: centeredPricingInputHeight,
+                                    paddingLeft: centeredPricingInputPadLeft,
+                                    paddingRight: "clamp(0.95rem, 3cqi, 1rem)",
+                                    fontSize: centeredPricingInputTextSize,
+                                    fontFamily: theme.fontFamily,
+                                    ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void handleCenteredPricingPhoneSubmit();
+                                  }}
+                                />
+                              </div>
                               <Button
                                 type="button"
                                 size="sm"
                                 disabled={isSubmittingCenteredPricingLead}
                                 onClick={() => void handleCenteredPricingPhoneSubmit()}
-                                className="absolute right-1.5 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] px-3.5 text-[0.8125rem] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
-                                style={{ fontFamily: theme.fontFamily }}
+                                className="flex shrink-0 whitespace-nowrap items-center rounded-full border-0 bg-[var(--sif-lead-gen-action-bg)] font-medium leading-none text-[var(--sif-lead-gen-action-fg)] shadow-sm hover:brightness-[0.96]"
+                                style={{
+                                  height: centeredPricingActionHeight,
+                                  paddingLeft: centeredPricingActionPadX,
+                                  paddingRight: centeredPricingActionPadX,
+                                  fontSize: centeredPricingMetaSize,
+                                  fontFamily: theme.fontFamily,
+                                }}
                               >
-                                {isSubmittingCenteredPricingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : "Show pricing"}
+                                {isSubmittingCenteredPricingLead ? (
+                                  <Loader2 className="animate-spin" style={{ width: centeredPricingIconSize, height: centeredPricingIconSize }} />
+                                ) : (
+                                  "Show pricing"
+                                )}
                               </Button>
                             </div>
                           )}
 
                           {centeredPricingError ? (
-                            <div className="text-[0.8125rem] leading-relaxed text-red-200 -mt-0.5">{centeredPricingError}</div>
+                            <div className="leading-relaxed text-red-200" style={{ fontSize: centeredPricingMetaSize }}>
+                              {centeredPricingError}
+                            </div>
                           ) : (
-                            <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 text-[0.8125rem] leading-relaxed text-[var(--sif-lead-gen-muted)] -mt-0.5">
+                            <div
+                              className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 leading-relaxed text-[var(--sif-lead-gen-muted)]"
+                              style={{ fontSize: centeredPricingMetaSize }}
+                            >
                               <span>
                                 {centeredPricingStep === "email"
                                   ? "Instant reveal after sending."

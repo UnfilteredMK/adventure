@@ -21,6 +21,7 @@ interface SliderStepProps {
   headerInlineControl?: React.ReactNode;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
 export function SliderStep({
@@ -34,6 +35,7 @@ export function SliderStep({
   headerInlineControl,
   actionsVariant,
   compactInPreview,
+  layoutDebugEnabled,
 }: SliderStepProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
@@ -94,17 +96,18 @@ export function SliderStep({
       headerInlineControl={headerInlineControl}
       actionsVariant={actionsVariant}
       compactInPreview={compactInPreview}
+      layoutDebugEnabled={layoutDebugEnabled}
     >
       <div
         className={cn(
-          compactInPreview ? "mx-auto flex h-full min-h-0 w-full max-w-xl flex-col justify-start overflow-y-auto py-0.5 pr-1 space-y-1.5" : null,
+          compactInPreview ? "mx-auto flex h-full min-h-0 w-full min-w-0 max-w-[68%] flex-col justify-start overflow-visible px-0 pt-0 pb-0 gap-0.5" : null,
           !compactInPreview && (isCompact ? "py-3 space-y-3" : "py-5 sm:py-8 space-y-4 sm:space-y-6")
         )}
       >
         <div
           className={cn(
             "font-black text-center",
-            compactInPreview ? "text-lg sm:text-xl leading-none" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
+            compactInPreview ? "w-full min-w-0 text-[clamp(0.92rem,1.8vh,1.18rem)] leading-tight py-0.5" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
           )}
           style={{ color: theme.primaryColor, fontFamily: theme.fontFamily }}
         >
@@ -120,7 +123,7 @@ export function SliderStep({
           className="w-full"
         />
         {compactInPreview ? (
-          <div className="flex items-center justify-between px-0.5 text-[10px] font-medium opacity-70">
+          <div className="flex items-center justify-between px-0 text-[clamp(8px,0.95vh,10px)] font-medium leading-none opacity-70">
             <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMin)}</span>
             <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMax)}</span>
           </div>

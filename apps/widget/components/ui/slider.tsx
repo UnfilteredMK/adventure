@@ -84,7 +84,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
         <div
           className={cn(
             "pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 rounded-full bg-black/10",
-            compact ? "h-1" : "h-[6px]"
+            compact ? "h-[4px]" : "h-[6px]"
           )}
         />
 
@@ -93,7 +93,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
           <div
             className={cn(
               "pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full",
-              compact ? "h-1" : "h-[6px]"
+              compact ? "h-[4px]" : "h-[6px]"
             )}
             style={{
               left: `${pct(orderedLow, safeMin, safeMax)}%`,

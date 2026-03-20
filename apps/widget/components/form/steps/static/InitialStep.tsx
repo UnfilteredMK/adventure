@@ -6,6 +6,7 @@ import type { IntroUI } from "@/types/ai-form-ui-contract";
 import { useFormTheme } from "../../demo/FormThemeProvider";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, ArrowRight, Sparkles, Clock3, ShieldCheck } from "lucide-react";
+import { layoutDebugClassName, withLayoutDebugStyle } from "../runtime/step-engine/debug-layout";
 
 interface InitialStepProps {
   step: IntroUI;
@@ -16,9 +17,19 @@ interface InitialStepProps {
   isLoading: boolean;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  layoutDebugEnabled?: boolean;
 }
 
-export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, actionsVariant, compactInPreview }: InitialStepProps) {
+export function InitialStep({
+  step,
+  onComplete,
+  onBack,
+  canGoBack,
+  isLoading,
+  actionsVariant,
+  compactInPreview,
+  layoutDebugEnabled = false,
+}: InitialStepProps) {
   const { theme } = useFormTheme();
   const brand = step.brand || null;
   const continueLabel = step.blueprint?.presentation?.continue_label || "Start";
@@ -35,12 +46,16 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
   const compact = Boolean(compactInPreview);
   return (
     <div
-      className={cn(
+      className={layoutDebugClassName(
+        layoutDebugEnabled,
+        cn(
         "w-full mx-auto",
         compact ? "max-w-2xl px-3 py-2 space-y-2" : "max-w-3xl px-4 py-6 space-y-6"
+        )
       )}
+      style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
     >
-      <div>
+      <div style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}>
         <h2 className={cn("font-semibold min-w-0 flex-1 break-words", compact ? "text-base" : "text-lg sm:text-xl")} style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>
           {step.question || "Let’s get started"}
         </h2>
@@ -51,7 +66,7 @@ export function InitialStep({ step, onComplete, onBack, canGoBack, isLoading, ac
         ) : null}
       </div>
 
-      <div className={cn(compact ? "space-y-2" : "space-y-6")}>
+      <div className={cn(compact ? "space-y-2" : "space-y-6")} style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneAnswer")}>
         <div
           className={cn("border", compact ? "rounded-xl p-2.5" : "rounded-2xl p-4")}
           style={{

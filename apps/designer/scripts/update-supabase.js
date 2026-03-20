@@ -109,32 +109,24 @@ function sortConfigsInDirectory(dir) {
 async function main() {
   log('🚀 Starting Supabase Update Process...', 'bright');
   
-  const projectId = 'xvpagpzufitqzoijoalz';
-  const schema = 'public';
-  
   try {
-    // Step 1: Update Designer types
-    logStep(1, 'Updating Designer app Supabase types...');
-    execSync(`cd apps/designer && npx supabase gen types typescript --project-id ${projectId} --schema ${schema} > src/types/database.ts`, { stdio: 'inherit' });
-    logSuccess('Designer types updated');
+    // Step 1: Update shared types
+    logStep(1, 'Updating shared Supabase types...');
+    execSync('npm run supabase:gen:types', { stdio: 'inherit' });
+    logSuccess('Shared Supabase types updated');
     
-    // Step 2: Update Widget types
-    logStep(2, 'Updating Widget app Supabase types...');
-    execSync(`cd apps/widget && npx supabase gen types typescript --project-id ${projectId} --schema ${schema} > types/database.ts`, { stdio: 'inherit' });
-    logSuccess('Widget types updated');
-    
-    // Step 3: Sort configs in Designer app
-    logStep(3, 'Sorting config objects alphabetically in Designer app...');
+    // Step 2: Sort configs in Designer app
+    logStep(2, 'Sorting config objects alphabetically in Designer app...');
     sortConfigsInDirectory('apps/designer/src');
     logSuccess('Designer configs sorted');
     
-    // Step 4: Sort configs in Widget app
-    logStep(4, 'Sorting config objects alphabetically in Widget app...');
+    // Step 3: Sort configs in Widget app
+    logStep(3, 'Sorting config objects alphabetically in Widget app...');
     sortConfigsInDirectory('apps/widget');
     logSuccess('Widget configs sorted');
     
-    // Step 5: Update package.json scripts
-    logStep(5, 'Updating package.json scripts...');
+    // Step 4: Update package.json scripts
+    logStep(4, 'Updating package.json scripts...');
     
     // Update designer package.json
     const designerPackagePath = 'apps/designer/package.json';

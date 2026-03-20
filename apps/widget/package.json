@@ -16,7 +16,7 @@
     "build": "next build",
     "start": "set -a && . ../../env/.env.shared.local && set +a && next start",
     "lint": "next lint",
-    "gen:types": "set -a && . ../../env/.env.shared.local && set +a && npx --yes supabase@2.30.4 gen types typescript --project-id $(node -e \"console.log(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.split('.')[0])\") --schema public > supabase/types.ts",
+    "gen:types": "npm --prefix ../.. run supabase:gen:types",
     "db:update": "node ../../scripts/update-supabase.js",
     "sort:configs": "node ../../scripts/sort-configs.js"
   },

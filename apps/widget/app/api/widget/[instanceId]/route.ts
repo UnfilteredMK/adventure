@@ -27,7 +27,8 @@ function buildCatalogStyleOptions(rows: any[]): {
 
   for (const row of Array.isArray(rows) ? rows : []) {
     const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : null;
-    if (!meta || String(meta.generated_for || "") !== "subcategory_catalog") continue;
+    const generatedFor = String(meta?.generated_for || "").trim();
+    if (!meta || (generatedFor !== "style_seed" && generatedFor !== "subcategory_catalog")) continue;
     const label =
       typeof meta.option_label === "string" && meta.option_label.trim()
         ? meta.option_label.trim()

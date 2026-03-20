@@ -217,8 +217,20 @@ export function Choice({
     const focusRing = withAlpha(primary, 0.35);
 
     return (
-      <div className={cn(isCompact ? "mx-auto w-full max-w-3xl space-y-1 text-center" : "space-y-2.5")}>
-        <div className={cn("flex flex-wrap items-center justify-center", isCompact ? "gap-1" : "gap-1.5 sm:gap-2")}>
+      <div
+        className={cn(
+          isCompact
+            ? "w-full max-w-none overflow-x-auto overflow-y-visible py-1 text-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            : "space-y-2.5"
+        )}
+      >
+        <div
+          className={cn(
+            isCompact
+              ? "inline-flex min-w-max flex-nowrap items-center justify-center gap-1 px-1"
+              : "flex flex-wrap items-center justify-center gap-1.5 sm:gap-2"
+          )}
+        >
           {options.map((option: string | UIOption, index: number) => {
             const picked = isSelected(option);
             const label = labelOf(option);
@@ -263,10 +275,10 @@ export function Choice({
                   placeholder={otherPlaceholder}
                   autoFocus
                   className={cn(
-                    "inline-flex min-w-[120px] max-w-[200px] rounded-full border-2 px-3 py-1.5 text-sm font-semibold transition-all",
+                    "inline-flex shrink-0 min-w-[120px] max-w-[200px] overflow-hidden whitespace-nowrap rounded-full border-2 px-3 text-sm font-semibold leading-none transition-all",
                     "focus:outline-none focus:ring-2 focus:ring-offset-1",
                     isCompact
-                      ? "min-h-[28px] px-2.5 py-1 text-[10px] sm:min-h-[30px] sm:text-[11px]"
+                      ? "h-7 px-2 text-[11px] sm:h-8 sm:px-2.5"
                       : "min-h-9 text-[12px] sm:min-h-10 sm:text-[13px]"
                   )}
                   style={{
@@ -275,6 +287,7 @@ export function Choice({
                     backgroundColor: "var(--form-surface-color, #fff)",
                     borderColor: primary,
                     color: theme.textColor || "var(--form-text-color)",
+                    ...(isCompact ? { fontSize: "clamp(0.68rem, 1.02vh, 0.8rem)", lineHeight: 1 } : null),
                   }}
                 />
               );
@@ -285,11 +298,11 @@ export function Choice({
                 key={`${key}-${index}`}
                 onClick={() => handleSelect(option)}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-full border transition-all font-semibold",
+                  "inline-flex shrink-0 items-center rounded-full border font-semibold leading-none transition-all",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
                   "shadow-sm hover:shadow",
                   isCompact
-                    ? "min-h-[28px] px-2 py-0.5 text-[10px] shadow-none hover:shadow-none sm:min-h-[30px] sm:px-2.5 sm:text-[11px]"
+                    ? "h-7 gap-1 overflow-hidden px-2 shadow-none hover:shadow-none sm:h-8 sm:px-2.5"
                     : "px-3 py-1.5 text-[12px] min-h-9 sm:px-4 sm:py-2 sm:text-[13px] sm:min-h-10",
                   picked
                     ? "bg-primary text-white border-primary shadow-sm"
@@ -307,6 +320,7 @@ export function Choice({
                         ["--choice-hover-bg" as any]: unpickedHoverBg,
                         ["--choice-focus" as any]: focusRing,
                       } as any)),
+                  ...(isCompact ? { fontSize: "clamp(0.68rem, 1.02vh, 0.8rem)", lineHeight: 1 } : null),
                 }}
                 onMouseEnter={(e) => {
                   if (picked) return;
@@ -321,8 +335,8 @@ export function Choice({
                   } catch {}
                 }}
               >
-                {picked && !isOther && <Check className={cn(isCompact ? "h-2.5 w-2.5" : "h-3.5 w-3.5")} strokeWidth={2.5} />}
-                <span>{label}</span>
+                {picked && !isOther && <Check className={cn(isCompact ? "h-2 w-2 shrink-0" : "h-3.5 w-3.5")} strokeWidth={2.5} />}
+                <span className={cn(isCompact ? "block truncate leading-none" : undefined)}>{label}</span>
               </button>
             );
           })}
