@@ -1,4 +1,5 @@
 import { DETERMINISTIC_FULL_NAME_ID } from "../constants";
+import { shouldExcludeStepFromAnsweredQA } from "@/lib/ai-form/answered-qa";
 import { clamp01 } from "./core";
 import { isFunctionCallStep } from "./function-calls";
 
@@ -57,6 +58,7 @@ export function buildAnsweredQA(params: { steps: any[]; stepData: Record<string,
     if (isFunctionCallStep(step)) continue;
     const stepId = (step as any)?.id;
     if (!stepId || typeof stepId !== "string") continue;
+    if (shouldExcludeStepFromAnsweredQA(stepId)) continue;
     const answer = stepData?.[stepId];
     if (answer === null || answer === undefined) continue;
     if (typeof answer === "string" && answer.trim().length === 0) continue;

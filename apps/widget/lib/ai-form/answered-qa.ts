@@ -2,6 +2,16 @@ import type { StepDefinition, UIStep } from "@/types/ai-form";
 
 type StepLike = StepDefinition | UIStep | null | undefined;
 
+const ANSWERED_QA_EXCLUDED_STEP_IDS = new Set<string>([
+  "step-budget-range",
+  "step-promptInput",
+  "step-pricing",
+  "step-pricing-accuracy-consent",
+  "step-confirmation",
+  "step-designer",
+  "step-refinement-upload-scene-image",
+]);
+
 export interface AnsweredQAItem {
   stepId: string;
   question: string;
@@ -42,6 +52,16 @@ function isNonEmptyAnswer(value: any): boolean {
   return true;
 }
 
+export function shouldExcludeStepFromAnsweredQA(stepId: unknown): boolean {
+  const normalized = String(stepId || "").trim();
+  if (!normalized) return true;
+  if (normalized.startsWith("__")) return true;
+  if (ANSWERED_QA_EXCLUDED_STEP_IDS.has(normalized)) return true;
+  if (normalized.startsWith("step-upload-")) return true;
+  if (normalized.startsWith("step-lead")) return true;
+  return false;
+}
+
 export function buildAnsweredQAFromSteps(
   steps: Array<StepDefinition | UIStep | null | undefined> | undefined,
   stepDataSoFar: Record<string, any>,
@@ -58,7 +78,7 @@ export function buildAnsweredQAFromSteps(
   }
 
   const keys = Object.keys(stepDataSoFar || {})
-    .filter((k) => typeof k === "string" && k && !k.startsWith("__"))
+    .filter((k) => typeof k === "string" && k && !shouldExcludeStepFromAnsweredQA(k))
     .sort();
 
   const answeredQA: AnsweredQAItem[] = [];

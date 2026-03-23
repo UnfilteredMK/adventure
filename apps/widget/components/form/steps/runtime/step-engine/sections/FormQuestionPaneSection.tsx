@@ -126,6 +126,11 @@ export function FormQuestionSection({
   const compactPreviewActive = Boolean(usePreviewPaneLayout);
   const useIconOnlyActions = Boolean(useCompactNav || usePreviewPaneLayout);
   const useWideQuestionContent = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
+  const questionContentMaxWidthClass = usePreviewPaneLayout
+    ? "max-w-4xl"
+    : useWideQuestionContent
+      ? "max-w-none"
+      : "max-w-6xl";
   const promptText = promptDraft.trim();
   const canGoBack = (state?.currentStepIndex || 0) > 0;
   const primary = theme.primaryColor || "#3b82f6";
@@ -334,14 +339,23 @@ export function FormQuestionSection({
       <div
         className={layoutDebugClassName(
           layoutDebugEnabled,
-          "flex min-h-8 w-full min-w-0 items-center justify-center gap-2"
+          cn(
+            "min-h-8 w-full min-w-0 items-center gap-2",
+            useCompactNav ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "flex justify-center"
+          )
         )}
         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
       >
+        {useCompactNav ? <div aria-hidden="true" className="min-w-0" /> : null}
         <div className="flex min-w-0 items-center justify-center overflow-hidden">
           {inputModeToggle}
         </div>
-        <div className="flex min-w-0 items-center justify-center">
+        <div
+          className={cn(
+            "flex min-w-0 items-center",
+            useCompactNav ? "justify-end" : "justify-center"
+          )}
+        >
           {showEasePrompt && adventureInputMode === "questions" ? (
             <EaseFeedbackPrompt visible={true} onSelect={handleEaseFeedback} layoutDebugEnabled={layoutDebugEnabled} />
           ) : null}
@@ -382,7 +396,7 @@ export function FormQuestionSection({
                   layoutDebugEnabled,
                   cn(
                     "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
-                    useWideQuestionContent ? "max-w-none" : "max-w-6xl"
+                    questionContentMaxWidthClass
                   )
                 )}
             style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}

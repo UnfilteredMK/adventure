@@ -57,6 +57,8 @@ def _normalize_use_case(raw: Any) -> str:
         return "tryon"
     if v == "scene-placement":
         return "scene-placement"
+    if v == "scene-refinement":
+        return "scene-refinement"
     if v == "scene":
         return "scene"
     return ""
@@ -124,6 +126,13 @@ def _replicate_default_model_id(*, use_case: Optional[str] = None) -> str:
         m = str(os.getenv("SCENE_PLACEMENT_REPLICATE_MODEL_ID") or "").strip()
         if m:
             return m
+    if uc == "scene-refinement":
+        m = str(os.getenv("SCENE_REFINEMENT_REPLICATE_MODEL_ID") or "").strip()
+        if m:
+            return m
+        m = str(os.getenv("SCENE_PLACEMENT_REPLICATE_MODEL_ID") or "").strip()
+        if m:
+            return m
 
     # Accept a few common env names to reduce friction across repos.
     model_id = (
@@ -146,6 +155,11 @@ def _replicate_default_model_id(*, use_case: Optional[str] = None) -> str:
             raise RuntimeError(
                 "No Replicate model configured for useCase='scene-placement'. "
                 "Set SCENE_PLACEMENT_REPLICATE_MODEL_ID (recommended) or REPLICATE_MODEL_ID."
+            )
+        if uc == "scene-refinement":
+            raise RuntimeError(
+                "No Replicate model configured for useCase='scene-refinement'. "
+                "Set SCENE_REFINEMENT_REPLICATE_MODEL_ID or SCENE_PLACEMENT_REPLICATE_MODEL_ID or REPLICATE_MODEL_ID."
             )
         raise RuntimeError(
             "REPLICATE_MODEL_ID is not set (required for image generation). "

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/server/logger';
 import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } from '@/lib/ai-form/utils/reference-images';
 
-type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'drilldown';
+type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'scene-refinement' | 'drilldown';
 type GenerationIntent = "initial" | "regenerate" | "small_improvement";
 
 function normalizeServiceUrl(raw: unknown): string {
@@ -32,6 +32,7 @@ function resolveFormServiceBaseUrls(): string[] {
 function mapUseCaseToServicePath(useCase: UseCase): string {
 	if (useCase === 'tryon' || useCase === 'try-on') return '/v1/api/generate/try-on';
 	if (useCase === 'scene-placement') return '/v1/api/generate/scene-placement';
+	if (useCase === 'scene-refinement') return '/v1/api/generate/scene-refinement';
 	if (useCase === 'drilldown') return '/v1/api/generate/drilldown';
 	return '/v1/api/generate/scene';
 }
@@ -40,6 +41,7 @@ function normalizeUseCase(raw: unknown): UseCase {
 	const v = String(raw || 'scene').trim().toLowerCase().replace(/_/g, '-');
 	if (v === 'tryon' || v === 'try-on') return 'tryon';
 	if (v === 'scene-placement') return 'scene-placement';
+	if (v === 'scene-refinement') return 'scene-refinement';
 	if (v === 'drilldown') return 'drilldown';
 	return 'scene';
 }
@@ -187,6 +189,17 @@ function resolveModelDefaults(
 				outputFormat: body.outputFormat || 'jpg',
 			};
 		}
+		return {
+			modelId: body.modelId || 'xai/grok-imagine-image',
+			guidanceScale: body.guidanceScale ?? 6.0,
+			numInferenceSteps: body.numInferenceSteps ?? 18,
+			promptUpsampling: body.promptUpsampling ?? false,
+			aspectRatio: body.aspectRatio || 'match_input_image',
+			outputFormat: body.outputFormat || 'jpg',
+		};
+	}
+
+	if (useCase === 'scene-refinement') {
 		return {
 			modelId: body.modelId || 'xai/grok-imagine-image',
 			guidanceScale: body.guidanceScale ?? 6.0,

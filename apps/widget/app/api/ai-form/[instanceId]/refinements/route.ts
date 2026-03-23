@@ -174,6 +174,15 @@ export async function POST(
   const reqId = `refinements-${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   try {
+    const debugEnabled = (() => {
+      try {
+        const url = new URL(request.url);
+        const v = (url.searchParams.get("debug") || "").trim().toLowerCase();
+        return v === "1" || v === "true" || v === "yes" || v === "on";
+      } catch {
+        return false;
+      }
+    })();
     const body = await request.json().catch(() => ({}));
     const sessionId = body?.sessionId || body?.session_id || "";
     const stepDataSoFar = body?.stepDataSoFar ?? body?.step_data_so_far ?? {};
@@ -189,7 +198,18 @@ export async function POST(
 
     const selectedServiceId = pickPrimaryServiceId(stepDataSoFar);
     if (!selectedServiceId) {
-      return NextResponse.json({ ok: true, miniSteps: [], requestId: reqId, schemaVersion: "1" });
+      logger.info("[refinements] EMPTY", {
+        reqId,
+        instanceId,
+        reason: "missing_selected_service",
+      });
+      return NextResponse.json({
+        ok: true,
+        miniSteps: [],
+        requestId: reqId,
+        schemaVersion: "1",
+        ...(debugEnabled ? { debug: { reason: "missing_selected_service" } } : {}),
+      });
     }
 
     const admin = createSupabaseAdminClient();
@@ -210,7 +230,19 @@ export async function POST(
       .single();
 
     if (subcategoryError || !subcategory) {
-      return NextResponse.json({ ok: true, miniSteps: [], requestId: reqId, schemaVersion: "1" });
+      logger.info("[refinements] EMPTY", {
+        reqId,
+        instanceId,
+        selectedServiceId,
+        reason: "subcategory_not_found",
+      });
+      return NextResponse.json({
+        ok: true,
+        miniSteps: [],
+        requestId: reqId,
+        schemaVersion: "1",
+        ...(debugEnabled ? { debug: { reason: "subcategory_not_found", selectedServiceId } } : {}),
+      });
     }
 
     const accountId = typeof (instance as any)?.account_id === "string" ? String((instance as any).account_id).trim() : "";
@@ -236,16 +268,47 @@ export async function POST(
         .limit(500),
     ]);
 
+    const mergedImages = [
+      ...(Array.isArray(accountImages.data) ? accountImages.data : []),
+      ...(Array.isArray(globalImages.data) ? globalImages.data : []),
+    ];
+    const componentCount = coerceSubcategoryComponents((subcategory as any)?.subcategory_components).length;
+    const componentKeys = coerceSubcategoryComponents((subcategory as any)?.subcategory_components)
+      .map((component) => String(component.key || "").trim())
+      .filter(Boolean);
+    const readyImageCount = mergedImages.filter((row) => isReadyRefinementImage(row)).length;
     const refinementCatalog = buildRefinementCatalog(
-      [
-        ...(Array.isArray(accountImages.data) ? accountImages.data : []),
-        ...(Array.isArray(globalImages.data) ? globalImages.data : []),
-      ],
+      mergedImages,
       (subcategory as any)?.subcategory_components,
     );
 
     if (refinementCatalog.length === 0) {
-      return NextResponse.json({ ok: true, miniSteps: [], requestId: reqId, schemaVersion: "1" });
+      logger.info("[refinements] EMPTY", {
+        reqId,
+        instanceId,
+        selectedServiceId,
+        reason: "empty_refinement_catalog",
+        componentCount,
+        componentKeys,
+        readyImageCount,
+      });
+      return NextResponse.json({
+        ok: true,
+        miniSteps: [],
+        requestId: reqId,
+        schemaVersion: "1",
+        ...(debugEnabled
+          ? {
+              debug: {
+                reason: "empty_refinement_catalog",
+                selectedServiceId,
+                componentCount,
+                componentKeys,
+                readyImageCount,
+              },
+            }
+          : {}),
+      });
     }
 
     const serviceSummary =
@@ -327,11 +390,34 @@ export async function POST(
             reqId,
             instanceId,
             selectedServiceId,
+            componentCount,
+            componentKeys,
+            readyImageCount,
             catalogCount: refinementCatalog.length,
+            catalogSummary: refinementCatalog.map((item) => ({
+              key: item.key,
+              optionCount: Array.isArray(item.options) ? item.options.length : 0,
+            })),
             stepsCount: miniSteps.length,
             steps: miniSteps.map((s: any) => ({ id: s?.id, question: s?.question, type: s?.type })),
           });
-          return NextResponse.json(json);
+          return NextResponse.json(
+            debugEnabled
+              ? {
+                  ...json,
+                  debug: {
+                    selectedServiceId,
+                    componentCount,
+                    componentKeys,
+                    readyImageCount,
+                    catalogSummary: refinementCatalog.map((item) => ({
+                      key: item.key,
+                      optionCount: Array.isArray(item.options) ? item.options.length : 0,
+                    })),
+                  },
+                }
+              : json
+          );
         }
         lastStatus = resp.status;
         lastBody = await resp.text().catch(() => null);

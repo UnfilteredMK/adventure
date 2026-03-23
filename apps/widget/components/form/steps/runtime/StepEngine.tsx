@@ -515,9 +515,11 @@ export function StepEngine({
 
   // Async refinements: only fetch after the first concept is shown and lead capture
   // has been explicitly completed for this session. Then prepend a deterministic
-  // upload step and append refinement questions after designer step.
+  // upload step and inject refinement questions immediately after the user's
+  // current post-preview position so they do not land behind the current step.
   const refinementsFetchedRef = useRef(false);
   const refinementAdvanceFromStepIdRef = useRef<string | null>(null);
+  const pendingRefinementFocusStepIdRef = useRef<string | null>(null);
   const [awaitingRefinementAdvance, setAwaitingRefinementAdvance] = useState(false);
   useEffect(() => {
     if (!previewHasImage || !flowPlan?.sessionId || !instanceId) return;
@@ -569,14 +571,24 @@ export function StepEngine({
         });
         if (deduped.length === 0) return;
 
-        const designerIdx = steps.findIndex((s: any) => String((s as any)?.id || "") === "step-designer");
-        const insertAtIndex = designerIdx >= 0 ? designerIdx + 1 : steps.length;
-        // Auto-advance if user is already at/past the insertion point (finished all planner questions).
+        const firstRefinementQuestionId =
+          deduped.find((s: any) => String((s as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID)?.id || null;
+
         const currentIdx = state?.currentStepIndex ?? 0;
+        const designerIdx = steps.findIndex((s: any) => String((s as any)?.id || "") === "step-designer");
+        const minPreviewInsertIndex = designerIdx >= 0 ? designerIdx + 1 : 0;
+        const insertAtIndex = Math.min(
+          steps.length,
+          Math.max(minPreviewInsertIndex, currentIdx + 1)
+        );
+        // Auto-advance if user is already at/past the insertion point (finished all planner questions).
         const userIsWaiting = currentIdx >= steps.length - 1;
         if (userIsWaiting && currentStep?.id) {
           refinementAdvanceFromStepIdRef.current = String(currentStep.id);
           setAwaitingRefinementAdvance(true);
+        }
+        if (!userIsWaiting && currentStep && isStructuralStep(currentStep) && firstRefinementQuestionId) {
+          pendingRefinementFocusStepIdRef.current = String(firstRefinementQuestionId);
         }
         addSteps(deduped, userIsWaiting, { insertAtIndex });
         if (!userIsWaiting) {
@@ -606,8 +618,23 @@ export function StepEngine({
   }, [awaitingRefinementAdvance, currentStep?.id]);
 
   useEffect(() => {
+    const targetStepId = pendingRefinementFocusStepIdRef.current;
+    if (!targetStepId) return;
+    const steps = state?.steps || [];
+    const targetIndex = steps.findIndex((step: any) => String((step as any)?.id || "") === targetStepId);
+    if (targetIndex < 0) return;
+    if (String(currentStep?.id || "") === targetStepId) {
+      pendingRefinementFocusStepIdRef.current = null;
+      return;
+    }
+    pendingRefinementFocusStepIdRef.current = null;
+    goToStep(targetIndex);
+  }, [currentStep?.id, goToStep, state?.steps]);
+
+  useEffect(() => {
     if (previewHasImage) return;
     refinementAdvanceFromStepIdRef.current = null;
+    pendingRefinementFocusStepIdRef.current = null;
     setAwaitingRefinementAdvance(false);
   }, [previewHasImage]);
 
@@ -832,6 +859,34 @@ export function StepEngine({
     if (leadCapturedForUI) setAdventureInputMode("questions");
   }, [leadCapturedForUI]);
 
+  useEffect(() => {
+    if (!leadCapturedForUI) return;
+    if (!previewHasImage) return;
+    if (!currentStep || !state?.steps?.length) return;
+    const currentStepId = String(currentStep.id || "");
+    if (!belowPreviewControlStepIds.has(currentStepId)) return;
+
+    const currentIndex = state.currentStepIndex ?? 0;
+    const nextVisibleIndex = state.steps.findIndex((step: any, index: number) => {
+      if (index <= currentIndex) return false;
+      const stepId = String((step as any)?.id || "");
+      return stepId.length > 0 && !belowPreviewControlStepIds.has(stepId);
+    });
+    if (nextVisibleIndex > currentIndex) {
+      goToStep(nextVisibleIndex);
+      return;
+    }
+
+    const previousVisibleIndex = [...state.steps]
+      .map((step: any, index: number) => ({ stepId: String((step as any)?.id || ""), index }))
+      .reverse()
+      .find(({ stepId, index }) => index < currentIndex && stepId.length > 0 && !belowPreviewControlStepIds.has(stepId))
+      ?.index;
+    if (typeof previousVisibleIndex === "number" && previousVisibleIndex >= 0) {
+      goToStep(previousVisibleIndex);
+    }
+  }, [belowPreviewControlStepIds, currentStep, goToStep, leadCapturedForUI, previewHasImage, state?.currentStepIndex, state?.steps]);
+
   // If we blocked an auto-advance due to the preview gate, resume once lead is captured.
   useEffect(() => {
     if (!leadCapturedForUI) return;
@@ -849,11 +904,24 @@ export function StepEngine({
     // Lead captured via pill: auto-advance to show the next guided question.
     if (!previewHasImage || !currentStep) return;
     if (leadCapturedAdvancedRef.current) return;
+    const currentIndex = state?.currentStepIndex ?? -1;
+    const nextVisibleIndex = (state?.steps || []).findIndex((step: any, index: number) => {
+      if (index <= currentIndex) return false;
+      const stepId = String((step as any)?.id || "");
+      return stepId.length > 0 && !belowPreviewControlStepIds.has(stepId);
+    });
+    if (nextVisibleIndex > currentIndex) {
+      leadCapturedAdvancedRef.current = true;
+      leadCapturedAdvanceStepIdRef.current = currentStep.id;
+      goToStep(nextVisibleIndex);
+      return;
+    }
+    if (belowPreviewControlStepIds.has(String(currentStep.id || ""))) return;
     leadCapturedAdvancedRef.current = true;
     leadCapturedAdvanceStepIdRef.current = currentStep.id;
     const stepData = (state?.stepData as Record<string, unknown>)?.[currentStep.id] ?? {};
     void goToNextStep(stepData);
-  }, [currentStep, goToNextStep, leadCapturedForUI, previewHasImage, state?.stepData]);
+  }, [belowPreviewControlStepIds, currentStep, goToNextStep, goToStep, leadCapturedForUI, previewHasImage, state?.currentStepIndex, state?.stepData, state?.steps]);
 
   // --- Pricing estimate (AI) ---
   const pricingEstimateAbortRef = useRef<AbortController | null>(null);
@@ -3476,11 +3544,11 @@ export function StepEngine({
                         ? isMobileViewport
                           ? cn(
                               "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden",
-                              compactLargeQuestionHost ? "h-[22vh] max-h-[22vh]" : "h-[10vh] max-h-[10vh]"
+                              compactLargeQuestionHost ? "h-[22vh] max-h-[22vh]" : "h-[19vh] max-h-[19vh]"
                             )
                           : cn(
                               "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden",
-                              compactLargeQuestionHost ? "h-[20vh] max-h-[20vh]" : "h-[10vh] max-h-[10vh]"
+                              compactLargeQuestionHost ? "h-[20vh] max-h-[20vh]" : "h-[17vh] max-h-[17vh]"
                             )
                         : "flex flex-col flex-1 min-h-0"
                     )}

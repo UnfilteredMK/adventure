@@ -200,9 +200,11 @@ def _normalize_use_case_for_dispatch(payload: Dict[str, Any]) -> str:
         return "tryon"
     if raw == "scene-placement":
         return "scene-placement"
+    if raw == "scene-refinement":
+        return "scene-refinement"
     if raw == "drilldown":
         return "scene"
-    return raw if raw in ("scene", "scene-placement", "tryon") else "scene"
+    return raw if raw in ("scene", "scene-placement", "scene-refinement", "tryon") else "scene"
 
 
 def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -353,6 +355,25 @@ def _extract_scene_placement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract inputs for SceneRefinementPromptModule."""
+    placement_inputs = _extract_scene_placement_inputs(payload)
+    return {
+        "service_summary": placement_inputs.get("service_summary") or "Refine the current scene design.",
+        "subject": placement_inputs.get("subject") or "project",
+        "style_tags": placement_inputs.get("style_tags") or "",
+        "location": placement_inputs.get("location") or "",
+        "scene_context": "User provided an existing scene/design image that should remain the anchor.",
+        "user_preferences": placement_inputs.get("user_preferences") or "",
+        "reference_adherence": (
+            "Hard anchor constraint: preserve the current scene composition, camera, perspective, geometry, depth relationships, "
+            "lighting direction, and unchanged objects/materials. Make only the requested local design refinements."
+        ),
+        "budget_level": placement_inputs.get("budget_level") or "",
+        "budget_requirements": placement_inputs.get("budget_requirements") or "",
+    }
+
+
 def _extract_tryon_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract inputs for TryonPromptModule."""
     step_data = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
@@ -423,6 +444,7 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         import dspy
         from programs.image_generator.image_prompt_library import get_negative_prompt
         from programs.image_generator.scene_placement_prompt_module import ScenePlacementPromptModule
+        from programs.image_generator.scene_refinement_prompt_module import SceneRefinementPromptModule
         from programs.image_generator.scene_prompt_module import ScenePromptModule
         from programs.image_generator.signatures.image_prompt import ImagePromptSpec
         from programs.image_generator.tryon_prompt_module import TryonPromptModule
@@ -464,6 +486,13 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
             module = ScenePlacementPromptModule()
             pred = module(**inputs)
             used_module_name = "scene-placement"
+            style_tags_str = inputs.get("style_tags", "")
+
+        elif use_case == "scene-refinement":
+            inputs = _extract_scene_refinement_inputs(payload)
+            module = SceneRefinementPromptModule()
+            pred = module(**inputs)
+            used_module_name = "scene-refinement"
             style_tags_str = inputs.get("style_tags", "")
 
         elif use_case == "tryon":

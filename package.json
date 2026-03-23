@@ -11,6 +11,8 @@
   "scripts": {
     "dev:designer": "npm -w apps/designer run dev",
     "dev:widget": "npm -w apps/widget run dev",
+    "dev:api-service": "sh -c 'cd apps/api-service && make dev'",
+    "dev": "sh -c 'npm run dev:designer & npm run dev:widget & npm run dev:api-service & wait'",
     "dev:shopify": "npm -w apps/shopify run dev",
     "build:designer": "npm -w apps/designer run build",
     "build:widget": "npm -w apps/widget run build",

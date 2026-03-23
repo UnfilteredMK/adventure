@@ -444,6 +444,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             context_prompt = f"{context_prompt} [{budget_context}]"
 
         from programs.form_pipeline.orchestrator import _should_skip_option_image_for_label  # noqa: E402
+        from programs.image_generator.image_prompt_library import build_option_image_prompt  # noqa: E402
         from programs.image_generator.providers.image_generation import generate_option_images_for_step  # noqa: E402
 
         prompts: list[str] = []
@@ -710,6 +711,65 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             "modelId": adapted["modelId"],
             "instanceId": instance_id,
             "useCase": "scene-placement",
+            "routingPolicy": routing_policy,
+        }
+
+    @compat_router.post("/generate/scene-refinement")
+    @router.post("/generate/scene-refinement")
+    async def generate_scene_refinement(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
+        prompt = str(payload.get("prompt") or "").strip()
+        instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
+        scene_image = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip()
+        if not prompt:
+            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
+        if not instance_id:
+            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
+        if not scene_image:
+            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "sceneImage_required"})
+
+        refs_in = payload.get("referenceImages") or payload.get("reference_images") or []
+        refs = [x for x in (refs_in if isinstance(refs_in, list) else []) if isinstance(x, str) and x.strip()]
+        reference_images = dedup_urls([scene_image, *refs])
+        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
+        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
+        if prompt:
+            step_data = {**step_data, "step-promptInput": prompt}
+        adapted["stepDataSoFar"] = step_data
+        adapted["useCase"] = "scene-refinement"
+        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or "xai/grok-imagine-image").strip()
+        adapted["numOutputs"] = int(payload.get("numOutputs") or payload.get("gallery_max_images") or 1)
+        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
+        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
+        adapted["width"] = int(payload.get("width") or 1024)
+        adapted["height"] = int(payload.get("height") or 1024)
+        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or 18)
+        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
+        adapted["referenceImages"] = reference_images
+        adapted["sceneImage"] = scene_image
+        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+            if k in payload and payload.get(k) is not None:
+                adapted[k] = payload.get(k)
+        routing_policy = _apply_replicate_routing_defaults(
+            payload=payload,
+            adapted=adapted,
+            use_case="scene-refinement",
+            num_input_images=len(reference_images),
+            has_scene_image=bool(scene_image),
+            is_edit=True,
+        )
+
+        pred = _generate_with_optional_optimized_request(adapted)
+        images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
+        return {
+            "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),
+            "success": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),
+            "images": images,
+            "predictionId": (pred.get("predictionId") or pred.get("id")) if isinstance(pred, dict) else None,
+            "status": str(pred.get("status") or "") if isinstance(pred, dict) else "",
+            "provider": _provider_from_prediction(pred),
+            "modelId": adapted["modelId"],
+            "instanceId": instance_id,
+            "useCase": "scene-refinement",
             "routingPolicy": routing_policy,
         }
 

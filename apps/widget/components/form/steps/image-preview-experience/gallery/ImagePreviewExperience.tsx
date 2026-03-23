@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFormTheme } from "../../../demo/FormThemeProvider";
 import { cn } from "@/lib/utils";
-import { buildAnsweredQAFromSteps } from "@/lib/ai-form/answered-qa";
+import { buildAnsweredQAFromSteps, shouldExcludeStepFromAnsweredQA } from "@/lib/ai-form/answered-qa";
 import { loadStepState } from "@/lib/ai-form/state/step-state";
 import { loadFormStateContext } from "@/lib/ai-form/state/form-state-context";
 import { loadServiceCatalog } from "@/lib/ai-form/state/service-catalog-storage";
@@ -270,7 +270,7 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
             ? (r as any).images.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src))
             : [];
           const rawPricing = Array.isArray((r as any).imagePricing) ? (r as any).imagePricing : [];
-          const imagePricing: (CachedPricing | undefined)[] = imgs.map((_, i) => {
+          const imagePricing: (CachedPricing | undefined)[] = imgs.map((_: string, i: number) => {
             const p = rawPricing[i];
             if (!p || typeof p !== "object" || !Number.isFinite(p.totalMin) || !Number.isFinite(p.totalMax))
               return undefined;
@@ -927,7 +927,17 @@ export function ImagePreviewExperience(props: {
         (useCase === "scene" || useCase === "scene-placement") &&
         (stepProductUpload || false) &&
         (runAnchorImage || stepSceneUpload || primaryReferenceImage);
-      const effectiveUseCase = canUseScenePlacementForRefinement ? "scene-placement" : useCase;
+      const canUseSceneRefinement =
+        hasExistingPreview &&
+        (useCase === "scene" || useCase === "scene-placement") &&
+        !stepProductUpload &&
+        !!(runAnchorImage || stepSceneUpload || primaryReferenceImage);
+      const effectiveUseCase =
+        canUseScenePlacementForRefinement
+          ? "scene-placement"
+          : canUseSceneRefinement
+            ? "scene-refinement"
+            : useCase;
 
       // Style drift: original reference = user's first upload; generationIndex = runs so far.
       const originalReferenceImage =
@@ -940,17 +950,17 @@ export function ImagePreviewExperience(props: {
           : "initial";
       // For refinements: use latest image as base. scene-placement + hasExistingPreview = drilldown edit.
       const sceneImageForRequest =
-        useCase === "scene" && runAnchorImage
+        (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
           ? runAnchorImage
-          : useCase === "scene" && stepSceneUpload
+          : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && stepSceneUpload
             ? stepSceneUpload
-            : useCase === "scene" && primaryReferenceImage
+            : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && primaryReferenceImage
               ? primaryReferenceImage
-              : (useCase === "scene-placement" && runAnchorImage)
+              : (effectiveUseCase === "scene-placement" && runAnchorImage)
                 ? runAnchorImage
-                : useCase === "scene-placement" && stepSceneUpload
+                : effectiveUseCase === "scene-placement" && stepSceneUpload
                   ? stepSceneUpload
-                  : useCase === "scene-placement" && primaryReferenceImage
+                  : effectiveUseCase === "scene-placement" && primaryReferenceImage
                     ? primaryReferenceImage
                     : undefined;
       const lastGeneratedSignature = latestRun?.contextSignature ?? cache?.generatedForContextSignature ?? null;
@@ -1118,12 +1128,16 @@ export function ImagePreviewExperience(props: {
 			                ? (stepProductUpload
 			                    ? `Seamlessly place the product into this scene for a ${serviceName} project.`
 			                    : `Edit this uploaded scene in place for a ${serviceName} project while preserving camera angle, layout, and perspective.`)
+                          : normalizedUseCase === "scene-refinement"
+                            ? `Refine this uploaded scene in place for a ${serviceName} project while preserving camera angle, layout, perspective, and all unchanged elements.`
 			                : `Redesign this space to show a completed ${serviceName} project. Keep the room layout, walls, windows, and camera angle. Transform the finishes, fixtures, and materials to match these preferences:`;
 			          } else {
 		            header = normalizedUseCase === "tryon"
 		              ? "Photorealistic try-on preview."
 		              : normalizedUseCase === "scene-placement"
 		                ? "Photorealistic scene placement preview."
+                    : normalizedUseCase === "scene-refinement"
+                      ? "Photorealistic scene refinement preview."
 		                : `A photorealistic image of a beautifully completed ${serviceName} project.`;
 		          }
 
@@ -1142,7 +1156,8 @@ export function ImagePreviewExperience(props: {
 
 	            // For scene edits, avoid injecting option-card style references into generation.
 	            // Keep the edit tightly anchored to the user's scene image.
-	            const scenePlacementInpaintMode = normalizedUseCase === "scene-placement" && !productImage;
+	            const scenePlacementInpaintMode =
+                normalizedUseCase === "scene-refinement" || (normalizedUseCase === "scene-placement" && !productImage);
 	            const refsForGeneration =
 	              normalizedUseCase === "scene" || scenePlacementInpaintMode
 	                ? [sceneImage || sceneImageForRequest].filter(isValidUrlLikeImage)
@@ -1185,12 +1200,12 @@ export function ImagePreviewExperience(props: {
 			          requestBody.userImage = userImage;
 			          requestBody.productImage = productImage;
 			          requestBody.referenceImages = Array.from(new Set([userImage, productImage, ...uniqueRefs])).slice(0, 6);
-			        } else if (normalizedUseCase === "scene-placement") {
+			        } else if (normalizedUseCase === "scene-placement" || normalizedUseCase === "scene-refinement") {
 			          if (!sceneImage) {
-			            throw new Error("Please upload a scene photo to generate a placement/inpaint preview.");
+			            throw new Error("Please upload a scene photo to generate a refinement preview.");
 			          }
 			          requestBody.sceneImage = sceneImage;
-			          if (productImage) requestBody.productImage = productImage;
+			          if (normalizedUseCase === "scene-placement" && productImage) requestBody.productImage = productImage;
 			          requestBody.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
 			        } else {
 		          if (sceneImage) requestBody.sceneImage = sceneImage;
@@ -1660,7 +1675,7 @@ export function ImagePreviewExperience(props: {
       const answeredQA = buildAnsweredQAFromSteps(stepsForQA, effectiveStepDataSoFar || {}, 60);
       const askedStepIds = stepsForQA
         .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
-        .filter((v: string) => Boolean(v && v.trim().length));
+        .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
 
       const formCtx = loadFormStateContext(sessionId);
       const serviceIdRaw =
@@ -1755,7 +1770,7 @@ export function ImagePreviewExperience(props: {
       }
 
       // Always store in cache for when user navigates back (even if they've nav'd away during fetch)
-      const heroIdx = activeRun?.images?.indexOf(heroAtFetchStart) ?? -1;
+      const heroIdx = heroAtFetchStart ? (activeRun?.images?.indexOf(heroAtFetchStart) ?? -1) : -1;
       if (heroIdx >= 0 && activeRun?.id && instanceId && sessionId) {
         setCache((prev) => {
           const base = prev ?? loadCache(instanceId, sessionId);
@@ -2170,7 +2185,7 @@ export function ImagePreviewExperience(props: {
         transparentBackground
         label={pillLabel}
         termsHref="/terms"
-        price={pillPrice}
+        price={pillPrice || (formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••")}
         loading={pillLoading}
         lockedPrice={formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••"}
         revealed={leadGateEnabled ? leadCaptured : true}
@@ -2955,7 +2970,7 @@ export function ImagePreviewExperience(props: {
                                     fontSize: centeredPricingInputTextSize,
                                     fontFamily: theme.fontFamily,
                                     ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
-                                  }}
+                                  } as React.CSSProperties}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") void handleCenteredPricingEmailSubmit();
                                   }}
@@ -2993,7 +3008,7 @@ export function ImagePreviewExperience(props: {
                                     fontSize: centeredPricingInputTextSize,
                                     fontFamily: theme.fontFamily,
                                     ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
-                                  }}
+                                  } as React.CSSProperties}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") void handleCenteredPricingNameSubmit();
                                   }}
@@ -3037,7 +3052,7 @@ export function ImagePreviewExperience(props: {
                                     fontSize: centeredPricingInputTextSize,
                                     fontFamily: theme.fontFamily,
                                     ["--tw-ring-color" as const]: "var(--sif-lead-gen-ring)",
-                                  }}
+                                  } as React.CSSProperties}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") void handleCenteredPricingPhoneSubmit();
                                   }}

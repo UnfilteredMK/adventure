@@ -108,7 +108,7 @@ export function PreviewSection({
             config={config}
             stepDataSoFar={stepDataSoFar}
             answeredQuestionCount={answeredQuestionCount}
-            autoRegenerateEveryNAnsweredQuestions={3}
+            autoRegenerateEveryNAnsweredQuestions={2}
             onPreviewVisibleChange={setPreviewVisible}
             onHasImageChange={setPreviewHasImage}
             variant="hero"

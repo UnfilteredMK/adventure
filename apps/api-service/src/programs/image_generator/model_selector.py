@@ -168,6 +168,17 @@ def select_routing_policy(
             go_fast=False,
         )
 
+    if uc == "scene-refinement":
+        return RoutingPolicy(
+            provider="replicate",
+            priorities=("highest_quality", "highest_reliability", "lowest_latency"),
+            traits=("high_prompt_adherence", "inpainting", "edit_preservation", "composition_preservation"),
+            notes="Refinement is a preserve-and-edit path: keep the anchor scene intact and apply focused local changes.",
+            prompt_strength=0.86,
+            image_prompt_strength=0.92,
+            go_fast=False,
+        )
+
     # Default scene
     return RoutingPolicy(
         provider="replicate",
@@ -222,6 +233,9 @@ def select_model(
     if uc == "scene-placement":
         # Scene placement is an inpainting/edit-heavy path.
         # xai/grok-imagine-image supports native `image` editing and is preferred here.
+        return GROK_IMAGINE_IMAGE
+
+    if uc == "scene-refinement":
         return GROK_IMAGINE_IMAGE
 
     if uc == "drilldown":

@@ -499,6 +499,14 @@ export async function GET(
         status: 200,
         durationMs: Date.now() - startedAtMs,
         hasServiceOptions: Array.isArray(serviceOptions) && serviceOptions.length > 0,
+        serviceOptions: (serviceOptions || []).slice(0, 20).map((opt: any) => ({
+          serviceId: String(opt?.value || ""),
+          label: typeof opt?.label === "string" ? opt.label : null,
+          componentCount: Array.isArray(opt?.subcategoryComponents) ? opt.subcategoryComponents.length : 0,
+          componentKeys: Array.isArray(opt?.subcategoryComponents)
+            ? opt.subcategoryComponents.map((component: any) => String(component?.key || "")).filter(Boolean)
+            : [],
+        })),
       });
     }
 

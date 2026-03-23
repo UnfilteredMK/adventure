@@ -38,7 +38,7 @@ export type ImagePromptResult = {
 export async function buildImagePromptViaDSPy(params: {
   contextState: ContextState;
   service?: string | null;
-  useCase: "tryon" | "scene-placement" | "scene";
+  useCase: "tryon" | "scene-placement" | "scene-refinement" | "scene";
   industry?: string | null;
   businessContext?: string | null;
   previousPrompt?: string | null;
@@ -138,7 +138,7 @@ export async function buildImagePromptViaDSPy(params: {
 function buildImagePromptFallback(params: {
   contextState: ContextState;
   service?: string | null;
-  useCase: "tryon" | "scene-placement" | "scene";
+  useCase: "tryon" | "scene-placement" | "scene-refinement" | "scene";
   industry?: string | null;
   businessContext?: string | null;
   steps?: any[];

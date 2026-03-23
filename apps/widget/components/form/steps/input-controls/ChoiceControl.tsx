@@ -220,7 +220,7 @@ export function Choice({
       <div
         className={cn(
           isCompact
-            ? "w-full max-w-none overflow-x-auto overflow-y-visible py-1 text-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            ? "w-full max-w-none overflow-x-auto overflow-y-hidden py-0.5 text-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             : "space-y-2.5"
         )}
       >

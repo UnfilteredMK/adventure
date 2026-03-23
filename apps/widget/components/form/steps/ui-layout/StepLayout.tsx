@@ -84,15 +84,15 @@ export function StepLayout({
       : null;
   const compactQuestionFontSize = isVisualAnswerStep ? "clamp(1rem, 2vh, 1.28rem)" : "clamp(1rem, 2.1vh, 1.35rem)";
   const compactSubtextFontSize = isVisualAnswerStep ? "clamp(0.74rem, 1.2vh, 0.9rem)" : "clamp(0.82rem, 1.45vh, 0.98rem)";
-  const compactQuestionRowClass = useCompactPane ? "min-h-0 h-full min-w-0 overflow-visible px-2 py-1" : "shrink-0 min-w-0";
+  const compactQuestionRowClass = useCompactPane ? "min-h-0 h-full min-w-0 overflow-visible px-2 pt-1 pb-1" : "shrink-0 min-w-0";
   const compactHeaderControlRowClass =
     "row-start-1 min-h-0 h-full min-w-0 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1";
   const compactAnswerViewportClass = useCompactPane
     ? isVisualAnswerStep
-      ? "h-full min-h-0 px-1 py-0"
+      ? "h-full min-h-0 px-1 pt-0.5 pb-0"
       : isChoiceStep
-        ? "h-full min-h-0 px-0 py-0"
-        : "h-full min-h-0 px-2 py-1"
+        ? "h-full min-h-0 px-0 pt-0.5 pb-0"
+        : "h-full min-h-0 px-2 pt-0.5 pb-0.5"
     : null;
   const question = getQuestion(step);
   const subtext = getSubtext(step);
@@ -110,12 +110,14 @@ export function StepLayout({
     : headerInlineControl
       ? "flex items-start justify-between gap-0"
       : undefined;
-  const compactInnerStackClass = "gap-0";
-  const standardInnerStackClass = "gap-0";
+  const compactInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
+  const standardInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const contentViewportClassName = cn(
     "flex-1 min-h-0 w-full min-w-0",
-    useCompactPane && (isVisualAnswerStep || isChoiceStep)
+    useCompactPane && isVisualAnswerStep
       ? "overflow-hidden"
+      : useCompactPane && isChoiceStep
+        ? "overflow-y-auto overflow-x-hidden"
       : useCompactPane && isSliderStep
         ? "overflow-visible"
         : "overflow-y-auto overflow-x-hidden",
@@ -134,7 +136,7 @@ export function StepLayout({
         : isSliderStep
           ? "mx-auto w-full max-w-none justify-start overflow-visible"
         : isChoiceStep
-          ? "w-full max-w-none justify-start overflow-hidden"
+          ? "w-full max-w-none justify-start overflow-visible"
           : "mx-auto w-full max-w-none justify-center overflow-hidden"
       : "justify-start overflow-hidden"
   );
