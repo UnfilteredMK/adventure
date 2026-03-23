@@ -13,6 +13,9 @@ from programs.refinement_category_planner.taxonomy import (
     normalize_refinement_plan_items,
 )
 
+_DEFAULT_TARGET_CATEGORIES = 10
+_MAX_TARGET_CATEGORIES = 10
+
 
 def _compact_json(obj: object) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
@@ -84,9 +87,36 @@ def plan_refinement_categories(payload: Dict[str, Any]) -> Dict[str, Any]:
     request_id = f"refinement_category_plan_{int(time.time() * 1000)}"
     ctx = _resolve_context(payload)
     existing_components = _resolve_existing_components(payload)
-    target_categories = max(1, min(5, _coerce_int(payload.get("target_categories") or payload.get("targetCategories"), 5)))
-    min_categories = max(0, min(target_categories, _coerce_int(payload.get("min_categories") or payload.get("minCategories"), 5)))
-    max_categories = max(target_categories, min(8, _coerce_int(payload.get("max_categories") or payload.get("maxCategories"), 5)))
+    target_categories = max(
+        1,
+        min(
+            _MAX_TARGET_CATEGORIES,
+            _coerce_int(
+                payload.get("target_categories") or payload.get("targetCategories"),
+                _DEFAULT_TARGET_CATEGORIES,
+            ),
+        ),
+    )
+    min_categories = max(
+        0,
+        min(
+            target_categories,
+            _coerce_int(
+                payload.get("min_categories") or payload.get("minCategories"),
+                target_categories,
+            ),
+        ),
+    )
+    max_categories = max(
+        target_categories,
+        min(
+            _MAX_TARGET_CATEGORIES,
+            _coerce_int(
+                payload.get("max_categories") or payload.get("maxCategories"),
+                target_categories,
+            ),
+        ),
+    )
 
     if not ctx["category_name"] and not ctx["subcategory_name"] and not ctx["service_summary"]:
         return {
@@ -119,12 +149,22 @@ def plan_refinement_categories(payload: Dict[str, Any]) -> Dict[str, Any]:
         {
             "category_id": ctx["category_id"] or None,
             "category_name": ctx["category_name"] or None,
+            "industry": ctx["category_name"] or None,
             "subcategory_id": ctx["subcategory_id"] or None,
             "subcategory_name": ctx["subcategory_name"] or None,
+            "service": ctx["subcategory_name"] or None,
             "company_summary": ctx["company_summary"] or None,
             "service_summary": ctx["service_summary"] or None,
+            "services_summary": ctx["service_summary"] or None,
             "existing_components": existing_components,
+            "max_categories": max_categories,
+            "min_categories": min_categories,
+            "planning_goal": (
+                "Choose the most important design-related refinement components for this exact vertical. "
+                "These become stored subcategory_components key/value pairs."
+            ),
             "supported_components": get_supported_refinement_components_for_planner(),
+            "target_categories": target_categories,
         }
     )
 

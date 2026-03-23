@@ -256,6 +256,12 @@ export type MultipleChoiceMini = MultipleChoiceUI;
 
 export type RatingMini = RatingUI;
 
+export type RefinementComponent = {
+  key: string;
+  label: string;
+  priority: number;
+};
+
 export type FormState = {
   formId: string;
   batchIndex: number;
@@ -295,6 +301,10 @@ export type FormState = {
   serviceSummary?: string | null;
   /** Optional business description (e.g. "Demo Bathroom remodeler"). */
   businessContext?: string | null;
+  /** Selected step-1 service id for the current session. */
+  selectedServiceId?: string | null;
+  /** Supported refinement components for the selected service. */
+  selectedServiceRefinementComponents?: RefinementComponent[] | null;
   /**
    * Optional user identity hints captured mid-flow (used for personalization).
    * Stored in session-scoped form state (resets when sessionId changes).

@@ -12,8 +12,7 @@ import time
 from typing import Any, Dict, List
 
 from programs.form_pipeline.context_builder import build_context
-from programs.question_planner.plan_parsing import derive_step_id_from_key, extract_plan_items, normalize_plan_key
-from programs.question_planner.renderer.plan_to_steps import render_plan_items_to_mini_steps
+from programs.question_planner.plan_parsing import derive_step_id_from_key, normalize_plan_key
 from programs.refinements.program import RefinementsPlannerProgram
 
 
@@ -67,6 +66,109 @@ def _make_refinements_lm_cfg() -> Dict[str, Any] | None:
     }
 
 
+def _build_refinement_planner_context(ctx: Dict[str, Any], asked_ids: set[str]) -> Dict[str, Any]:
+    refinement_catalog = ctx.get("refinement_catalog") if isinstance(ctx.get("refinement_catalog"), list) else []
+    return {
+        "services_summary": str(ctx.get("services_summary") or ctx.get("grounding_summary") or "").strip(),
+        "answered_qa": ctx.get("answered_qa") if isinstance(ctx.get("answered_qa"), list) else [],
+        "asked_step_ids": sorted(list(asked_ids)),
+        "industry": str(ctx.get("industry") or "").strip(),
+        "service": str(ctx.get("service") or "").strip(),
+        "refinement_catalog": [
+            {
+                "key": str(item.get("key") or "").strip(),
+                "label": str(item.get("label") or "").strip(),
+                "priority": int(item.get("priority") or 0),
+                "option_labels": [
+                    str(opt.get("label") or "").strip()
+                    for opt in (item.get("options") or [])
+                    if isinstance(opt, dict) and str(opt.get("label") or "").strip()
+                ],
+            }
+            for item in refinement_catalog
+            if isinstance(item, dict) and str(item.get("key") or "").strip()
+        ],
+    }
+
+
+def _fallback_question_for_label(label: str) -> str:
+    cleaned = str(label or "").strip()
+    if not cleaned:
+        return "Which option should we try next?"
+    return f"Which {cleaned.lower()} option should we try next?"
+
+
+def _render_refinement_catalog_steps(
+    plan: List[Dict[str, Any]],
+    *,
+    catalog: List[Dict[str, Any]],
+    asked_ids: set[str],
+    max_steps: int,
+) -> List[Dict[str, Any]]:
+    catalog_by_key = {
+        normalize_plan_key(item.get("key")): item
+        for item in catalog
+        if isinstance(item, dict) and normalize_plan_key(item.get("key"))
+    }
+    emitted: List[Dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    for item in plan or []:
+        if len(emitted) >= max_steps:
+            break
+        if not isinstance(item, dict):
+            continue
+        component_key = normalize_plan_key(item.get("component_key") or item.get("key"))
+        if not component_key or component_key in seen_keys or component_key not in catalog_by_key:
+            continue
+        step_id = derive_step_id_from_key(component_key)
+        if step_id in asked_ids:
+            continue
+        catalog_item = catalog_by_key[component_key]
+        options = catalog_item.get("options") if isinstance(catalog_item.get("options"), list) else []
+        if len(options) < 2:
+            continue
+        question = str(item.get("question") or "").strip() or _fallback_question_for_label(str(catalog_item.get("label") or ""))
+        emitted.append(
+            {
+                "id": step_id,
+                "type": "image_choice_grid",
+                "question": question,
+                "options": options,
+            }
+        )
+        seen_keys.add(component_key)
+
+    if emitted:
+        return emitted
+
+    fallback_catalog = sorted(
+        [item for item in catalog if isinstance(item, dict)],
+        key=lambda item: (int(item.get("priority") or 999), str(item.get("label") or "")),
+    )
+    for catalog_item in fallback_catalog:
+        if len(emitted) >= max_steps:
+            break
+        component_key = normalize_plan_key(catalog_item.get("key"))
+        if not component_key:
+            continue
+        step_id = derive_step_id_from_key(component_key)
+        if step_id in asked_ids:
+            continue
+        options = catalog_item.get("options") if isinstance(catalog_item.get("options"), list) else []
+        if len(options) < 2:
+            continue
+        emitted.append(
+            {
+                "id": step_id,
+                "type": "image_choice_grid",
+                "question": _fallback_question_for_label(str(catalog_item.get("label") or "")),
+                "options": options,
+            }
+        )
+    return emitted
+
+
 def refinements_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate refinement miniSteps for post-concept exploration.
@@ -86,18 +188,20 @@ def refinements_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     asked_ids = set(str(x).strip() for x in (ctx.get("asked_step_ids") or []) if str(x).strip())
+    refinement_catalog = ctx.get("refinement_catalog") if isinstance(ctx.get("refinement_catalog"), list) else []
+    if not refinement_catalog:
+        return {
+            "ok": True,
+            "requestId": request_id,
+            "schemaVersion": "1",
+            "miniSteps": [],
+        }
     batch_constraints = ctx.get("batch_constraints") if isinstance(ctx.get("batch_constraints"), dict) else {}
     max_steps_raw = batch_constraints.get("maxStepsTotal", 8)
-    max_steps = min(10, max(5, _coerce_int(max_steps_raw, 8)))
-    allowed_mini_types = ["multiple_choice"]
+    max_steps = min(len(refinement_catalog), max(1, min(10, _coerce_int(max_steps_raw, len(refinement_catalog) or 1))))
+    allowed_mini_types = ["image_choice_grid"]
 
-    planner_context_json = _compact_json({
-        "services_summary": str(ctx.get("services_summary") or ctx.get("grounding_summary") or "").strip(),
-        "answered_qa": ctx.get("answered_qa") if isinstance(ctx.get("answered_qa"), list) else [],
-        "asked_step_ids": sorted(list(asked_ids)),
-        "industry": str(ctx.get("industry") or "").strip(),
-        "service": str(ctx.get("service") or "").strip(),
-    })
+    planner_context_json = _compact_json(_build_refinement_planner_context(ctx, asked_ids))
 
     import dspy
 
@@ -122,11 +226,17 @@ def refinements_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     raw = str(getattr(pred, "refinement_plan_json", "") or "").strip()
     if not raw:
+        emitted = _render_refinement_catalog_steps(
+            [],
+            catalog=refinement_catalog,
+            asked_ids=asked_ids,
+            max_steps=max_steps,
+        )
         return {
             "ok": True,
             "requestId": request_id,
             "schemaVersion": "1",
-            "miniSteps": [],
+            "miniSteps": emitted,
         }
 
     try:
@@ -136,38 +246,35 @@ def refinements_jsonl(payload: Dict[str, Any]) -> Dict[str, Any]:
         plan = []
 
     if not isinstance(plan, list) or not plan:
+        emitted = _render_refinement_catalog_steps(
+            [],
+            catalog=refinement_catalog,
+            asked_ids=asked_ids,
+            max_steps=max_steps,
+        )
         return {
             "ok": True,
             "requestId": request_id,
             "schemaVersion": "1",
-            "miniSteps": [],
+            "miniSteps": emitted,
         }
 
     plan_items: List[Dict[str, Any]] = []
     for item in plan:
         if not isinstance(item, dict):
             continue
-        key = normalize_plan_key(item.get("key"))
-        if not key:
+        component_key = normalize_plan_key(item.get("component_key") or item.get("key"))
+        if not component_key:
             continue
-        sid = derive_step_id_from_key(key)
-        if sid in asked_ids:
-            continue
-        plan_items.append(dict(item, key=key))
+        plan_items.append(dict(item, component_key=component_key))
         if len(plan_items) >= max_steps:
             break
 
-    choice_min = ctx.get("choice_option_min", 4)
-    choice_max = ctx.get("choice_option_max", 10)
-    choice_target = ctx.get("choice_option_target", 6)
-    budget_hint = ctx.get("budget_bounds_hint")
-
-    emitted = render_plan_items_to_mini_steps(
+    emitted = _render_refinement_catalog_steps(
         plan_items,
-        choice_option_min=choice_min,
-        choice_option_max=choice_max,
-        choice_option_target=choice_target,
-        budget_bounds_hint=budget_hint,
+        catalog=refinement_catalog,
+        asked_ids=asked_ids,
+        max_steps=max_steps,
     )
 
     latency_ms = int((time.time() - start_time) * 1000)

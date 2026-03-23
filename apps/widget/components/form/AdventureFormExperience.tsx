@@ -427,6 +427,11 @@ export function AdventureFormExperience({
                   industryId: typeof o?.industryId === "string" ? o.industryId : null,
                   industryName: typeof o?.industryName === "string" ? o.industryName : null,
                   serviceSummary: typeof o?.serviceSummary === "string" ? o.serviceSummary : typeof o?.service_summary === "string" ? o.service_summary : null,
+                  subcategoryComponents: Array.isArray(o?.subcategoryComponents)
+                    ? o.subcategoryComponents
+                    : Array.isArray(o?.subcategory_components)
+                      ? o.subcategory_components
+                      : undefined,
                   styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
                   styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
                 }))

@@ -4,9 +4,9 @@ import refinementSupportedComponents from "./refinement-supported-components.jso
 
 export const REFINEMENT_OPTION_GENERATED_FOR = "refinement_option";
 export const REFINEMENT_OPTION_MODEL_ID = "black-forest-labs/flux-schnell";
-export const REFINEMENT_LIBRARY_TARGET_CATEGORIES = 5;
-export const REFINEMENT_LIBRARY_MIN_CATEGORIES = 5;
-export const REFINEMENT_LIBRARY_MAX_CATEGORIES = 5;
+export const REFINEMENT_LIBRARY_TARGET_CATEGORIES = 10;
+export const REFINEMENT_LIBRARY_MIN_CATEGORIES = 10;
+export const REFINEMENT_LIBRARY_MAX_CATEGORIES = 10;
 export const REFINEMENT_LIBRARY_MIN_IMAGES_PER_CATEGORY = 6;
 
 export type RefinementPlannerCategory = {

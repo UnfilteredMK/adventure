@@ -166,6 +166,7 @@ export function StepEngine({
   const completedBatchIndexesRef = useRef<Set<number>>(new Set());
   const [maxVisitedIndex, setMaxVisitedIndex] = useState(0);
   const [formState, setFormState] = useState<FormState | null>(null);
+  const leadCapturedForUI = Boolean(formState?.leadCaptured);
   // Backend-owned call cap for this session. Not persisted; not hard-coded.
   const backendMaxCallsRef = useRef<number | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
@@ -512,13 +513,15 @@ export function StepEngine({
     [updateStepData]
   );
 
-  // Async refinements: when first concept is shown, prepend a deterministic upload step
-  // then append refinement questions after designer step.
+  // Async refinements: only fetch after the first concept is shown and lead capture
+  // has been explicitly completed for this session. Then prepend a deterministic
+  // upload step and append refinement questions after designer step.
   const refinementsFetchedRef = useRef(false);
   const refinementAdvanceFromStepIdRef = useRef<string | null>(null);
   const [awaitingRefinementAdvance, setAwaitingRefinementAdvance] = useState(false);
   useEffect(() => {
     if (!previewHasImage || !flowPlan?.sessionId || !instanceId) return;
+    if (!leadCapturedForUI) return;
     if (refinementsFetchedRef.current) return;
     refinementsFetchedRef.current = true;
 
@@ -589,7 +592,7 @@ export function StepEngine({
           console.warn("[StepEngine] Refinements fetch failed", e);
         }
       });
-  }, [previewHasImage, flowPlan?.sessionId, instanceId, addSteps, currentStep?.id, state?.currentStepIndex, state?.stepData, state?.steps]);
+  }, [previewHasImage, flowPlan?.sessionId, instanceId, leadCapturedForUI, addSteps, currentStep?.id, state?.currentStepIndex, state?.stepData, state?.steps]);
 
   useEffect(() => {
     if (!awaitingRefinementAdvance) return;
@@ -799,8 +802,6 @@ export function StepEngine({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep?.id]);
 
-  // Lead-gate should unlock only after an explicit capture in this session.
-  const leadCapturedForUI = Boolean(formState?.leadCaptured);
   const belowPreviewControlStepIds = useMemo(() => {
     const uploadIds = desiredDeterministicUploadSteps
       .map((step: any) => String(step?.id || ""))

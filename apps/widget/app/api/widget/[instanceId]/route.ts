@@ -5,6 +5,33 @@ import { logger } from '@/lib/server/logger';
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
+function coerceSubcategoryComponents(
+  raw: unknown,
+): Array<{ key: string; label: string; priority: number }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const items: Array<{ key: string; label: string; priority: number }> = [];
+  for (const [index, entry] of raw.entries()) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = typeof (entry as any).key === "string" ? (entry as any).key.trim() : "";
+    if (!key) continue;
+    const dedupeKey = key.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    const label =
+      typeof (entry as any).label === "string" && (entry as any).label.trim()
+        ? (entry as any).label.trim()
+        : key;
+    const priorityRaw = Number((entry as any).priority);
+    items.push({
+      key,
+      label,
+      priority: Number.isFinite(priorityRaw) ? priorityRaw : index + 1,
+    });
+  }
+  return items;
+}
+
 function buildCatalogStyleOptions(rows: any[]): {
   options: Array<{
     label: string;
@@ -212,6 +239,11 @@ export async function GET(
       industryName?: string | null;
       serviceName?: string | null;
       serviceSummary?: string | null;
+      subcategoryComponents?: Array<{
+        key: string;
+        label: string;
+        priority: number;
+      }>;
       styleQuestion?: string | null;
       styleOptions?: Array<{
         label: string;
@@ -240,7 +272,7 @@ export async function GET(
         if (ids.length > 0) {
           const { data: subcats, error: subcatsError } = await supabase
             .from("categories_subcategories")
-            .select("id, subcategory, category_id, service_summary, categories(name)")
+            .select("id, subcategory, category_id, service_summary, subcategory_components, categories(name)")
             .in("id", ids)
             .limit(60);
           if (subcatsError) {
@@ -252,23 +284,36 @@ export async function GET(
           }
           const metaById = new Map<
             string,
-            { serviceName: string; industryId: string | null; industryName: string | null; serviceSummary: string | null }
+            {
+              serviceName: string;
+              industryId: string | null;
+              industryName: string | null;
+              serviceSummary: string | null;
+              subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
+            }
           >(
             (Array.isArray(subcats) ? subcats : []).map((s: any) => {
               const serviceName = String(s?.subcategory || "Service");
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary = typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
+              const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { serviceName, industryId, industryName, serviceSummary }];
+              return [String(s.id), { serviceName, industryId, industryName, serviceSummary, subcategoryComponents }];
             })
           );
           serviceOptions = ids
             .map((id) => {
-              const meta = metaById.get(id) || { serviceName: "Service", industryId: null, industryName: null, serviceSummary: null };
+              const meta = metaById.get(id) || {
+                serviceName: "Service",
+                industryId: null,
+                industryName: null,
+                serviceSummary: null,
+                subcategoryComponents: [],
+              };
               const rawLabel = meta.serviceName || "Service";
               const cleanedLabel =
                 rawLabel.replace(/\s*\(service\)\s*$/i, "").trim() || rawLabel;
@@ -279,6 +324,7 @@ export async function GET(
                 industryId: meta.industryId,
                 industryName: meta.industryName,
                 serviceSummary: meta.serviceSummary,
+                ...(meta.subcategoryComponents.length > 0 ? { subcategoryComponents: meta.subcategoryComponents } : {}),
               };
             })
             .slice(0, 40);
@@ -308,7 +354,7 @@ export async function GET(
         try {
           const { data: subcats, error: subcatsError } = await supabase
             .from("categories_subcategories")
-            .select("id, subcategory, category_id, service_summary, categories(name)")
+            .select("id, subcategory, category_id, service_summary, subcategory_components, categories(name)")
             .in("id", candidateIds)
             .limit(60);
           if (subcatsError) {
@@ -321,7 +367,13 @@ export async function GET(
 
           const metaById = new Map<
             string,
-            { label: string; industryId: string | null; industryName: string | null; serviceSummary: string | null }
+            {
+              label: string;
+              industryId: string | null;
+              industryName: string | null;
+              serviceSummary: string | null;
+              subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
+            }
           >(
             (Array.isArray(subcats) ? subcats : []).map((s: any) => {
               const rawLabel = String(s?.subcategory || "Service");
@@ -329,12 +381,13 @@ export async function GET(
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary =
                 typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
+              const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary }];
+              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary, subcategoryComponents }];
             }),
           );
 
@@ -348,6 +401,7 @@ export async function GET(
               industryId: meta?.industryId ?? null,
               industryName: meta?.industryName ?? null,
               serviceSummary: meta?.serviceSummary ?? null,
+              ...(meta?.subcategoryComponents?.length ? { subcategoryComponents: meta.subcategoryComponents } : {}),
             };
           });
         } catch (e) {

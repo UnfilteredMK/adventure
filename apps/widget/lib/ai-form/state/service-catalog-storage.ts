@@ -1,11 +1,14 @@
 "use client";
 
+import type { RefinementComponent } from "@/types/ai-form";
+
 export type ServiceCatalogItem = {
   serviceId: string;
   serviceName: string | null;
   industryId: string | null;
   industryName: string | null;
   serviceSummary?: string | null;
+  subcategoryComponents?: RefinementComponent[];
   styleQuestion?: string | null;
   styleOptions?: Array<{
     label: string;
@@ -20,6 +23,31 @@ export type ServiceCatalogSnapshot = {
   v: 1;
   byServiceId: Record<string, ServiceCatalogItem>;
 };
+
+function coerceSubcategoryComponents(raw: unknown): RefinementComponent[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const items: RefinementComponent[] = [];
+  for (const [index, entry] of raw.entries()) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = typeof (entry as any).key === "string" ? (entry as any).key.trim() : "";
+    if (!key) continue;
+    const dedupeKey = key.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    const label =
+      typeof (entry as any).label === "string" && (entry as any).label.trim()
+        ? (entry as any).label.trim()
+        : key;
+    const priorityRaw = Number((entry as any).priority);
+    items.push({
+      key,
+      label,
+      priority: Number.isFinite(priorityRaw) ? priorityRaw : index + 1,
+    });
+  }
+  return items;
+}
 
 function storageKey(sessionId: string) {
   return `serviceCatalog:${sessionId}`;
@@ -51,12 +79,14 @@ export function saveServiceCatalog(sessionId: string, items: ServiceCatalogItem[
     for (const item of items) {
       const serviceId = typeof item?.serviceId === "string" ? item.serviceId : "";
       if (!serviceId) continue;
+      const subcategoryComponents = coerceSubcategoryComponents((item as any)?.subcategoryComponents);
       byServiceId[serviceId] = {
         serviceId,
         serviceName: typeof item?.serviceName === "string" ? item.serviceName : null,
         industryId: typeof item?.industryId === "string" ? item.industryId : null,
         industryName: typeof item?.industryName === "string" ? item.industryName : null,
         serviceSummary: typeof (item as any)?.serviceSummary === "string" ? String((item as any).serviceSummary).trim() || null : null,
+        ...(subcategoryComponents.length > 0 ? { subcategoryComponents } : {}),
         styleQuestion: typeof (item as any)?.styleQuestion === "string" ? String((item as any).styleQuestion).trim() || null : null,
         styleOptions: Array.isArray((item as any)?.styleOptions)
           ? (item as any).styleOptions

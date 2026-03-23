@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import random
 import hashlib
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from programs.form_pipeline.constraints import (
     build_batch_constraints,
@@ -151,6 +151,93 @@ def extract_company_summary(payload: Dict[str, Any], *, max_len: int = 1200) -> 
     return ""
 
 
+def _coerce_priority(raw: Any, fallback: int) -> int:
+    try:
+        value = int(raw)
+        return max(1, value)
+    except Exception:
+        return fallback
+
+
+def _extract_refinement_catalog_raw(payload: Dict[str, Any]) -> List[dict]:
+    raw = payload.get("refinementCatalog") or payload.get("refinement_catalog")
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+
+    for container_key in ("instanceContext", "instance_context"):
+        ctx = payload.get(container_key)
+        if not isinstance(ctx, dict):
+            continue
+        service = ctx.get("service")
+        if isinstance(service, dict):
+            raw = service.get("refinementCatalog") or service.get("refinement_catalog")
+            if isinstance(raw, list):
+                return [item for item in raw if isinstance(item, dict)]
+    return []
+
+
+def extract_refinement_catalog(
+    payload: Dict[str, Any],
+    *,
+    max_items: int = 10,
+    max_options_per_item: int = 8,
+) -> List[dict]:
+    raw_items = _extract_refinement_catalog_raw(payload)
+    if not raw_items:
+        return []
+
+    seen_keys: set[str] = set()
+    normalized: List[dict] = []
+    for index, raw_item in enumerate(raw_items, start=1):
+        key = str(raw_item.get("key") or "").strip()
+        label = str(raw_item.get("label") or key).strip()
+        if not key or key in seen_keys:
+            continue
+
+        raw_options = raw_item.get("options")
+        options: List[dict] = []
+        seen_option_values: set[str] = set()
+        if isinstance(raw_options, list):
+            for raw_opt in raw_options:
+                if not isinstance(raw_opt, dict):
+                    continue
+                opt_label = str(raw_opt.get("label") or "").strip()
+                opt_value = str(raw_opt.get("value") or opt_label).strip()
+                image_url = str(raw_opt.get("imageUrl") or raw_opt.get("image_url") or "").strip()
+                if not opt_label or not opt_value or not image_url:
+                    continue
+                dedupe_key = opt_value.lower()
+                if dedupe_key in seen_option_values:
+                    continue
+                seen_option_values.add(dedupe_key)
+                options.append(
+                    {
+                        "label": opt_label[:120],
+                        "value": opt_value[:120],
+                        "imageUrl": image_url[:1000],
+                    }
+                )
+                if len(options) >= max_options_per_item:
+                    break
+
+        if len(options) < 2:
+            continue
+
+        seen_keys.add(key)
+        normalized.append(
+            {
+                "key": key[:120],
+                "label": label[:120] if label else key[:120],
+                "priority": _coerce_priority(raw_item.get("priority"), index),
+                "options": options,
+            }
+        )
+        if len(normalized) >= max_items:
+            break
+
+    return sorted(normalized, key=lambda item: (int(item.get("priority") or 999), str(item.get("label") or "")))
+
+
 def infer_goal_intent(*, services_summary: str = "", explicit_goal_intent: str = "") -> str:
     """
     Decide between "pricing" vs "visual" intent.
@@ -193,6 +280,7 @@ def build_context(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Back-compat internal naming: most prompts still refer to `services_summary`.
     services_summary = service_summary[:600] if service_summary else ""
+    refinement_catalog = extract_refinement_catalog(payload)
 
     industry, service = derive_industry_and_service_strings(payload)
     goal_intent = infer_goal_intent(
@@ -277,6 +365,7 @@ def build_context(payload: Dict[str, Any]) -> Dict[str, Any]:
         "services_summary": services_summary or "",
         "service_summary": service_summary or "",
         "company_summary": company_summary or "",
+        "refinement_catalog": refinement_catalog,
         "budget_bounds_hint": budget_bounds_hint,
         # Back-compat internal alias
         "grounding_summary": services_summary or "",
@@ -316,6 +405,7 @@ __all__ = [
     # exported for reuse/testing (formerly in service_context.py)
     "derive_industry_and_service_strings",
     "extract_company_summary",
+    "extract_refinement_catalog",
     "extract_service_summary",
     "infer_goal_intent",
 ]

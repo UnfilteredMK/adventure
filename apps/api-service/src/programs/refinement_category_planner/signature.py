@@ -7,7 +7,10 @@ from programs.refinement_category_planner.prompt_library import build_refinement
 
 class RefinementCategoryPlannerSignature(dspy.Signature):
     planner_context_json: str = dspy.InputField(
-        desc="JSON string ONLY. Category/subcategory context plus optional company/service summary."
+        desc=(
+            "JSON string ONLY. Service context + supported reusable components + existing taxonomy "
+            "+ selection constraints for planning stored subcategory_components."
+        )
     )
     target_categories: int = dspy.InputField(desc="Preferred number of categories to emit.")
     min_categories: int = dspy.InputField(desc="Minimum number of categories to emit.")
@@ -15,7 +18,8 @@ class RefinementCategoryPlannerSignature(dspy.Signature):
     refinement_category_plan_json: str = dspy.OutputField(
         desc=(
             "JSON string ONLY. Single object with top-level `vertical` and `categories` array. "
-            "Each category item must include `raw_name`, `priority`, and `reason`."
+            "Each category item must include `raw_name`, `priority`, and `reason`. "
+            "`raw_name` should be a short human design-component label that maps cleanly to a supported component family."
         )
     )
 
