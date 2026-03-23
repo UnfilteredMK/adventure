@@ -14,7 +14,7 @@ from api.request_adapter import to_next_steps_payload
 from api.utils import dedup_urls, normalize_output_urls
 from programs.common.visual_text_safety import sanitize_visual_context_text
 from programs.image_generator.model_selector import select_model, select_routing_policy
-from programs.image_generator.orchestrator import build_image_prompt, generate_image
+from programs.image_generator.orchestrator import generate_image
 
 
 def register(router: APIRouter, compat_router: APIRouter) -> None:
@@ -195,61 +195,14 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
 
     @router.post("/image/prompt")
     def image_prompt(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        """
-        Prompt-only endpoint: returns the deterministic ImagePromptSpec without generating images.
-        """
-        instance_id = ""
-        if isinstance(payload.get("instanceId"), str):
-            instance_id = str(payload.get("instanceId") or "").strip()
-        if not instance_id and isinstance(payload.get("session"), dict):
-            instance_id = str((payload.get("session") or {}).get("instanceId") or "").strip()
-        if not instance_id:
-            return {"ok": False, "error": "instanceId is required"}
-
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        for k in (
-            "useCase",
-            "modelId",
-            "negativePrompt",
-            "referenceImages",
-            "sceneImage",
-            "productImage",
-            "generationIntent",
-            "originalReferenceImage",
-            "generationIndex",
-        ):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-
-        # Cache key: session + step data hash + use case + model/version-ish.
-        try:
-            from api.utils import hash_step_data  # noqa: E402
-            from api.payload_extractors import extract_session_id  # noqa: E402
-
-            session_id = str(extract_session_id(adapted) or "").strip()
-            step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-            state_hash = hash_step_data(step_data)
-            refs = adapted.get("referenceImages") if isinstance(adapted.get("referenceImages"), list) else []
-            # Include a short reference signature so prompt cache invalidates when refs change.
-            refs_sig = hash_step_data({"refs": [str(x or "")[:120] for x in refs[:6]]}) if refs else "norefs"
-            use_case = str(adapted.get("useCase") or "")
-            model_id = str(adapted.get("modelId") or os.getenv("REPLICATE_MODEL_ID") or "").strip()
-            mode = str(os.getenv("IMAGE_PROMPT_MODE") or "deterministic").strip().lower()
-            cache_key = f"prompt:{instance_id}:{session_id}:{use_case}:{mode}:{model_id}:{state_hash}:{refs_sig}"
-        except Exception:
-            cache_key = ""
-
-        disable_cache = bool(payload.get("noCache") is True or str(payload.get("noCache") or "").lower() == "true")
-        if cache_key and not disable_cache:
-            cached = _prompt_cache_get(cache_key)
-            if cached:
-                return cached
-
-        out = build_image_prompt(adapted)
-        if isinstance(out, dict) and out.get("ok") and cache_key and not disable_cache:
-            ttl = int(os.getenv("AI_FORM_IMAGE_PROMPT_CACHE_TTL_SEC") or "60")
-            _prompt_cache_set(cache_key, out, ttl_sec=ttl)
-        return out
+        return JSONResponse(
+            status_code=410,
+            content={
+                "ok": False,
+                "error": "deprecated",
+                "message": "Prompt generation now happens inside /generate requests. Do not call /image/prompt.",
+            },
+        )
 
     @compat_router.post("/image")
     def image_compat(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
@@ -593,8 +546,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     async def generate_try_on(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
         prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
-        if not prompt:
-            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
 
@@ -657,8 +608,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         scene_image = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip()
         product_image = str(payload.get("productImage") or payload.get("product_image") or "").strip()
-        if not prompt:
-            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
         if not scene_image:
@@ -686,7 +635,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         adapted["sceneImage"] = scene_image
         if product_image:
             adapted["productImage"] = product_image
-        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
             if k in payload and payload.get(k) is not None:
                 adapted[k] = payload.get(k)
         routing_policy = _apply_replicate_routing_defaults(
@@ -720,8 +669,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         scene_image = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip()
-        if not prompt:
-            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
         if not scene_image:
@@ -746,7 +693,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
         adapted["referenceImages"] = reference_images
         adapted["sceneImage"] = scene_image
-        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
             if k in payload and payload.get(k) is not None:
                 adapted[k] = payload.get(k)
         routing_policy = _apply_replicate_routing_defaults(
@@ -778,8 +725,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     async def generate_scene(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
         prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
-        if not prompt:
-            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
 
@@ -813,7 +758,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or (4.0 if is_edit else 6.0))
         adapted["referenceImages"] = [primary_image] if primary_image else []
         adapted["sceneImage"] = primary_image or None
-        for k in ("generationIntent", "originalReferenceImage", "generationIndex"):
+        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
             if k in payload and payload.get(k) is not None:
                 adapted[k] = payload.get(k)
         routing_policy = _apply_replicate_routing_defaults(
@@ -846,8 +791,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     async def generate_drilldown(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
         prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
-        if not prompt:
-            return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "prompt_required"})
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
 

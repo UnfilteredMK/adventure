@@ -126,11 +126,6 @@ export function FormQuestionSection({
   const compactPreviewActive = Boolean(usePreviewPaneLayout);
   const useIconOnlyActions = Boolean(useCompactNav || usePreviewPaneLayout);
   const useWideQuestionContent = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
-  const questionContentMaxWidthClass = usePreviewPaneLayout
-    ? "max-w-4xl"
-    : useWideQuestionContent
-      ? "max-w-none"
-      : "max-w-6xl";
   const promptText = promptDraft.trim();
   const canGoBack = (state?.currentStepIndex || 0) > 0;
   const primary = theme.primaryColor || "#3b82f6";
@@ -396,7 +391,7 @@ export function FormQuestionSection({
                   layoutDebugEnabled,
                   cn(
                     "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
-                    questionContentMaxWidthClass
+                    useWideQuestionContent ? "max-w-none" : "max-w-6xl"
                   )
                 )}
             style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}

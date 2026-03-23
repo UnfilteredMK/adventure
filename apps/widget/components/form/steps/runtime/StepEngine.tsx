@@ -195,6 +195,8 @@ export function StepEngine({
   const [promptDraft, setPromptDraft] = useState("");
   const [promptSubmitCount, setPromptSubmitCount] = useState(0);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
+  const [previewAutoGenerationPending, setPreviewAutoGenerationPending] = useState(false);
+  const [previewAutoGenerationBusy, setPreviewAutoGenerationBusy] = useState(false);
   const [pendingPreviewSceneUploadUrl, setPendingPreviewSceneUploadUrl] = useState<string | null>(null);
   // Once the preview experience is enabled, keep it enabled (avoids flicker if total steps change as new batches load).
   const [previewEverEnabled, setPreviewEverEnabled] = useState(false);
@@ -565,14 +567,32 @@ export function StepEngine({
         const existingIds = new Set(
           steps.map((s: any) => String((s as any)?.id || "")).filter(Boolean)
         );
+        incoming.forEach((step: any) => {
+          const stepId = String((step as any)?.id || "");
+          if (!stepId || !existingIds.has(stepId)) return;
+          patchStep(stepId, {
+            __refinementStep: stepId !== REFINEMENT_UPLOAD_STEP_ID,
+            __refinementUploadStep: stepId === REFINEMENT_UPLOAD_STEP_ID,
+          });
+        });
         const deduped = incoming.filter((s: any) => {
           const id = String((s as any)?.id || "");
           return id && !existingIds.has(id);
         });
         if (deduped.length === 0) return;
 
+        const markedDeduped = deduped.map((step: any) => {
+          const stepId = String((step as any)?.id || "");
+          if (!stepId) return step;
+          return {
+            ...step,
+            __refinementStep: stepId !== REFINEMENT_UPLOAD_STEP_ID,
+            __refinementUploadStep: stepId === REFINEMENT_UPLOAD_STEP_ID,
+          };
+        });
+
         const firstRefinementQuestionId =
-          deduped.find((s: any) => String((s as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID)?.id || null;
+          markedDeduped.find((s: any) => String((s as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID)?.id || null;
 
         const currentIdx = state?.currentStepIndex ?? 0;
         const designerIdx = steps.findIndex((s: any) => String((s as any)?.id || "") === "step-designer");
@@ -590,7 +610,7 @@ export function StepEngine({
         if (!userIsWaiting && currentStep && isStructuralStep(currentStep) && firstRefinementQuestionId) {
           pendingRefinementFocusStepIdRef.current = String(firstRefinementQuestionId);
         }
-        addSteps(deduped, userIsWaiting, { insertAtIndex });
+        addSteps(markedDeduped, userIsWaiting, { insertAtIndex });
         if (!userIsWaiting) {
           refinementAdvanceFromStepIdRef.current = null;
           setAwaitingRefinementAdvance(false);
@@ -604,7 +624,7 @@ export function StepEngine({
           console.warn("[StepEngine] Refinements fetch failed", e);
         }
       });
-  }, [previewHasImage, flowPlan?.sessionId, instanceId, leadCapturedForUI, addSteps, currentStep?.id, state?.currentStepIndex, state?.stepData, state?.steps]);
+  }, [previewHasImage, flowPlan?.sessionId, instanceId, leadCapturedForUI, addSteps, currentStep?.id, patchStep, state?.currentStepIndex, state?.stepData, state?.steps]);
 
   useEffect(() => {
     if (!awaitingRefinementAdvance) return;
@@ -2365,6 +2385,12 @@ export function StepEngine({
     const isRefinementSceneUploadStep = currentStep.id === "step-refinement-upload-scene-image";
     const isSceneUploadStep =
       currentStep.id === DETERMINISTIC_SCENE_IMAGE_ID || currentStep.id === REFINEMENT_UPLOAD_STEP_ID;
+    const isRefinementQuestionStep = Boolean((currentStep as any)?.__refinementStep);
+    const wasRefinementQuestionAlreadyAnswered =
+      isRefinementQuestionStep && isStepAnsweredForCounts(currentStep, state?.stepData);
+    const nextAnsweredRefinementQuestionCount =
+      answeredRefinementQuestionCount +
+      (isRefinementQuestionStep && hasMeaningfulAnswer(data) && !wasRefinementQuestionAlreadyAnswered ? 1 : 0);
     const isSceneUploadSkipped =
       isSceneUploadStep &&
       (data === null || data === undefined || data === "__skip__" || data === "" || (Array.isArray(data) && data.length === 0));
@@ -2375,12 +2401,31 @@ export function StepEngine({
       isRefinementSceneUploadStep &&
       typeof data === "string" &&
       (data.startsWith("http://") || data.startsWith("https://") || data.startsWith("data:image/"));
+    const uploadedSceneImageUrl =
+      isSceneUploadStep &&
+      typeof data === "string" &&
+      (data.startsWith("http://") || data.startsWith("https://") || data.startsWith("data:image/"))
+        ? data
+        : null;
     const persistStepAnswer = () => {
       updateStepData(currentStep.id, data);
       if (shouldMirrorRefinementSceneUpload) {
         updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, data);
       }
     };
+
+    if (uploadedSceneImageUrl) {
+      setPendingPreviewSceneUploadUrl(uploadedSceneImageUrl);
+      setPreviewRefreshNonce((prev) => prev + 1);
+    }
+    if (
+      isRefinementQuestionStep &&
+      hasMeaningfulAnswer(data) &&
+      nextAnsweredRefinementQuestionCount > 0 &&
+      nextAnsweredRefinementQuestionCount % 2 === 0
+    ) {
+      setPreviewAutoGenerationPending(true);
+    }
     
     console.log('[StepEngine] Step completed', {
       stepId: currentStep.id,
@@ -2941,6 +2986,32 @@ export function StepEngine({
     }).length;
   }, [isStepAnsweredForCounts, state?.stepData, state?.steps]);
 
+  const autoPreviewAnsweredQuestionCount = useMemo(() => {
+    if (!state?.steps || !state?.stepData) return 0;
+    return state.steps.filter((step) => {
+      if (!isPreviewGateQuestionStep(step)) return false;
+      return isStepAnsweredForCounts(step, state.stepData);
+    }).length;
+  }, [isStepAnsweredForCounts, state?.stepData, state?.steps]);
+
+  const hasRefinementQuestions = useMemo(() => {
+    if (!state?.steps?.length) return false;
+    return state.steps.some((step) => Boolean((step as any)?.__refinementStep));
+  }, [state?.steps]);
+
+  const answeredRefinementQuestionCount = useMemo(() => {
+    if (!state?.steps || !state?.stepData) return 0;
+    return state.steps.filter((step) => {
+      if (!(step as any)?.__refinementStep) return false;
+      return isStepAnsweredForCounts(step, state.stepData);
+    }).length;
+  }, [isStepAnsweredForCounts, state?.stepData, state?.steps]);
+
+  const previewAutoAnsweredQuestionCount = hasRefinementQuestions
+    ? answeredRefinementQuestionCount
+    : autoPreviewAnsweredQuestionCount;
+  const previewAutoGenerationCounterScope = hasRefinementQuestions ? "refinement" : "base";
+
   const isBootstrapStepId = useCallback((stepId: string | null | undefined) => {
     return isBootstrapStepIdValue(stepId);
   }, []);
@@ -3215,12 +3286,27 @@ export function StepEngine({
     (usePreviewDominantLayout || useDesktopPreviewLayout) &&
       (previewHasImage || previewVisible || !previewQuestionRevealReady)
   );
+  useEffect(() => {
+    if (!previewAutoGenerationPending) return;
+    if (previewAutoGenerationBusy) {
+      setPreviewAutoGenerationPending(false);
+    }
+  }, [previewAutoGenerationBusy, previewAutoGenerationPending]);
+  useEffect(() => {
+    if (!previewAutoGenerationPending) return;
+    if (!hasRefinementQuestions || !previewHasImage) {
+      setPreviewAutoGenerationPending(false);
+    }
+  }, [hasRefinementQuestions, previewAutoGenerationPending, previewHasImage]);
+  const isAutoPreviewRefreshLocked = Boolean(previewHasImage && previewAutoGenerationBusy);
+  const shouldHideQuestionPaneForAutoRefresh = Boolean(previewAutoGenerationPending || isAutoPreviewRefreshLocked);
   // Keep the question pane hidden while waiting for lead capture; re-show it once lead is captured and pricing is revealed.
   const shouldHideQuestionPaneForLeadGate = Boolean(
     previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
   );
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
+    !shouldHideQuestionPaneForAutoRefresh &&
     previewQuestionRevealReady &&
     !shouldHideQuestionPaneForLeadGate &&
     (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
@@ -3514,7 +3600,8 @@ export function StepEngine({
                     >
                       <PreviewSection
                         adventureInputMode={adventureInputMode}
-                        completedQuestionCount={completedQuestionCount}
+                        answeredQuestionCount={previewAutoAnsweredQuestionCount}
+                        autoGenerationCounterScope={previewAutoGenerationCounterScope}
                         config={config}
                         hasPreviewSubsections={hasPreviewSubsections}
                         instanceId={instanceId}
@@ -3527,6 +3614,7 @@ export function StepEngine({
                         promptDraft={promptDraft}
                         promptSubmitCount={promptSubmitCount}
                         sessionId={sessionId}
+                        setAutoGenerationBusy={setPreviewAutoGenerationBusy}
                         setPreviewHasImage={setPreviewHasImage}
                         setPreviewVisible={setPreviewVisible}
                         showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}

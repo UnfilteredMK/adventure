@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 interface PreviewSectionProps {
   adventureInputMode: "questions" | "prompt" | "budget" | "uploads";
-  completedQuestionCount: number;
+  answeredQuestionCount: number;
+  autoGenerationCounterScope: string;
   config?: any;
   hasPreviewSubsections: boolean;
   instanceId: string;
@@ -19,6 +20,7 @@ interface PreviewSectionProps {
   promptDraft: string;
   promptSubmitCount: number;
   sessionId: string;
+  setAutoGenerationBusy: (busy: boolean) => void;
   setPreviewHasImage: (hasImage: boolean) => void;
   setPreviewVisible: (visible: boolean) => void;
   showQuestionPaneUnderPreview: boolean;
@@ -30,7 +32,8 @@ interface PreviewSectionProps {
 
 export function PreviewSection({
   adventureInputMode,
-  completedQuestionCount,
+  answeredQuestionCount,
+  autoGenerationCounterScope,
   config,
   hasPreviewSubsections,
   instanceId,
@@ -42,6 +45,7 @@ export function PreviewSection({
   promptDraft,
   promptSubmitCount,
   sessionId,
+  setAutoGenerationBusy,
   setPreviewHasImage,
   setPreviewVisible,
   showQuestionPaneUnderPreview: _showQuestionPaneUnderPreview,
@@ -68,11 +72,6 @@ export function PreviewSection({
     promptDraft,
     promptSubmitCount,
   ]);
-  const answeredQuestionCount = useMemo(
-    () =>
-      completedQuestionCount + previewRefreshNonce + (adventureInputMode === "prompt" ? promptSubmitCount : 0),
-    [completedQuestionCount, previewRefreshNonce, adventureInputMode, promptSubmitCount]
-  );
   return (
     <div
       className={cn(
@@ -109,6 +108,8 @@ export function PreviewSection({
             stepDataSoFar={stepDataSoFar}
             answeredQuestionCount={answeredQuestionCount}
             autoRegenerateEveryNAnsweredQuestions={2}
+            autoGenerationCounterScope={autoGenerationCounterScope}
+            onAutoGenerationBusyChange={setAutoGenerationBusy}
             onPreviewVisibleChange={setPreviewVisible}
             onHasImageChange={setPreviewHasImage}
             variant="hero"

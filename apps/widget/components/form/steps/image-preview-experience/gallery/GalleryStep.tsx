@@ -4,9 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { DesignSettings } from "@/types/design";
 import type { StepDefinition, UIStep } from "@/types/ai-form";
 import type { GalleryUI } from "@/types/ai-form-ui-contract";
-import { buildContextState } from "@/lib/ai-form/state/context-state";
+import { buildAnsweredQAFromSteps, shouldExcludeStepFromAnsweredQA } from "@/lib/ai-form/answered-qa";
 import { loadServiceCatalog } from "@/lib/ai-form/state/service-catalog-storage";
-import { buildImagePromptViaDSPy } from "@/lib/ai-form/utils/image-prompt-builder";
 import { emitTelemetry } from "@/lib/ai-form/telemetry";
 import { useFormSubmission } from "@/hooks/use-form-submission";
 import { StepLayout } from "../../ui-layout/StepLayout";
@@ -366,20 +365,6 @@ export function GalleryStep({
     void refreshRegenAllowance();
   }, [refreshRegenAllowance]);
 
-  const resolveServiceName = useCallback((): string | null => {
-    if (!sessionId) return null;
-    const serviceIdRaw =
-      allStepData?.["step-service-primary"] ??
-      allStepData?.["step-service"] ??
-      allStepData?.["step_service_primary"] ??
-      allStepData?.["step_service"];
-    const serviceId = Array.isArray(serviceIdRaw) ? String(serviceIdRaw[0] || "") : String(serviceIdRaw || "");
-    if (!serviceId) return null;
-    const cat = loadServiceCatalog(sessionId);
-    const meta = cat?.byServiceId?.[serviceId];
-    return meta?.serviceName || null;
-  }, [allStepData, sessionId]);
-
   const resolveServiceSummary = useCallback((): string | null => {
     if (!sessionId) return null;
     const serviceIdRaw =
@@ -404,40 +389,12 @@ export function GalleryStep({
         ? { ...(allStepData || {}), [promptInputStepId]: manualPrompt }
         : allStepData;
 
-      const promptInputStepForQA: StepDefinition = {
-        id: promptInputStepId,
-        componentType: "promptInput" as any,
-        intent: "refine_preferences",
-        data: { placeholder: "Describe what you want to change…" },
-        copy: {
-          headline: "What would you like to change?",
-          subtext: "Tell us what to update and we’ll regenerate.",
-        },
-      };
-
-      const ctx = buildContextState({
-        stepDataSoFar: stepDataSoFarWithPrompt,
-        steps: allSteps,
-        extra: { useCase, subcategoryName: null },
-      });
-
-      const serviceName = resolveServiceName();
-      const promptResult = await buildImagePromptViaDSPy({
-        contextState: ctx,
-        service: serviceName,
-        useCase,
-        industry: config?.industry ?? null,
-        businessContext: config?.businessContext ?? null,
-        previousPrompt: manualPrompt ? prompt : undefined,
-        refinementNotes: manualPrompt ? manualPrompt : undefined,
-        steps: allSteps,
-        stepDataSoFar: stepDataSoFarWithPrompt,
-        instanceId,
-        sessionId,
-        referenceImages,
-      });
-      const nextPrompt = String(promptResult.prompt || "").trim();
-      if (!nextPrompt) throw new Error("Prompt builder returned an empty prompt.");
+      const answeredQA = buildAnsweredQAFromSteps(allSteps as Array<StepDefinition | UIStep>, stepDataSoFarWithPrompt || {}, 60);
+      const askedStepIds = (allSteps || [])
+        .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
+        .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
+      const serviceSummary = resolveServiceSummary();
+      const nextPrompt = manualPrompt || prompt || "";
       setPrompt(nextPrompt);
 
       // Gather use-case specific uploads (if present)
@@ -474,17 +431,28 @@ export function GalleryStep({
             new URLSearchParams(window.location.search).get("fresh") === "true"
           : undefined;
 
-      const endpoint =
-        useCase === "tryon" ? "/api/generate/try-on" : useCase === "scene-placement" ? "/api/generate/scene-placement" : "/api/generate/scene";
+      const endpoint = "/api/generate";
+      const generationIntent =
+        generatedImages.length > 0 || activeImage
+          ? "small_improvement"
+          : "initial";
 
       const requestBody: any = {
-        prompt: nextPrompt,
         instanceId,
+        sessionId,
+        useCase,
+        generationIntent,
         numOutputs: galleryMaxImages,
-        outputFormat: useCase === "scene" ? undefined : "jpg",
+        stepDataSoFar: stepDataSoFarWithPrompt ?? {},
+        answeredQA,
+        askedStepIds,
+        instanceContext: {
+          businessContext: config?.businessContext ?? null,
+          serviceSummary,
+        },
       };
-
-      if (promptResult.negativePrompt) requestBody.negativePrompt = promptResult.negativePrompt;
+      if (prompt) requestBody.previousPrompt = prompt;
+      if (manualPrompt) requestBody.refinementNotes = manualPrompt;
 
       if (useCase === "tryon") {
         requestBody.userImage = userImageUrl;
@@ -538,11 +506,11 @@ export function GalleryStep({
     config,
     ensureReferenceImageUrls,
     galleryMaxImages,
+    generatedImages.length,
     instanceId,
     prompt,
     promptInputStepId,
     referenceImages,
-    resolveServiceName,
     resolveServiceSummary,
     refreshRegenAllowance,
     sessionId,

@@ -86,22 +86,6 @@ function isStyleDirectionStep(step: StepDefinition | MultipleChoiceUI): boolean 
   return rawId === "style_direction" || rawId === "step-style-direction";
 }
 
-function buildSelectionHint(minSelections: number, maxSelections?: number): string | null {
-  if (!Number.isFinite(minSelections) || minSelections <= 0) return null;
-  if (Number.isFinite(Number(maxSelections)) && Number(maxSelections) > minSelections) {
-    return `Pick ${minSelections} to ${Number(maxSelections)} styles to continue.`;
-  }
-  return `Pick at least ${minSelections} style${minSelections === 1 ? "" : "s"} to continue.`;
-}
-
-function buildCompactSelectionHint(minSelections: number, maxSelections?: number): string | null {
-  if (!Number.isFinite(minSelections) || minSelections <= 0) return null;
-  if (Number.isFinite(Number(maxSelections)) && Number(maxSelections) > minSelections) {
-    return `${minSelections}-${Number(maxSelections)} styles`;
-  }
-  return `${minSelections}+ styles`;
-}
-
 export function ImageChoiceGridStep({
   step,
   stepData,
@@ -159,12 +143,27 @@ export function ImageChoiceGridStep({
 
   const selectedArray = Array.isArray(value) ? value : value ? [value] : [];
   const canContinue = multiple ? selectedArray.length >= minSelections : Boolean(value);
-  const selectionHint = multiple
-    ? compactInPreview
-      ? buildCompactSelectionHint(minSelections, maxSelections)
-      : buildSelectionHint(minSelections, maxSelections)
-    : null;
   const maxReached = Boolean(multiple && Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections));
+  const selectionCounter = multiple && Number.isFinite(Number(maxSelections))
+    ? (
+        <span
+          className={cn(
+            "shrink-0 tabular-nums text-sm sm:text-base",
+            maxReached ? "font-semibold text-primary" : "font-medium text-muted-foreground"
+          )}
+        >
+          {selectedArray.length}/{Number(maxSelections)}
+        </span>
+      )
+    : null;
+  const resolvedHeaderInlineControl = selectionCounter || headerInlineControl
+    ? (
+        <div className="flex items-center gap-2">
+          {headerInlineControl}
+          {selectionCounter}
+        </div>
+      )
+    : undefined;
 
   return (
     <StepLayout
@@ -174,7 +173,7 @@ export function ImageChoiceGridStep({
       canGoBack={canGoBack}
       isLoading={isLoading}
       canContinue={canContinue}
-      headerInlineControl={headerInlineControl}
+      headerInlineControl={resolvedHeaderInlineControl}
       actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
       compactInPreview={compactInPreview}
       preferWideLayout={!compactInPreview}
@@ -189,20 +188,6 @@ export function ImageChoiceGridStep({
         )}
         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "emerald")}
       >
-        {selectionHint && !compactInPreview ? (
-          <div
-            className={cn(
-              "flex items-center justify-between gap-2 rounded-lg border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]/70",
-              "mb-3 px-3 py-2 text-xs sm:text-sm"
-            )}
-          >
-            <span className="text-muted-foreground truncate min-w-0">{selectionHint}</span>
-            <span className={cn("shrink-0 tabular-nums", maxReached ? "font-semibold text-primary" : "font-medium text-muted-foreground")}>
-              {selectedArray.length}
-              {Number.isFinite(Number(maxSelections)) ? ` / ${Number(maxSelections)}` : ""}
-            </span>
-          </div>
-        ) : null}
         <div
           className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex-1 flex flex-col")}
           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}

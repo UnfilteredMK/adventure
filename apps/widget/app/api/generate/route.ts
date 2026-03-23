@@ -7,6 +7,28 @@ import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } 
 type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'scene-refinement' | 'drilldown';
 type GenerationIntent = "initial" | "regenerate" | "small_improvement";
 
+function normalizeRequestedOutputs(raw: unknown): number {
+	const n = Number(raw);
+	if (!Number.isFinite(n)) return 1;
+	return Math.max(1, Math.min(8, Math.floor(n)));
+}
+
+function supportsMultiOutput(modelId: string): boolean {
+	const model = String(modelId || '').trim().toLowerCase();
+	if (!model) return true;
+	if (model.includes('flux-kontext')) return false;
+	if (model.includes('nano-banana')) return false;
+	if (model.includes('grok-imagine-image')) return false;
+	if (model.includes('flux-1.1-pro')) return false;
+	return true;
+}
+
+function resolveEffectiveNumOutputs(requested: number, modelId: string): number {
+	const normalizedRequested = normalizeRequestedOutputs(requested);
+	if (normalizedRequested <= 1) return 1;
+	return supportsMultiOutput(modelId) ? normalizedRequested : 1;
+}
+
 function normalizeServiceUrl(raw: unknown): string {
 	let s = String(raw || "").trim();
 	if (!s) return "";
@@ -269,9 +291,6 @@ export async function POST(request: NextRequest) {
 			generationIntent: body.generationIntent || body.generationMode || null,
 		});
 
-		if (!body.prompt) {
-			return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
-		}
 		if (!body.instanceId) {
 			return NextResponse.json({ error: 'Instance ID is required' }, { status: 400 });
 		}
@@ -287,8 +306,18 @@ export async function POST(request: NextRequest) {
 		});
 		const totalInputImages = hasInputImage ? referenceImages.length + 1 : 0;
 		const generationIntent = resolveGenerationIntent(body, hasInputImage);
-		const numOutputs = body.numOutputs || body.gallery_max_images || (useCase === 'drilldown' ? 1 : 4);
-		const defaults = resolveModelDefaults(useCase, hasInputImage, totalInputImages, numOutputs, body, generationIntent);
+		const requestedNumOutputs = normalizeRequestedOutputs(body.numOutputs || body.gallery_max_images || (useCase === 'drilldown' ? 1 : 4));
+		const defaults = resolveModelDefaults(useCase, hasInputImage, totalInputImages, requestedNumOutputs, body, generationIntent);
+		const numOutputs = resolveEffectiveNumOutputs(requestedNumOutputs, defaults.modelId);
+		if (numOutputs !== requestedNumOutputs) {
+			logger.info('[GENERATE] Clamped requested outputs to model capability', {
+				instanceId: body.instanceId,
+				useCase,
+				modelId: defaults.modelId,
+				requestedNumOutputs,
+				effectiveNumOutputs: numOutputs,
+			});
+		}
 
 		// Supabase + instance lookup
 		const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -355,6 +384,8 @@ export async function POST(request: NextRequest) {
 			isEdit: hasInputImage,
 			hasTargetImage: Boolean(targetImage),
 			referenceCount: referenceImages.length,
+			requestedNumOutputs,
+			effectiveNumOutputs: numOutputs,
 			guidanceScale: defaults.guidanceScale,
 			numInferenceSteps: defaults.numInferenceSteps,
 		});
@@ -364,6 +395,10 @@ export async function POST(request: NextRequest) {
 			typeof body.generationIndex === "number" && Number.isFinite(body.generationIndex)
 				? body.generationIndex
 				: undefined;
+		const previousPrompt =
+			typeof body.previousPrompt === "string" ? body.previousPrompt.trim() || undefined : undefined;
+		const refinementNotes =
+			typeof body.refinementNotes === "string" ? body.refinementNotes.trim() || undefined : undefined;
 
 		const upstreamPayload = {
 			...body,
@@ -384,6 +419,8 @@ export async function POST(request: NextRequest) {
 			selectedImage: body.selectedImage || (useCase === 'drilldown' ? targetImage : undefined),
 			budgetRange: body.budgetRange,
 			generationIntent,
+			...(previousPrompt ? { previousPrompt } : {}),
+			...(refinementNotes ? { refinementNotes } : {}),
 			...(originalReferenceImage ? { originalReferenceImage } : {}),
 			...(generationIndex !== undefined ? { generationIndex } : {}),
 		};
@@ -428,7 +465,8 @@ export async function POST(request: NextRequest) {
 			instanceId: body.instanceId,
 			useCase,
 			imageCount: upstreamImages.length,
-			requestedNumOutputs: numOutputs,
+			requestedNumOutputs,
+			effectiveNumOutputs: numOutputs,
 			modelId: upstream?.modelId || defaults.modelId,
 		});
 		const inputImages = hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : [];

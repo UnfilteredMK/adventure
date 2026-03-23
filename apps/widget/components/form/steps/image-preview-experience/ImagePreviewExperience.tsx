@@ -23,6 +23,8 @@ export interface ImagePreviewExperienceProps {
   stepDataSoFar: Record<string, any>;
   answeredQuestionCount?: number;
   autoRegenerateEveryNAnsweredQuestions?: number;
+  autoGenerationCounterScope?: string;
+  onAutoGenerationBusyChange?: (busy: boolean) => void;
   enabled: boolean;
   onPreviewVisibleChange?: (visible: boolean) => void;
   variant?: "hero" | "rail" | "tiny";

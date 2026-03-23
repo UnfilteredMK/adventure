@@ -358,6 +358,21 @@ def _extract_scene_placement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract inputs for SceneRefinementPromptModule."""
     placement_inputs = _extract_scene_placement_inputs(payload)
+    previous_prompt = sanitize_visual_context_text(
+        payload.get("previousPrompt") or payload.get("previous_prompt") or "",
+        max_len=500,
+    )
+    refinement_notes = sanitize_visual_context_text(
+        payload.get("refinementNotes")
+        or payload.get("refinement_notes")
+        or (
+            (payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}).get("step-promptInput")
+            if isinstance(payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}, dict)
+            else ""
+        )
+        or "",
+        max_len=500,
+    )
     return {
         "service_summary": placement_inputs.get("service_summary") or "Refine the current scene design.",
         "subject": placement_inputs.get("subject") or "project",
@@ -365,6 +380,8 @@ def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "location": placement_inputs.get("location") or "",
         "scene_context": "User provided an existing scene/design image that should remain the anchor.",
         "user_preferences": placement_inputs.get("user_preferences") or "",
+        "previous_prompt": previous_prompt,
+        "refinement_notes": refinement_notes,
         "reference_adherence": (
             "Hard anchor constraint: preserve the current scene composition, camera, perspective, geometry, depth relationships, "
             "lighting direction, and unchanged objects/materials. Make only the requested local design refinements."
@@ -593,19 +610,23 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    prompt_result = build_image_prompt(payload)
-    if not isinstance(prompt_result, dict) or not prompt_result.get("ok"):
-        return prompt_result
-    prompt_obj = prompt_result.get("prompt") if isinstance(prompt_result.get("prompt"), dict) else {}
-    _log_verbose("generated_prompt_spec", prompt_obj)
-    prompt_text = ((prompt_obj.get("prompt") if isinstance(prompt_obj, dict) else "") or "").strip()
+    prompt_text = str(payload.get("prompt") or "").strip()
+    negative_prompt = extract_negative_prompt(payload) or None
+    if prompt_text:
+        print("[image_generator] using explicit prompt from request", flush=True)
+    else:
+        prompt_result = build_image_prompt(payload)
+        if not isinstance(prompt_result, dict) or not prompt_result.get("ok"):
+            return prompt_result
+        prompt_obj = prompt_result.get("prompt") if isinstance(prompt_result.get("prompt"), dict) else {}
+        _log_verbose("generated_prompt_spec", prompt_obj)
+        prompt_text = ((prompt_obj.get("prompt") if isinstance(prompt_obj, dict) else "") or "").strip()
 
-    # Prefer prompt-spec negativePrompt, fall back to payload negativePrompt.
-    negative_prompt = None
-    if isinstance(prompt_obj, dict) and isinstance(prompt_obj.get("negativePrompt"), str):
-        negative_prompt = str(prompt_obj.get("negativePrompt") or "").strip() or None
-    if not negative_prompt:
-        negative_prompt = extract_negative_prompt(payload) or None
+        # Prefer prompt-spec negativePrompt, fall back to payload negativePrompt.
+        if isinstance(prompt_obj, dict) and isinstance(prompt_obj.get("negativePrompt"), str):
+            negative_prompt = str(prompt_obj.get("negativePrompt") or "").strip() or None
+        if not negative_prompt:
+            negative_prompt = extract_negative_prompt(payload) or None
 
     # Wire through common widget fields
     def _as_int(v: Any) -> Optional[int]:

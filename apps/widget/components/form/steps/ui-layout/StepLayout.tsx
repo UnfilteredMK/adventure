@@ -107,9 +107,7 @@ export function StepLayout({
   const compactActionButtonClass = "h-8 min-w-[80px] px-2.5 text-[11px]";
   const compactHeaderLayoutClass = useCompactPane
     ? "flex h-full min-h-0 flex-col items-center justify-center gap-0 text-center"
-    : headerInlineControl
-      ? "flex items-start justify-between gap-0"
-      : undefined;
+    : undefined;
   const compactInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const standardInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const contentViewportClassName = cn(
@@ -340,45 +338,84 @@ export function StepLayout({
               )}
               style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneQuestion")}
             >
-              {headerInlineControl && !useCompactHeaderControlRow ? (
-                <div
-                  className={layoutDebugClassName(layoutDebugEnabled, "shrink-0")}
-                  style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
-                >
-                  {headerInlineControl}
+              {headerInlineControl && !useCompactHeaderControlRow && !useCompactPane ? (
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h2
+                      className={cn(
+                        isCompact ? "text-xl" : "text-2xl",
+                        "font-semibold min-w-0 break-words"
+                      )}
+                      style={{
+                        color: theme.textColor,
+                        fontFamily: theme.fontFamily,
+                      }}
+                    >
+                      {question}
+                    </h2>
+                    {subtext && showCompactSubtext ? (
+                      <p
+                        className="mt-0 text-sm opacity-80"
+                        style={{
+                          ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky"),
+                          color: theme.textColor,
+                          fontFamily: theme.fontFamily,
+                        }}
+                      >
+                        {subtext}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div
+                    className={layoutDebugClassName(layoutDebugEnabled, "shrink-0")}
+                    style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+                  >
+                    {headerInlineControl}
+                  </div>
                 </div>
-              ) : null}
-              <h2
-                className={cn(
-                  useCompactPane ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center") : isCompact ? "text-xl" : "text-2xl",
-                  "font-semibold min-w-0 break-words"
-                )}
-                style={{
-                  color: theme.textColor,
-                  fontFamily: theme.fontFamily,
-                  ...(useCompactPane ? { fontSize: compactQuestionFontSize } : null),
-                }}
-              >
-                {question}
-              </h2>
-                {subtext && showCompactSubtext ? (
-                  <p
-                  className={cn(
-                    "opacity-80",
-                    useCompactPane
-                      ? isVisualAnswerStep ? "mt-0 leading-tight line-clamp-1 text-center" : "mt-0 leading-tight text-center"
-                      : "mt-0 text-sm"
-                  )}
-                  style={{
-                    ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky"),
-                    color: theme.textColor,
-                    fontFamily: theme.fontFamily,
-                    ...(useCompactPane ? { fontSize: compactSubtextFontSize } : null),
-                  }}
-                >
-                  {subtext}
-                </p>
-              ) : null}
+              ) : (
+                <>
+                  {headerInlineControl && !useCompactHeaderControlRow ? (
+                    <div
+                      className={layoutDebugClassName(layoutDebugEnabled, "shrink-0")}
+                      style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+                    >
+                      {headerInlineControl}
+                    </div>
+                  ) : null}
+                  <h2
+                    className={cn(
+                      useCompactPane ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center") : isCompact ? "text-xl" : "text-2xl",
+                      "font-semibold min-w-0 break-words"
+                    )}
+                    style={{
+                      color: theme.textColor,
+                      fontFamily: theme.fontFamily,
+                      ...(useCompactPane ? { fontSize: compactQuestionFontSize } : null),
+                    }}
+                  >
+                    {question}
+                  </h2>
+                  {subtext && showCompactSubtext ? (
+                    <p
+                      className={cn(
+                        "opacity-80",
+                        useCompactPane
+                          ? isVisualAnswerStep ? "mt-0 leading-tight line-clamp-1 text-center" : "mt-0 leading-tight text-center"
+                          : "mt-0 text-sm"
+                      )}
+                      style={{
+                        ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky"),
+                        color: theme.textColor,
+                        fontFamily: theme.fontFamily,
+                        ...(useCompactPane ? { fontSize: compactSubtextFontSize } : null),
+                      }}
+                    >
+                      {subtext}
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 

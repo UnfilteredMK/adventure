@@ -40,6 +40,12 @@ class SceneRefinementPromptSignature(dspy.Signature):
     user_preferences: str = dspy.InputField(
         desc="Condensed user answers/preferences describing the specific requested refinements."
     )
+    previous_prompt: str = dspy.InputField(
+        desc="Best-effort summary of the prior generation prompt/design intent to preserve across refinement turns."
+    )
+    refinement_notes: str = dspy.InputField(
+        desc="Latest explicit delta request from the user describing what to change in this refinement turn."
+    )
     reference_adherence: str = dspy.InputField(
         desc=(
             "HARD anchor-image constraint. Keep the current scene composition/camera geometry stable; "
@@ -78,6 +84,8 @@ class SceneRefinementPromptModule(dspy.Module):
         location: str = "",
         scene_context: str = "",
         user_preferences: str = "",
+        previous_prompt: str = "",
+        refinement_notes: str = "",
         reference_adherence: str = "",
         budget_requirements: str = "",
         budget_level: str = "",
@@ -89,6 +97,8 @@ class SceneRefinementPromptModule(dspy.Module):
             location=location or "",
             scene_context=scene_context or "User provided an anchor scene to refine.",
             user_preferences=user_preferences or "",
+            previous_prompt=previous_prompt or "",
+            refinement_notes=refinement_notes or "",
             reference_adherence=reference_adherence or "",
             budget_requirements=budget_requirements or "",
             budget_level=budget_level or "",

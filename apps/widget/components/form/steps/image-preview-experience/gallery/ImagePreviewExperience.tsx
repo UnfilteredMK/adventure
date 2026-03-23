@@ -19,7 +19,6 @@ import {
   upsertLeadState,
   upsertFormStateSnapshot,
 } from "@/lib/ai-form/state/form-state-storage";
-import { buildImagePromptViaDSPy } from "@/lib/ai-form/utils/image-prompt-builder";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 import { ArrowLeft, Download, ImageIcon, LayoutGrid, Loader2, Mail, Maximize2, Phone } from "lucide-react";
@@ -98,6 +97,16 @@ type CachedPricing = {
   currency: string;
   imagePriceRange?: { low: number; high: number };
   servicePriceRange?: { low: number; high: number };
+};
+
+type PricingRequestInputs = {
+  answeredQA: Array<{ stepId: string; question: string; answer: any }>;
+  askedStepIds: string[];
+  instanceContext: {
+    businessContext?: any;
+    serviceSummary?: string | null;
+  };
+  previewImageUrl?: string | null;
 };
 
 type PreviewRun = {
@@ -454,6 +463,8 @@ export function ImagePreviewExperience(props: {
   stepDataSoFar: Record<string, any>;
   answeredQuestionCount?: number;
   autoRegenerateEveryNAnsweredQuestions?: number;
+  autoGenerationCounterScope?: string;
+  onAutoGenerationBusyChange?: (busy: boolean) => void;
   enabled: boolean;
   onPreviewVisibleChange?: (visible: boolean) => void;
   variant?: "hero" | "rail" | "tiny";
@@ -470,7 +481,6 @@ export function ImagePreviewExperience(props: {
   const {
     instanceId,
     sessionId,
-    contextState,
     enabled,
     leadGateEnabled = true,
     transparentChrome = false,
@@ -478,6 +488,8 @@ export function ImagePreviewExperience(props: {
     stepDataSoFar,
     answeredQuestionCount = 0,
     autoRegenerateEveryNAnsweredQuestions = 2,
+    autoGenerationCounterScope = "base",
+    onAutoGenerationBusyChange,
     config,
     onPreviewVisibleChange,
     variant = "hero",
@@ -491,6 +503,7 @@ export function ImagePreviewExperience(props: {
 
   const initialCache = useMemo(() => loadCache(instanceId, sessionId), [instanceId, sessionId]);
   const [cache, setCache] = useState<PreviewCacheV3 | null>(initialCache);
+  const [activeGenerationReason, setActiveGenerationReason] = useState<"auto" | "manual" | null>(null);
   const inFlightRef = useRef(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingOwnImages, setIsUploadingOwnImages] = useState(false);
@@ -504,22 +517,6 @@ export function ImagePreviewExperience(props: {
         : CONCEPT_GALLERY_COUNT,
     [designConfig]
   );
-
-  const refreshRegenAllowance = useCallback(async () => {
-    if (!instanceId) return;
-    try {
-      const required = Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
-      const res = await fetch(`/api/leads/availability/${encodeURIComponent(instanceId)}?required=${required}`);
-      if (!res.ok) return;
-      const data = await res.json().catch(() => ({}));
-      const bal = typeof data?.currentBalance === "number" ? Number(data.currentBalance) : 0;
-      setRegenerationsRemaining(Math.max(0, Math.floor(bal / required)));
-    } catch {}
-  }, [galleryMaxImages, instanceId]);
-
-  useEffect(() => {
-    void refreshRegenAllowance();
-  }, [refreshRegenAllowance]);
 
   const sceneUploadUrl = useMemo(() => {
     const sceneUploadStepIds = ["step-upload-scene-image", "step-refinement-upload-scene-image"] as const;
@@ -536,6 +533,40 @@ export function ImagePreviewExperience(props: {
     const arr = Array.isArray(raw) ? raw : (typeof raw === "string" && raw ? [raw] : []);
     return arr.find(isValidUrlLikeImage) ?? null;
   }, [stepDataSoFar]);
+  const nextGenerationOutputCount = useMemo(() => {
+    const normalizedUseCase = String((config as any)?.useCase || "")
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, "-");
+    const hasDirectEditAnchor =
+      Boolean(sceneUploadUrl || userUploadUrl) ||
+      uploadedImages.length > 0 ||
+      Boolean(cache?.runs?.length);
+    if (
+      normalizedUseCase === "tryon" ||
+      normalizedUseCase === "scene-placement" ||
+      normalizedUseCase === "scene-refinement" ||
+      hasDirectEditAnchor
+    ) {
+      return 1;
+    }
+    return Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
+  }, [cache?.runs?.length, config, galleryMaxImages, sceneUploadUrl, uploadedImages.length, userUploadUrl]);
+  const refreshRegenAllowance = useCallback(async () => {
+    if (!instanceId) return;
+    try {
+      const required = Math.max(1, nextGenerationOutputCount);
+      const res = await fetch(`/api/leads/availability/${encodeURIComponent(instanceId)}?required=${required}`);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      const bal = typeof data?.currentBalance === "number" ? Number(data.currentBalance) : 0;
+      setRegenerationsRemaining(Math.max(0, Math.floor(bal / required)));
+    } catch {}
+  }, [instanceId, nextGenerationOutputCount]);
+
+  useEffect(() => {
+    void refreshRegenAllowance();
+  }, [refreshRegenAllowance]);
   // Image uploaded through the form's dedicated upload step — shown as a static thumbnail.
   const formStepUploadThumbnail = sceneUploadUrl ?? userUploadUrl ?? null;
   const [leadCaptured, setLeadCaptured] = useState<boolean>(() => loadLeadState(sessionId).leadCaptured);
@@ -567,6 +598,7 @@ export function ImagePreviewExperience(props: {
   const gateContextRef = useRef<string>("design_and_estimate");
   const promptSubmitNonceRef = useRef<number>(0);
   const promptSubmitNonceInitializedRef = useRef(false);
+  const autoGenerationCounterScopeRef = useRef<string>(autoGenerationCounterScope);
   const previewRefreshNonceRef = useRef<number>(0);
   const pendingManualGenerateRef = useRef(false);
   const pendingBudgetRefineRef = useRef(false);
@@ -735,6 +767,64 @@ export function ImagePreviewExperience(props: {
     }
     return base;
   }, [liveBudget, stepDataSoFar]);
+
+  const requestAccuratePricing = useCallback(
+    async ({ answeredQA, askedStepIds, instanceContext, previewImageUrl }: PricingRequestInputs): Promise<CachedPricing> => {
+      const res = await fetch(`/api/ai-form/${encodeURIComponent(instanceId)}/pricing`, {
+        method: "POST",
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          sessionId,
+          useCase: (config as any)?.useCase,
+          stepDataSoFar: effectiveStepDataSoFar,
+          answeredQA,
+          askedStepIds,
+          instanceContext,
+          noCache: true,
+          ...(previewImageUrl && (previewImageUrl.startsWith("http://") || previewImageUrl.startsWith("https://"))
+            ? { previewImageUrl }
+            : {}),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message = typeof (json as any)?.error === "string" ? String((json as any).error) : `Pricing failed (${res.status})`;
+        throw new Error(message);
+      }
+      const est = (json as any)?.estimate ?? json;
+      const totalMin = Number((est as any)?.totalMin);
+      const totalMax = Number((est as any)?.totalMax);
+      const currencyRaw = typeof (est as any)?.currency === "string" ? String((est as any).currency).trim().toUpperCase() : "USD";
+      if (!Number.isFinite(totalMin) || !Number.isFinite(totalMax)) {
+        throw new Error("Pricing returned invalid numbers");
+      }
+      const svcRange = (est as any)?.servicePriceRange ?? (est as any)?.service_price_range;
+      const servicePriceRange =
+        typeof svcRange === "object" &&
+        svcRange !== null &&
+        typeof svcRange.low === "number" &&
+        typeof svcRange.high === "number"
+          ? { low: Math.min(svcRange.low, svcRange.high), high: Math.max(svcRange.low, svcRange.high) }
+          : undefined;
+      const imgRange = (est as any)?.imagePriceRange ?? (est as any)?.image_price_range;
+      const imagePriceRange =
+        typeof imgRange === "object" &&
+        imgRange !== null &&
+        typeof imgRange.low === "number" &&
+        typeof imgRange.high === "number"
+          ? { low: Math.min(imgRange.low, imgRange.high), high: Math.max(imgRange.low, imgRange.high) }
+          : { low: Math.min(totalMin, totalMax), high: Math.max(totalMin, totalMax) };
+      return {
+        totalMin: Math.min(totalMin, totalMax),
+        totalMax: Math.max(totalMin, totalMax),
+        currency: currencyRaw || "USD",
+        imagePriceRange,
+        ...(servicePriceRange ? { servicePriceRange } : {}),
+      };
+    },
+    [config, effectiveStepDataSoFar, instanceId, sessionId]
+  );
 
   const contextSignature = useMemo(() => computeContextSignature(effectiveStepDataSoFar), [effectiveStepDataSoFar]);
   const runs = cache?.runs ?? [];
@@ -976,6 +1066,7 @@ export function ImagePreviewExperience(props: {
       }
 
       const runId = newRunId();
+      setActiveGenerationReason(reason);
       setCache((prev) => {
         const base: PreviewCacheV3 =
           prev ??
@@ -1020,6 +1111,9 @@ export function ImagePreviewExperience(props: {
 	      try {
 	        const stepsForQA = typeof window !== "undefined" ? loadStepState(instanceId)?.steps ?? [] : [];
 	        const answeredQA = buildAnsweredQAFromSteps(stepsForQA, effectiveStepDataSoFar || {}, 60);
+	        const askedStepIds = stepsForQA
+	          .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
+	          .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
 	        const formCtx = loadFormStateContext(sessionId);
 	        const serviceIdRaw =
 	          (effectiveStepDataSoFar as any)?.["step-service-primary"] ??
@@ -1062,92 +1156,6 @@ export function ImagePreviewExperience(props: {
 		        };
 
 		        const normalizedUseCase = effectiveUseCase;
-		        const promptResult =
-		          contextState && typeof contextState === "object"
-		            ? await buildImagePromptViaDSPy({
-		                contextState,
-		                useCase: normalizedUseCase,
-		                industry: config?.industry ?? null,
-		                businessContext: instanceContext.businessContext ?? null,
-		                service: null,
-		                stepDataSoFar: effectiveStepDataSoFar,
-                    instanceId,
-                    sessionId,
-                    referenceImages: referenceImagesForRequest,
-                    sceneImage: sceneImageForRequest ?? undefined,
-                    productImage: stepProductUpload ?? undefined,
-                    answeredQA,
-                    instanceContext,
-                    generationIntent,
-                    originalReferenceImage: originalReferenceImage ?? undefined,
-                    generationIndex,
-		              })
-		            : null;
-
-		        const promptFromBuilder = typeof promptResult?.prompt === "string" ? promptResult.prompt.trim() : "";
-		        const negativePrompt =
-		          typeof promptResult?.negativePrompt === "string" && promptResult.negativePrompt.trim()
-		            ? promptResult.negativePrompt.trim()
-		            : undefined;
-
-		        const promptFallback = (() => {
-		          const isUuidLike = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s?.trim?.() || "");
-		          const isUrlLike = (s: string) => /^https?:\/\//i.test(s?.trim?.() || "");
-		          const isInternalKey = (q: string) => {
-		            const low = (q || "").toLowerCase();
-		            return low.includes("pricing") || low.startsWith("wait") || low.includes("collect_context");
-		          };
-		          const cleanValue = (raw: any): string => {
-		            if (Array.isArray(raw)) return raw.filter((x) => typeof x === "string" && x && !isUuidLike(x) && !isUrlLike(x)).join(", ");
-		            if (typeof raw === "string" && raw && !isUuidLike(raw) && !isUrlLike(raw)) return raw;
-		            return "";
-		          };
-		          const prefs = answeredQA
-		            .slice(0, 15)
-		            .map((qa: any) => {
-		              const q = typeof qa?.question === "string" ? qa.question : String(qa?.stepId || "Preference");
-		              if (isInternalKey(q)) return null;
-		              const aText = cleanValue(qa?.answer);
-		              return aText ? `- ${q}: ${aText}` : null;
-		            })
-		            .filter(Boolean)
-		            .join("\n");
-
-		          const hasUploadedImage = !!(sceneImageForRequest || storedUploads.length > 0);
-		          const serviceName = (() => {
-		            const raw = instanceContext.serviceSummary || "";
-		            const m = raw.match(/^(.{3,80}?)\s+is\s+(?:an?\s+)?service\b/i);
-		            return m ? m[1].trim() : "home improvement";
-		          })();
-
-		          let header: string;
-			          if (hasUploadedImage) {
-			            header = normalizedUseCase === "tryon"
-			              ? "Create a photorealistic try-on preview showing the product on the person."
-			              : normalizedUseCase === "scene-placement"
-			                ? (stepProductUpload
-			                    ? `Seamlessly place the product into this scene for a ${serviceName} project.`
-			                    : `Edit this uploaded scene in place for a ${serviceName} project while preserving camera angle, layout, and perspective.`)
-                          : normalizedUseCase === "scene-refinement"
-                            ? `Refine this uploaded scene in place for a ${serviceName} project while preserving camera angle, layout, perspective, and all unchanged elements.`
-			                : `Redesign this space to show a completed ${serviceName} project. Keep the room layout, walls, windows, and camera angle. Transform the finishes, fixtures, and materials to match these preferences:`;
-			          } else {
-		            header = normalizedUseCase === "tryon"
-		              ? "Photorealistic try-on preview."
-		              : normalizedUseCase === "scene-placement"
-		                ? "Photorealistic scene placement preview."
-                    : normalizedUseCase === "scene-refinement"
-                      ? "Photorealistic scene refinement preview."
-		                : `A photorealistic image of a beautifully completed ${serviceName} project.`;
-		          }
-
-		          return [header, prefs ? `${hasUploadedImage ? "Design preferences" : "Preferences"}:\n${prefs}` : null, "Photorealistic, high quality, realistic materials and natural lighting.", "No text, no logos, no watermarks, no annotations."]
-		            .filter((s) => typeof s === "string" && String(s).trim())
-		            .join("\n\n");
-		        })();
-
-		        const prompt = promptFromBuilder || promptFallback;
-
 		        const userImage = stepUserUpload ? await ensureUrlLikeImage(stepUserUpload) : null;
 			        const productImageRaw = stepProductUpload || null;
 			        const productImage = productImageRaw ? await ensureUrlLikeImage(productImageRaw) : null;
@@ -1167,31 +1175,26 @@ export function ImagePreviewExperience(props: {
 
 		        const endpoint = "/api/generate";
 		        const budgetForRequest = extractBudgetValue(effectiveStepDataSoFar || {});
-            // Always include budget constraint when we have one — backend and prompt both use it for material/finish adherence.
-            const promptWithBudgetConstraint =
-              budgetForRequest !== null
-                ? isBudgetDrivenRegeneration
-                  ? `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Keep the same overall style and layout, but visibly adjust materials, finishes, fixtures, and scope to fit this budget level.`
-                  : `${prompt}\n\nBudget target: about $${Math.round(budgetForRequest).toLocaleString()}. Match materials, finishes, fixtures, and scope to this budget level.`
-                : prompt;
-		        const numOutputs = generationIntent === "initial" ? CONCEPT_GALLERY_COUNT : 1;
+		        const refinementNotesRaw = (effectiveStepDataSoFar as any)?.["step-promptInput"];
+		        const refinementNotes =
+		          typeof refinementNotesRaw === "string" && refinementNotesRaw.trim() ? refinementNotesRaw.trim() : undefined;
+		        const hasDirectImageInput = Boolean(userImage || productImage || sceneImage);
+		        const numOutputs = generationIntent === "initial" && !hasDirectImageInput ? CONCEPT_GALLERY_COUNT : 1;
 		        const requestBody: any = {
-		          prompt: promptWithBudgetConstraint,
 		          instanceId,
 		          sessionId,
 		          numOutputs,
 		          useCase: normalizedUseCase,
 		          generationIntent,
 		          stepDataSoFar: effectiveStepDataSoFar ?? {},
+		          answeredQA,
+		          askedStepIds,
 		          instanceContext: { ...instanceContext },
 		        };
+		        if (refinementNotes) requestBody.refinementNotes = refinementNotes;
 		        if (originalReferenceImage) requestBody.originalReferenceImage = originalReferenceImage;
 		        if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
 		        if (budgetForRequest !== null) requestBody.budgetRange = budgetForRequest;
-		        if (negativePrompt) requestBody.negativePrompt = negativePrompt;
-
-		        const modelRec = typeof (promptResult as any)?.modelRecommendation === "object" ? (promptResult as any).modelRecommendation : null;
-		        if (modelRec) requestBody.modelRecommendation = modelRec;
 
 			        if (normalizedUseCase === "tryon") {
 			          if (!userImage || !productImage) {
@@ -1253,6 +1256,27 @@ export function ImagePreviewExperience(props: {
           throw new Error("Preview generated, but only a placeholder image was returned.");
         }
 
+        let initialImagePricing: (CachedPricing | undefined)[] | undefined;
+        try {
+          const pricedHero = normalizedImages[0] ?? null;
+          if (pricedHero) {
+            const priced = await requestAccuratePricing({
+              answeredQA,
+              askedStepIds,
+              instanceContext,
+              previewImageUrl: pricedHero,
+            });
+            initialImagePricing = normalizedImages.map((_: string, index: number) => (index === 0 ? priced : undefined));
+            if (currentHeroRef.current === null || currentHeroRef.current === hero) {
+              heroForPricingRef.current = pricedHero;
+              setAccuratePricing(priced);
+              setAccuratePricingStatus("complete");
+            }
+          }
+        } catch {
+          if (currentHeroRef.current === hero) setAccuratePricingStatus("error");
+        }
+
         setCache((prev) => {
           const base = prev ?? loadCache(instanceId, sessionId);
           const nextRuns = Array.isArray(base?.runs) ? [...base!.runs] : [];
@@ -1263,6 +1287,7 @@ export function ImagePreviewExperience(props: {
             answeredQuestionCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : null,
             images: normalizedImages,
             message: msg,
+            ...(initialImagePricing ? { imagePricing: initialImagePricing } : {}),
           };
           nextRuns.push(run);
 
@@ -1330,6 +1355,7 @@ export function ImagePreviewExperience(props: {
           return next;
         });
       } finally {
+        setActiveGenerationReason(null);
         inFlightRef.current = false;
       }
     },
@@ -1344,7 +1370,6 @@ export function ImagePreviewExperience(props: {
       runs,
       sessionId,
       effectiveStepDataSoFar,
-      contextState,
     ]
   );
 
@@ -1515,6 +1540,7 @@ export function ImagePreviewExperience(props: {
   const isPreviewVisible = Boolean(enabled && (hero || busy || (cache?.status === "error" && cache?.error)));
   const showLoader = !hero && (busy || !cache || cache.status === "idle");
   const showRefreshMask = Boolean(hero && busy);
+  const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
   const leadGateActive = leadGateEnabled && Boolean(hero) && !leadCaptured;
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
   const formattedLoaderCountdown = useMemo(() => {
@@ -1536,7 +1562,51 @@ export function ImagePreviewExperience(props: {
     return () => window.clearInterval(timer);
   }, [busy]);
 
-  const AUTO_REGEN_COOLDOWN_MS = 30_000;
+  useEffect(() => {
+    onAutoGenerationBusyChange?.(autoRefreshBusy);
+  }, [autoRefreshBusy, onAutoGenerationBusyChange]);
+
+  useEffect(() => {
+    return () => {
+      onAutoGenerationBusyChange?.(false);
+    };
+  }, [onAutoGenerationBusyChange]);
+
+  useEffect(() => {
+    if (autoGenerationCounterScopeRef.current === autoGenerationCounterScope) return;
+    autoGenerationCounterScopeRef.current = autoGenerationCounterScope;
+    lastAutoRegenAtRef.current = 0;
+    setCache((prev) => {
+      if (!prev) return prev;
+      const next: PreviewCacheV3 = {
+        ...prev,
+        lastGeneratedAnsweredCount: null,
+        updatedAt: Date.now(),
+      };
+      saveCache(instanceId, sessionId, next);
+      return next;
+    });
+  }, [autoGenerationCounterScope, instanceId, sessionId]);
+
+  useEffect(() => {
+    if (autoGenerationCounterScope !== "refinement") return;
+    const last = cache?.lastGeneratedAnsweredCount;
+    if (typeof last !== "number" || !Number.isFinite(last)) return;
+    if (!Number.isFinite(answeredQuestionCount) || answeredQuestionCount > last) return;
+    if (answeredQuestionCount === last) return;
+    setCache((prev) => {
+      if (!prev) return prev;
+      const next: PreviewCacheV3 = {
+        ...prev,
+        lastGeneratedAnsweredCount: null,
+        updatedAt: Date.now(),
+      };
+      saveCache(instanceId, sessionId, next);
+      return next;
+    });
+  }, [answeredQuestionCount, autoGenerationCounterScope, cache?.lastGeneratedAnsweredCount, instanceId, sessionId]);
+
+  const AUTO_REGEN_COOLDOWN_MS = 1_000;
 
   // Auto-regenerate every N answered questions, starting after the first successful run.
   useEffect(() => {
@@ -1699,57 +1769,12 @@ export function ImagePreviewExperience(props: {
         serviceSummary: combinedServiceSummary,
       };
 
-      const res = await fetch(`/api/ai-form/${encodeURIComponent(instanceId)}/pricing`, {
-        method: "POST",
-        headers: { "content-type": "application/json", Accept: "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          sessionId,
-          useCase: (config as any)?.useCase,
-          stepDataSoFar: effectiveStepDataSoFar,
-          answeredQA,
-          askedStepIds,
-          instanceContext,
-          noCache: true,
-          // Send preview image URL for image-based pricing (VLM analyzes the design). Generated images are https CDN URLs.
-          ...(hero && (hero.startsWith("http://") || hero.startsWith("https://")) ? { previewImageUrl: hero } : {}),
-        }),
+      const cached = await requestAccuratePricing({
+        answeredQA,
+        askedStepIds,
+        instanceContext,
+        previewImageUrl: heroAtFetchStart,
       });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) {
-        const message = typeof (json as any)?.error === "string" ? String((json as any).error) : `Pricing failed (${res.status})`;
-        throw new Error(message);
-      }
-      const est = (json as any)?.estimate ?? json;
-      const totalMin = Number((est as any)?.totalMin);
-      const totalMax = Number((est as any)?.totalMax);
-      const currencyRaw = typeof (est as any)?.currency === "string" ? String((est as any).currency).trim().toUpperCase() : "USD";
-      if (!Number.isFinite(totalMin) || !Number.isFinite(totalMax)) {
-        throw new Error("Pricing returned invalid numbers");
-      }
-      const svcRange = (est as any)?.servicePriceRange ?? (est as any)?.service_price_range;
-      const servicePriceRange =
-        typeof svcRange === "object" &&
-        svcRange !== null &&
-        typeof svcRange.low === "number" &&
-        typeof svcRange.high === "number"
-          ? { low: Math.min(svcRange.low, svcRange.high), high: Math.max(svcRange.low, svcRange.high) }
-          : undefined;
-      const imgRange = (est as any)?.imagePriceRange ?? (est as any)?.image_price_range;
-      const imagePriceRange =
-        typeof imgRange === "object" &&
-        imgRange !== null &&
-        typeof imgRange.low === "number" &&
-        typeof imgRange.high === "number"
-          ? { low: Math.min(imgRange.low, imgRange.high), high: Math.max(imgRange.low, imgRange.high) }
-          : { low: Math.min(totalMin, totalMax), high: Math.max(totalMin, totalMax) };
-      const cached: CachedPricing = {
-        totalMin: Math.min(totalMin, totalMax),
-        totalMax: Math.max(totalMin, totalMax),
-        currency: currencyRaw || "USD",
-        imagePriceRange,
-        ...(servicePriceRange ? { servicePriceRange } : {}),
-      };
 
       // Only update displayed pricing if user is still viewing this hero (avoid overwriting after stack nav)
       const stillViewingHero = currentHeroRef.current === heroAtFetchStart;
@@ -1759,7 +1784,8 @@ export function ImagePreviewExperience(props: {
             prev?.servicePriceRange &&
             typeof prev.servicePriceRange.low === "number" &&
             typeof prev.servicePriceRange.high === "number";
-          const finalServiceRange = keepServiceRange && prev?.servicePriceRange ? prev.servicePriceRange : servicePriceRange;
+          const finalServiceRange =
+            keepServiceRange && prev?.servicePriceRange ? prev.servicePriceRange : cached.servicePriceRange;
           return {
             ...cached,
             ...(finalServiceRange ? { servicePriceRange: finalServiceRange } : {}),
@@ -1794,10 +1820,10 @@ export function ImagePreviewExperience(props: {
   }, [
     accuratePricingStatus,
     activeRun,
-    config,
     effectiveStepDataSoFar,
     hero,
     instanceId,
+    requestAccuratePricing,
     selectedConceptIndex,
     sessionId,
   ]);
