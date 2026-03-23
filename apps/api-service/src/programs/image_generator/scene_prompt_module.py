@@ -37,6 +37,8 @@ class ScenePromptSignature(dspy.Signature):
       Fully renovate, replace all finishes/fixtures, make every service-touched element look brand-new.
       De-emphasize preservation; preserve only layout, camera, structure. REPLACE everything else.
     - When generation_intent=refinement: Apply focused changes per user preferences; preserve more of the current design.
+    - When generation_intent=budget_tier_shift: Preserve geometry/camera, but allow broad replacement of service-touched
+      finishes, fixtures, and materials so the image clearly moves into a new budget tier. Do not limit the edit to tiny accessories.
     - For generation mode (is_edit=false): use descriptive language painting the final result.
       Use service_summary to understand the scope of work and ensure the scene reflects a
       fully-completed professional project rendered as one coherent final scene.
@@ -62,7 +64,11 @@ class ScenePromptSignature(dspy.Signature):
     )
     is_edit: bool = dspy.InputField(desc="True if editing an uploaded image, False for text-to-image")
     generation_intent: str = dspy.InputField(
-        desc="'initial' = first large overhaul, demand complete transformation; 'refinement' = focused changes, preserve more"
+        desc=(
+            "'initial' = first large overhaul, demand complete transformation; "
+            "'refinement' = focused changes, preserve more; "
+            "'budget_tier_shift' = preserve geometry/camera but broadly replace service-touched finishes/materials"
+        )
     )
     user_preferences: str = dspy.InputField(
         desc="Structured user preferences as key-value pairs (style, materials, colors, etc.)"

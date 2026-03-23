@@ -27,6 +27,7 @@ import { LeadGenPopover } from "@/components/form/steps/image-preview-experience
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
 import { useFormSubmission } from "@/hooks/use-form-submission";
+import { safeStableJsonForPricingContext } from "../../runtime/step-engine/utils/pricing-context";
 
 function hexToRgba(hex: string, alpha: number): string | null {
   const h = String(hex || "").replace("#", "").trim();
@@ -97,6 +98,13 @@ type CachedPricing = {
   currency: string;
   imagePriceRange?: { low: number; high: number };
   servicePriceRange?: { low: number; high: number };
+  baselinePriceRange?: { low: number; high: number };
+  deltaPriceRange?: { low: number; high: number };
+  deltaDirection?: "up" | "down" | "flat";
+  budgetTier?: string;
+  budgetTierRanges?: Record<string, { low: number; high: number }>;
+  priceDrivers?: Array<{ key: string; label: string }>;
+  calibrationKey?: string;
 };
 
 type PricingRequestInputs = {
@@ -107,6 +115,11 @@ type PricingRequestInputs = {
     serviceSummary?: string | null;
   };
   previewImageUrl?: string | null;
+  pricingScenario?: "initial" | "comparison" | "refinement";
+  baselineImageUrl?: string | null;
+  baselinePriceRange?: { low: number; high: number } | null;
+  changedRefinementKeys?: Array<{ key: string; label: string }>;
+  budgetRange?: number | null;
 };
 
 type PreviewRun = {
@@ -116,6 +129,7 @@ type PreviewRun = {
   answeredQuestionCount?: number | null;
   images: string[];
   message?: string | null;
+  stepDataSnapshot?: Record<string, any>;
   /** Per-image pricing: imagePricing[i] corresponds to images[i]. Fetched once, fixed to the image. */
   imagePricing?: (CachedPricing | undefined)[];
 };
@@ -197,6 +211,17 @@ function computeContextSignature(stepDataSoFar: Record<string, any>) {
   return safeJsonStringify(snapshot);
 }
 
+function buildPricingStepSnapshot(stepDataSoFar: Record<string, any>): Record<string, any> {
+  try {
+    const stable = safeStableJsonForPricingContext(stepDataSoFar || {});
+    if (!stable) return {};
+    const parsed = JSON.parse(stable);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function extractBudgetValue(stepData: Record<string, any>): number | null {
   const raw =
     (stepData as any)?.["step-budget-range"] ??
@@ -205,6 +230,111 @@ function extractBudgetValue(stepData: Record<string, any>): number | null {
     (stepData as any)?.["step-budget"];
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeNumericRange(
+  raw: any,
+  opts?: { allowNegative?: boolean }
+): { low: number; high: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const low = Number((raw as any).low ?? (raw as any).min);
+  const high = Number((raw as any).high ?? (raw as any).max);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return undefined;
+  if (!opts?.allowNegative && (low <= 0 || high <= 0)) return undefined;
+  return { low: Math.min(low, high), high: Math.max(low, high) };
+}
+
+function formatSignedCurrencyRange(params: {
+  range: { low: number; high: number };
+  currency: string;
+  locale?: string;
+  direction?: "up" | "down" | "flat";
+}): string | null {
+  const { range, currency, locale, direction } = params;
+  const low = Number(range.low);
+  const high = Number(range.high);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  const sign = direction === "down" ? "-" : direction === "up" ? "+" : "";
+  const absLow = Math.min(Math.abs(low), Math.abs(high));
+  const absHigh = Math.max(Math.abs(low), Math.abs(high));
+  const formattedLow = formatCurrency(absLow, { locale, currency, compact: true });
+  const formattedHigh = formatCurrency(absHigh, { locale, currency, compact: true });
+  if (absLow === absHigh) return `${sign}${formattedLow}`;
+  return `${sign}${formattedLow}-${formattedHigh}`;
+}
+
+function resolveBudgetTierFromRanges(
+  ranges: Record<string, { low: number; high: number }> | undefined,
+  budgetValue: number | null
+): string | null {
+  if (!ranges || !budgetValue || !Number.isFinite(budgetValue)) return null;
+  for (const key of ["starter", "standard", "premium", "luxury"]) {
+    const range = normalizeNumericRange(ranges[key]);
+    if (!range) continue;
+    if (budgetValue <= range.high) return key;
+  }
+  return "luxury";
+}
+
+function isPricingComparableUseCase(raw?: string | null): boolean {
+  const v = String(raw || "").trim().toLowerCase();
+  return v === "scene" || v === "scene-placement" || v === "scene-refinement";
+}
+
+function valueForDiff(raw: any): string {
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+function shouldTrackRefinementChange(key: string): boolean {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized) return false;
+  if (
+    normalized.includes("budget") ||
+    normalized.includes("service") ||
+    normalized.includes("upload") ||
+    normalized.includes("lead") ||
+    normalized.includes("pricing") ||
+    normalized.includes("location")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function buildChangedRefinementKeys(params: {
+  currentSnapshot: Record<string, any>;
+  previousSnapshot?: Record<string, any> | null;
+  steps: any[];
+}): Array<{ key: string; label: string }> {
+  const { currentSnapshot, previousSnapshot, steps } = params;
+  const labelByStepId = new Map<string, string>();
+  for (const step of steps || []) {
+    const stepId = String((step as any)?.id || "");
+    if (!stepId) continue;
+    const label =
+      typeof (step as any)?.question === "string" && (step as any).question.trim()
+        ? String((step as any).question).trim()
+        : stepId;
+    labelByStepId.set(stepId, label);
+  }
+
+  const out: Array<{ key: string; label: string }> = [];
+  const prev = previousSnapshot && typeof previousSnapshot === "object" ? previousSnapshot : {};
+  const keys = Array.from(new Set([...Object.keys(currentSnapshot || {}), ...Object.keys(prev || {})])).sort();
+  for (const key of keys) {
+    if (!shouldTrackRefinementChange(key)) continue;
+    const currentValue = (currentSnapshot as any)?.[key];
+    const previousValue = (prev as any)?.[key];
+    if (currentValue === null || currentValue === undefined || valueForDiff(currentValue) === valueForDiff(previousValue)) continue;
+    const label = labelByStepId.get(key) || key.replace(/^step-/, "").replace(/[-_]+/g, " ").trim();
+    out.push({ key, label });
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 function isValidUrlLikeImage(src: any): src is string {
@@ -301,6 +431,42 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
                 Number.isFinite(p.servicePriceRange.high)
                   ? { low: p.servicePriceRange.low, high: p.servicePriceRange.high }
                   : undefined,
+              baselinePriceRange:
+                typeof p.baselinePriceRange === "object" &&
+                p.baselinePriceRange !== null &&
+                Number.isFinite(p.baselinePriceRange.low) &&
+                Number.isFinite(p.baselinePriceRange.high)
+                  ? { low: p.baselinePriceRange.low, high: p.baselinePriceRange.high }
+                  : undefined,
+              deltaPriceRange:
+                typeof p.deltaPriceRange === "object" &&
+                p.deltaPriceRange !== null &&
+                Number.isFinite(p.deltaPriceRange.low) &&
+                Number.isFinite(p.deltaPriceRange.high)
+                  ? { low: p.deltaPriceRange.low, high: p.deltaPriceRange.high }
+                  : undefined,
+              deltaDirection:
+                p.deltaDirection === "up" || p.deltaDirection === "down" || p.deltaDirection === "flat"
+                  ? p.deltaDirection
+                  : undefined,
+              budgetTier: typeof p.budgetTier === "string" ? p.budgetTier : undefined,
+              budgetTierRanges:
+                typeof p.budgetTierRanges === "object" && p.budgetTierRanges !== null
+                  ? Object.fromEntries(
+                      Object.entries(p.budgetTierRanges)
+                        .map(([key, value]) => [key, normalizeNumericRange(value)])
+                        .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[1]))
+                    )
+                  : undefined,
+              priceDrivers: Array.isArray(p.priceDrivers)
+                ? p.priceDrivers
+                    .map((driver: any) => ({
+                      key: typeof driver?.key === "string" ? driver.key : "",
+                      label: typeof driver?.label === "string" ? driver.label : typeof driver?.key === "string" ? driver.key : "",
+                    }))
+                    .filter((driver: { key: string; label: string }) => Boolean(driver.key))
+                : undefined,
+              calibrationKey: typeof p.calibrationKey === "string" ? p.calibrationKey : undefined,
             };
           });
           return {
@@ -313,6 +479,10 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
                 : null,
             images: imgs,
             message: typeof (r as any).message === "string" ? (r as any).message : null,
+            stepDataSnapshot:
+              typeof (r as any).stepDataSnapshot === "object" && (r as any).stepDataSnapshot !== null
+                ? ((r as any).stepDataSnapshot as Record<string, any>)
+                : undefined,
             ...(imagePricing.some(Boolean) ? { imagePricing } : {}),
           };
         })
@@ -602,6 +772,7 @@ export function ImagePreviewExperience(props: {
   const previewRefreshNonceRef = useRef<number>(0);
   const pendingManualGenerateRef = useRef(false);
   const pendingBudgetRefineRef = useRef(false);
+  const pendingBudgetTierShiftRef = useRef(false);
   const prevBudgetForPricingRef = useRef<number | null>(null);
   const prevRunsLengthRef = useRef(0);
   const lastAutoRegenAtRef = useRef<number>(0);
@@ -609,15 +780,7 @@ export function ImagePreviewExperience(props: {
   const skipNextFetchRef = useRef(false);
   const currentHeroRef = useRef<string | null>(null);
   const fetchAccuratePricingRef = useRef<(() => Promise<void>) | null>(null);
-  const [accuratePricing, setAccuratePricing] = useState<null | {
-    totalMin: number;
-    totalMax: number;
-    currency: string;
-    /** Image-specific price range (for this design). Used for budget slider bounds. */
-    imagePriceRange?: { low: number; high: number };
-    /** Typical service price range (e.g. Landscape $5k–$175k). For validation/display. */
-    servicePriceRange?: { low: number; high: number };
-  }>(null);
+  const [accuratePricing, setAccuratePricing] = useState<null | CachedPricing>(null);
   const [accuratePricingStatus, setAccuratePricingStatus] = useState<"idle" | "running" | "complete" | "error">("idle");
   const [liveBudget, setLiveBudget] = useState<number | null>(() => extractBudgetValue(stepDataSoFar || {}));
   const [liveBudgetDirty, setLiveBudgetDirty] = useState(false);
@@ -769,7 +932,17 @@ export function ImagePreviewExperience(props: {
   }, [liveBudget, stepDataSoFar]);
 
   const requestAccuratePricing = useCallback(
-    async ({ answeredQA, askedStepIds, instanceContext, previewImageUrl }: PricingRequestInputs): Promise<CachedPricing> => {
+    async ({
+      answeredQA,
+      askedStepIds,
+      instanceContext,
+      previewImageUrl,
+      pricingScenario,
+      baselineImageUrl,
+      baselinePriceRange,
+      changedRefinementKeys,
+      budgetRange,
+    }: PricingRequestInputs): Promise<CachedPricing> => {
       const res = await fetch(`/api/ai-form/${encodeURIComponent(instanceId)}/pricing`, {
         method: "POST",
         headers: { "content-type": "application/json", Accept: "application/json" },
@@ -782,8 +955,17 @@ export function ImagePreviewExperience(props: {
           askedStepIds,
           instanceContext,
           noCache: true,
+          ...(pricingScenario ? { pricingScenario } : {}),
           ...(previewImageUrl && (previewImageUrl.startsWith("http://") || previewImageUrl.startsWith("https://"))
             ? { previewImageUrl }
+            : {}),
+          ...(baselineImageUrl && (baselineImageUrl.startsWith("http://") || baselineImageUrl.startsWith("https://"))
+            ? { baselineImageUrl }
+            : {}),
+          ...(baselinePriceRange ? { baselinePriceRange } : {}),
+          ...(Array.isArray(changedRefinementKeys) && changedRefinementKeys.length > 0 ? { changedRefinementKeys } : {}),
+          ...(budgetRange !== null && budgetRange !== undefined && Number.isFinite(Number(budgetRange))
+            ? { budgetRange: Number(budgetRange) }
             : {}),
         }),
       });
@@ -815,12 +997,46 @@ export function ImagePreviewExperience(props: {
         typeof imgRange.high === "number"
           ? { low: Math.min(imgRange.low, imgRange.high), high: Math.max(imgRange.low, imgRange.high) }
           : { low: Math.min(totalMin, totalMax), high: Math.max(totalMin, totalMax) };
+      const baselineRange = normalizeNumericRange((est as any)?.baselinePriceRange ?? (est as any)?.baseline_price_range);
+      const deltaRange = normalizeNumericRange((est as any)?.deltaPriceRange ?? (est as any)?.delta_price_range, {
+        allowNegative: true,
+      });
+      const budgetTier =
+        typeof (est as any)?.budgetTier === "string" ? String((est as any).budgetTier).trim().toLowerCase() : undefined;
+      const budgetTierRangesRaw = (est as any)?.budgetTierRanges ?? (est as any)?.budget_tier_ranges;
+      const budgetTierRanges =
+        budgetTierRangesRaw && typeof budgetTierRangesRaw === "object"
+          ? Object.fromEntries(
+              Object.entries(budgetTierRangesRaw)
+                .map(([key, value]) => [key, normalizeNumericRange(value)])
+                .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[1]))
+            )
+          : undefined;
+      const rawDrivers = Array.isArray((est as any)?.priceDrivers ?? (est as any)?.price_drivers)
+        ? ((est as any)?.priceDrivers ?? (est as any)?.price_drivers)
+        : [];
+      const priceDrivers = rawDrivers
+        .map((driver: any) => ({
+          key: typeof driver?.key === "string" ? driver.key.trim() : "",
+          label:
+            typeof driver?.label === "string" ? driver.label.trim() : typeof driver?.key === "string" ? driver.key.trim() : "",
+        }))
+        .filter((driver: { key: string; label: string }) => Boolean(driver.key));
       return {
         totalMin: Math.min(totalMin, totalMax),
         totalMax: Math.max(totalMin, totalMax),
         currency: currencyRaw || "USD",
         imagePriceRange,
         ...(servicePriceRange ? { servicePriceRange } : {}),
+        ...(baselineRange ? { baselinePriceRange: baselineRange } : {}),
+        ...(deltaRange ? { deltaPriceRange: deltaRange } : {}),
+        ...((est as any)?.deltaDirection === "up" || (est as any)?.deltaDirection === "down" || (est as any)?.deltaDirection === "flat"
+          ? { deltaDirection: (est as any).deltaDirection }
+          : {}),
+        ...(budgetTier ? { budgetTier } : {}),
+        ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
+        ...(priceDrivers.length > 0 ? { priceDrivers } : {}),
+        ...(typeof (est as any)?.calibrationKey === "string" ? { calibrationKey: String((est as any).calibrationKey) } : {}),
       };
     },
     [config, effectiveStepDataSoFar, instanceId, sessionId]
@@ -897,6 +1113,91 @@ export function ImagePreviewExperience(props: {
     });
   }, [contextSignature, enabled, instanceId, sessionId]);
 
+  const derivePricingContextForPreview = useCallback(
+    (params: { stepsForQA: any[]; previewImageUrl?: string | null }) => {
+      const previewImageUrl = params.previewImageUrl || null;
+      const currentSnapshot = buildPricingStepSnapshot(effectiveStepDataSoFar || {});
+      const normalizedUseCase = String((config as any)?.useCase || "")
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, "-");
+      const previewIndex = previewImageUrl ? activeRun?.images?.indexOf(previewImageUrl) ?? -1 : -1;
+      const cachedActivePricing = previewIndex >= 0 ? activeRun?.imagePricing?.[previewIndex] : undefined;
+      const currentVisiblePricing =
+        previewImageUrl && previewImageUrl === hero && accuratePricing ? accuratePricing : cachedActivePricing;
+      const previousRun = activeIndex > 0 ? runs[activeIndex - 1] ?? null : null;
+      const previousRunPricing = previousRun?.imagePricing?.[0];
+      const previousSnapshot = activeRun?.stepDataSnapshot ?? previousRun?.stepDataSnapshot ?? null;
+
+      const normalizeUploadToStrings = (raw: any): string[] => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw.filter((x) => typeof x === "string");
+        if (typeof raw === "string") return [raw];
+        return [];
+      };
+      const stepSceneUpload = (
+        ["step-upload-scene-image", "step-refinement-upload-scene-image"] as const
+      )
+        .map((stepId) => normalizeUploadToStrings((effectiveStepDataSoFar as any)?.[stepId]).filter(isValidUrlLikeImage)[0] ?? null)
+        .find(Boolean) ?? null;
+      const stepUserUpload =
+        normalizeUploadToStrings((effectiveStepDataSoFar as any)?.["step-upload-user-image"]).filter(isValidUrlLikeImage)[0] ?? null;
+      const uploadedBeforeImage =
+        isPricingComparableUseCase(normalizedUseCase) && (stepSceneUpload || stepUserUpload)
+          ? (stepSceneUpload || stepUserUpload)
+          : null;
+      const changedRefinementKeys = buildChangedRefinementKeys({
+        currentSnapshot,
+        previousSnapshot,
+        steps: params.stepsForQA,
+      });
+
+      const baselineRange =
+        currentVisiblePricing && Number.isFinite(currentVisiblePricing.totalMin) && Number.isFinite(currentVisiblePricing.totalMax)
+          ? {
+              low: Math.min(currentVisiblePricing.totalMin, currentVisiblePricing.totalMax),
+              high: Math.max(currentVisiblePricing.totalMin, currentVisiblePricing.totalMax),
+            }
+          : previousRunPricing &&
+              Number.isFinite(previousRunPricing.totalMin) &&
+              Number.isFinite(previousRunPricing.totalMax)
+            ? {
+                low: Math.min(previousRunPricing.totalMin, previousRunPricing.totalMax),
+                high: Math.max(previousRunPricing.totalMin, previousRunPricing.totalMax),
+              }
+            : null;
+
+      if (baselineRange) {
+        return {
+          pricingScenario: "refinement" as const,
+          baselinePriceRange: baselineRange,
+          baselineImageUrl: null,
+          changedRefinementKeys,
+          stepDataSnapshot: currentSnapshot,
+        };
+      }
+
+      if (uploadedBeforeImage) {
+        return {
+          pricingScenario: "comparison" as const,
+          baselinePriceRange: null,
+          baselineImageUrl: uploadedBeforeImage,
+          changedRefinementKeys: [] as Array<{ key: string; label: string }>,
+          stepDataSnapshot: currentSnapshot,
+        };
+      }
+
+      return {
+        pricingScenario: "initial" as const,
+        baselinePriceRange: null,
+        baselineImageUrl: null,
+        changedRefinementKeys: [] as Array<{ key: string; label: string }>,
+        stepDataSnapshot: currentSnapshot,
+      };
+    },
+    [accuratePricing, activeIndex, activeRun, config, effectiveStepDataSoFar, hero, runs]
+  );
+
   const runGenerate = useCallback(
     async (reason: "auto" | "manual") => {
       if (!enabled) return;
@@ -904,7 +1205,7 @@ export function ImagePreviewExperience(props: {
       inFlightRef.current = true;
       let responseErrorDetails: string | null = null;
 
-      const normalizeUseCase = (raw?: unknown): "tryon" | "scene-placement" | "scene" => {
+      const normalizeUseCase = (raw?: unknown): "tryon" | "scene-placement" | "scene-refinement" | "scene" => {
         const v = String(raw || "")
           .trim()
           .toLowerCase()
@@ -912,6 +1213,7 @@ export function ImagePreviewExperience(props: {
           .replace(/\s+/g, "-");
         if (v === "tryon" || v === "try-on") return "tryon";
         if (v === "scene-placement") return "scene-placement";
+        if (v === "scene-refinement") return "scene-refinement";
         if (v === "scene") return "scene";
         return "scene";
       };
@@ -977,6 +1279,7 @@ export function ImagePreviewExperience(props: {
 
       const hasExistingPreview = Boolean(baseReferenceImage);
       const isBudgetDrivenRegeneration = Boolean(pendingBudgetRefineRef.current);
+      const isBudgetTierShift = Boolean(pendingBudgetTierShiftRef.current);
       const generationSignatureAtStart = safeJsonStringify({
         contextSignature: signatureAtStart,
         uploads: storedUploads,
@@ -1033,8 +1336,10 @@ export function ImagePreviewExperience(props: {
       const originalReferenceImage =
         (stepSceneUpload || stepUserUpload || storedUploads?.[0] || null) as string | null;
       const generationIndex = runs.length;
-      const generationIntent: "initial" | "small_improvement" | "regenerate" = isBudgetDrivenRegeneration
-        ? "regenerate"
+      const generationIntent: "initial" | "small_improvement" | "regenerate" | "budget_tier_shift" = isBudgetDrivenRegeneration
+        ? isBudgetTierShift
+          ? "budget_tier_shift"
+          : "regenerate"
         : hasExistingPreview
           ? "small_improvement"
           : "initial";
@@ -1100,7 +1405,9 @@ export function ImagePreviewExperience(props: {
               ? runs.length
                 ? "Fine-tuning your design + pricing…"
                 : "Generating your design + pricing for you…"
-              : "Refreshing your design + pricing…",
+              : isBudgetTierShift
+                ? "Reworking your design + pricing for the new budget tier…"
+                : "Refreshing your design + pricing…",
           runStartedAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -1114,6 +1421,7 @@ export function ImagePreviewExperience(props: {
 	        const askedStepIds = stepsForQA
 	          .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
 	          .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
+          const pricingContextForNextRun = derivePricingContextForPreview({ stepsForQA, previewImageUrl: hero });
 	        const formCtx = loadFormStateContext(sessionId);
 	        const serviceIdRaw =
 	          (effectiveStepDataSoFar as any)?.["step-service-primary"] ??
@@ -1265,6 +1573,11 @@ export function ImagePreviewExperience(props: {
               askedStepIds,
               instanceContext,
               previewImageUrl: pricedHero,
+              pricingScenario: pricingContextForNextRun.pricingScenario,
+              baselineImageUrl: pricingContextForNextRun.baselineImageUrl,
+              baselinePriceRange: pricingContextForNextRun.baselinePriceRange,
+              changedRefinementKeys: pricingContextForNextRun.changedRefinementKeys,
+              budgetRange: budgetForRequest,
             });
             initialImagePricing = normalizedImages.map((_: string, index: number) => (index === 0 ? priced : undefined));
             if (currentHeroRef.current === null || currentHeroRef.current === hero) {
@@ -1287,6 +1600,7 @@ export function ImagePreviewExperience(props: {
             answeredQuestionCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : null,
             images: normalizedImages,
             message: msg,
+            stepDataSnapshot: pricingContextForNextRun.stepDataSnapshot,
             ...(initialImagePricing ? { imagePricing: initialImagePricing } : {}),
           };
           nextRuns.push(run);
@@ -1316,6 +1630,7 @@ export function ImagePreviewExperience(props: {
         void refreshRegenAllowance();
       } catch (e) {
         pendingBudgetRefineRef.current = false;
+        pendingBudgetTierShiftRef.current = false;
         const message = e instanceof Error ? e.message : "Failed to generate preview.";
         const details =
           e && typeof e === "object" && "details" in e && typeof (e as any).details === "string"
@@ -1356,6 +1671,7 @@ export function ImagePreviewExperience(props: {
         });
       } finally {
         setActiveGenerationReason(null);
+        pendingBudgetTierShiftRef.current = false;
         inFlightRef.current = false;
       }
     },
@@ -1364,6 +1680,7 @@ export function ImagePreviewExperience(props: {
       cache?.generatedForContextSignature,
       cache?.refinementNote,
       config,
+      derivePricingContextForPreview,
       enabled,
       instanceId,
       refreshRegenAllowance,
@@ -1746,6 +2063,7 @@ export function ImagePreviewExperience(props: {
       const askedStepIds = stepsForQA
         .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
         .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
+      const pricingContext = derivePricingContextForPreview({ stepsForQA, previewImageUrl: heroAtFetchStart });
 
       const formCtx = loadFormStateContext(sessionId);
       const serviceIdRaw =
@@ -1774,6 +2092,11 @@ export function ImagePreviewExperience(props: {
         askedStepIds,
         instanceContext,
         previewImageUrl: heroAtFetchStart,
+        pricingScenario: pricingContext.pricingScenario,
+        baselineImageUrl: pricingContext.baselineImageUrl,
+        baselinePriceRange: pricingContext.baselinePriceRange,
+        changedRefinementKeys: pricingContext.changedRefinementKeys,
+        budgetRange: liveBudget,
       });
 
       // Only update displayed pricing if user is still viewing this hero (avoid overwriting after stack nav)
@@ -1820,9 +2143,11 @@ export function ImagePreviewExperience(props: {
   }, [
     accuratePricingStatus,
     activeRun,
+    derivePricingContextForPreview,
     effectiveStepDataSoFar,
     hero,
     instanceId,
+    liveBudget,
     requestAccuratePricing,
     selectedConceptIndex,
     sessionId,
@@ -1851,9 +2176,15 @@ export function ImagePreviewExperience(props: {
     prevBudgetForPricingRef.current = liveBudget;
     if (!enabled || !hero) return;
     if (!leadCaptured) return;
+    const heroIdx = hero ? (activeRun?.images?.indexOf(hero) ?? -1) : -1;
+    const cachedHeroPricing = heroIdx >= 0 ? activeRun?.imagePricing?.[heroIdx] : undefined;
+    const tierRanges = accuratePricing?.budgetTierRanges ?? cachedHeroPricing?.budgetTierRanges;
+    const sourceTier = accuratePricing?.budgetTier ?? cachedHeroPricing?.budgetTier ?? null;
+    const targetTier = resolveBudgetTierFromRanges(tierRanges, liveBudget);
+    pendingBudgetTierShiftRef.current = Boolean(sourceTier && targetTier && sourceTier !== targetTier);
     pendingBudgetRefineRef.current = true;
     prevRunsLengthRef.current = runs.length;
-  }, [enabled, hero, leadCaptured, liveBudget, runs.length]);
+  }, [accuratePricing?.budgetTier, accuratePricing?.budgetTierRanges, activeRun, enabled, hero, leadCaptured, liveBudget, runs.length]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -2163,6 +2494,34 @@ export function ImagePreviewExperience(props: {
     })}`;
   }, [accuratePricing, pricingCurrency, pricingLocale]);
 
+  const pricingDetailSummary = useMemo(() => {
+    if (!accuratePricing) return { deltaText: null as string | null, driversText: null as string | null };
+    if (leadGateEnabled && !leadCaptured) return { deltaText: null as string | null, driversText: null as string | null };
+
+    const currency = (accuratePricing.currency || pricingCurrency || "USD").toUpperCase();
+    const deltaText =
+      accuratePricing.deltaPriceRange && accuratePricing.deltaDirection && accuratePricing.deltaDirection !== "flat"
+        ? (() => {
+            const formatted = formatSignedCurrencyRange({
+              range: accuratePricing.deltaPriceRange,
+              currency,
+              locale: pricingLocale,
+              direction: accuratePricing.deltaDirection,
+            });
+            return formatted ? `Vs. before ${formatted}` : null;
+          })()
+        : null;
+    const driverLabels = Array.from(
+      new Set(
+        (accuratePricing.priceDrivers ?? [])
+          .map((driver) => (typeof driver?.label === "string" ? driver.label.trim() : ""))
+          .filter(Boolean)
+      )
+    ).slice(0, 3);
+    const driversText = driverLabels.length > 0 ? `Drivers: ${driverLabels.join(", ")}` : null;
+    return { deltaText, driversText };
+  }, [accuratePricing, leadCaptured, leadGateEnabled, pricingCurrency, pricingLocale]);
+
   const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
   // Price pill shows the image-specific price range from the API. Never show $200-$400 placeholder.
   const pillPrice = formattedAccuratePricingRange
@@ -2239,6 +2598,23 @@ export function ImagePreviewExperience(props: {
         accentColor={pillBg}
         style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
       />
+      {pricingDetailSummary.deltaText || pricingDetailSummary.driversText ? (
+        <div
+          className="mt-2 flex min-w-0 flex-col gap-1 text-[0.68rem] leading-[1.2] text-white/80"
+          style={{ fontFamily: theme.fontFamily }}
+        >
+          {pricingDetailSummary.deltaText ? (
+            <div className="truncate" title={pricingDetailSummary.deltaText}>
+              {pricingDetailSummary.deltaText}
+            </div>
+          ) : null}
+          {pricingDetailSummary.driversText ? (
+            <div className="truncate" title={pricingDetailSummary.driversText}>
+              {pricingDetailSummary.driversText}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   ) : null;
   const uploadControlPositionClass =
@@ -2266,6 +2642,13 @@ export function ImagePreviewExperience(props: {
         currency: cached.currency || "USD",
         imagePriceRange: cached.imagePriceRange,
         servicePriceRange: cached.servicePriceRange,
+        baselinePriceRange: cached.baselinePriceRange,
+        deltaPriceRange: cached.deltaPriceRange,
+        deltaDirection: cached.deltaDirection,
+        budgetTier: cached.budgetTier,
+        budgetTierRanges: cached.budgetTierRanges,
+        priceDrivers: cached.priceDrivers,
+        calibrationKey: cached.calibrationKey,
       });
       setAccuratePricingStatus("complete");
       return;

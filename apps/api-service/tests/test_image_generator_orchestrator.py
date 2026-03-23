@@ -95,3 +95,38 @@ def test_scene_refinement_inputs_include_previous_prompt_and_refinement_notes() 
 
     assert inputs["previous_prompt"] == "Warm transitional bathroom with oak vanity and matte brass hardware."
     assert "terrazzo" in inputs["refinement_notes"].lower()
+
+
+def test_scene_inputs_budget_tier_shift_uses_broad_regeneration_adherence() -> None:
+    inputs = orchestrator._extract_scene_inputs(
+        {
+            "useCase": "scene",
+            "generationIntent": "budget_tier_shift",
+            "sceneImage": "https://example.com/scene.png",
+            "referenceImages": ["https://example.com/scene.png"],
+            "instanceContext": {
+                "serviceSummary": "Bathroom remodeling service.",
+            },
+        }
+    )
+
+    assert inputs["generation_intent"] == "budget_tier_shift"
+    assert "broad replacement" in inputs["reference_adherence"].lower()
+    assert "tiny accessories" in inputs["reference_adherence"].lower()
+
+
+def test_scene_refinement_inputs_budget_tier_shift_expands_refinement_scope() -> None:
+    inputs = orchestrator._extract_scene_refinement_inputs(
+        {
+            "useCase": "scene-refinement",
+            "generationIntent": "budget_tier_shift",
+            "refinementNotes": "Increase the finish level and upgrade the vanity and tile.",
+            "instanceContext": {
+                "serviceSummary": "Bathroom remodeling service.",
+            },
+            "sceneImage": "https://example.com/scene.png",
+        }
+    )
+
+    assert inputs["refinement_notes"].lower().startswith("budget tier shift requested.")
+    assert "new budget tier" in inputs["reference_adherence"].lower()

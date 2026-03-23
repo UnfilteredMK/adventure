@@ -23,7 +23,8 @@ class SceneRefinementPromptSignature(dspy.Signature):
     - Never include text instructions like "no text" in the main prompt (use negative_prompt).
     - Keep prompts under 300 words; be specific and visual.
     - Treat this as an image-edit/inpaint task: preserve the original structure and only revise targeted elements.
-    - Do not rewrite the whole design from scratch. Preserve unchanged materials, objects, and layout unless the user explicitly asked to change them.
+    - Do not rewrite the whole design from scratch unless the reference_adherence explicitly says this is a budget tier shift.
+      In that case, preserve geometry/camera but allow broader finish/material replacement than a normal refinement.
     """
 
     service_summary: str = dspy.InputField(

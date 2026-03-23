@@ -9,18 +9,21 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-SERVICE_BUDGET_BOUNDS: tuple[tuple[tuple[str, ...], tuple[int, int]], ...] = (
-    (("bath", "bathroom"), (3000, 60000)),
-    (("kitchen",), (10000, 120000)),
-    (("paint", "painting"), (500, 20000)),
-    (("floor", "flooring"), (1500, 30000)),
-    (("roof",), (5000, 50000)),
-    (("hvac",), (3000, 25000)),
-    (("landscape", "yard"), (2000, 50000)),
-    (("remodel", "renovation"), (5000, 150000)),
+from programs.pricing.service_calibration import (
+    DEFAULT_SERVICE_CALIBRATION,
+    SERVICE_CALIBRATIONS,
+    match_service_calibration,
 )
 
-DEFAULT_BUDGET_BOUNDS: tuple[int, int] = (1000, 150000)
+SERVICE_BUDGET_BOUNDS: tuple[tuple[tuple[str, ...], tuple[int, int]], ...] = tuple(
+    (calibration.hints, (calibration.service_price_range.low, calibration.service_price_range.high))
+    for calibration in SERVICE_CALIBRATIONS
+)
+
+DEFAULT_BUDGET_BOUNDS: tuple[int, int] = (
+    DEFAULT_SERVICE_CALIBRATION.service_price_range.low,
+    DEFAULT_SERVICE_CALIBRATION.service_price_range.high,
+)
 
 
 def infer_budget_bounds_hint(
@@ -38,10 +41,9 @@ def infer_budget_bounds_hint(
     text = f"{industry} {service} {services_summary}".strip().lower()
     if not text:
         return DEFAULT_BUDGET_BOUNDS
-    for hints, bounds in SERVICE_BUDGET_BOUNDS:
-        if any(h in text for h in hints):
-            return bounds
-    return DEFAULT_BUDGET_BOUNDS
+    calibration = match_service_calibration(text)
+    bounds = calibration.normalized_service_range()
+    return (bounds.low, bounds.high)
 
 
 def ensure_budget_in_plan(plan_items: list, *, asked_step_ids: Optional[set] = None) -> list:

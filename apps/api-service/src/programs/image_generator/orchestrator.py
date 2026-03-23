@@ -217,6 +217,8 @@ def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     ).strip().lower().replace("-", "_")
     if generation_intent_raw == "initial":
         out["generation_intent"] = "initial"
+    elif generation_intent_raw == "budget_tier_shift":
+        out["generation_intent"] = "budget_tier_shift"
     elif generation_intent_raw in ("small_improvement", "refine", "refinement", "regenerate"):
         out["generation_intent"] = "refinement"
     else:
@@ -228,6 +230,12 @@ def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "Preserve ONLY: room layout, camera angle, structural walls, perspective. REPLACE everything else the service touches — "
                 "all finishes, fixtures, materials, surfaces. Every service-touched element must look brand-new and professionally done. "
                 "Nothing old, worn, or original should remain in the renovated scope."
+            )
+        elif out["generation_intent"] == "budget_tier_shift":
+            out["reference_adherence"] = (
+                "BUDGET TIER SHIFT: preserve the room geometry, camera, perspective, and structural shell, but allow BROAD replacement "
+                "of service-touched finishes, fixtures, materials, and surfaces so the image clearly moves into a new budget tier. "
+                "Do not limit the edit to tiny accessories."
             )
         else:
             anchor_hint = "uploaded reference image"
@@ -358,6 +366,9 @@ def _extract_scene_placement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract inputs for SceneRefinementPromptModule."""
     placement_inputs = _extract_scene_placement_inputs(payload)
+    generation_intent_raw = str(
+        payload.get("generationIntent") or payload.get("generation_intent") or ""
+    ).strip().lower().replace("-", "_")
     previous_prompt = sanitize_visual_context_text(
         payload.get("previousPrompt") or payload.get("previous_prompt") or "",
         max_len=500,
@@ -373,6 +384,7 @@ def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
         or "",
         max_len=500,
     )
+    tier_shift_refinement = generation_intent_raw == "budget_tier_shift"
     return {
         "service_summary": placement_inputs.get("service_summary") or "Refine the current scene design.",
         "subject": placement_inputs.get("subject") or "project",
@@ -381,9 +393,20 @@ def _extract_scene_refinement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "scene_context": "User provided an existing scene/design image that should remain the anchor.",
         "user_preferences": placement_inputs.get("user_preferences") or "",
         "previous_prompt": previous_prompt,
-        "refinement_notes": refinement_notes,
+        "refinement_notes": (
+            "Budget tier shift requested. Make broad finish/material changes that clearly match the new budget tier while preserving geometry. "
+            + refinement_notes
+            if tier_shift_refinement and refinement_notes
+            else "Budget tier shift requested. Make broad finish/material changes that clearly match the new budget tier while preserving geometry."
+            if tier_shift_refinement
+            else refinement_notes
+        ),
         "reference_adherence": (
-            "Hard anchor constraint: preserve the current scene composition, camera, perspective, geometry, depth relationships, "
+            "Budget tier shift anchor constraint: preserve the current scene composition, camera, perspective, geometry, and lighting "
+            "direction, but allow broad replacement of service-touched materials, fixtures, and finishes so the result visibly lands in "
+            "the new budget tier."
+            if tier_shift_refinement
+            else "Hard anchor constraint: preserve the current scene composition, camera, perspective, geometry, depth relationships, "
             "lighting direction, and unchanged objects/materials. Make only the requested local design refinements."
         ),
         "budget_level": placement_inputs.get("budget_level") or "",

@@ -197,6 +197,8 @@ export function StepEngine({
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const [previewAutoGenerationPending, setPreviewAutoGenerationPending] = useState(false);
   const [previewAutoGenerationBusy, setPreviewAutoGenerationBusy] = useState(false);
+  const pendingRefinementPreviewAdvanceRef = useRef<null | { stepId: string; data: any }>(null);
+  const pendingRefinementPreviewAdvanceStageRef = useRef<"idle" | "waiting_for_start" | "waiting_for_finish">("idle");
   const [pendingPreviewSceneUploadUrl, setPendingPreviewSceneUploadUrl] = useState<string | null>(null);
   // Once the preview experience is enabled, keep it enabled (avoids flicker if total steps change as new batches load).
   const [previewEverEnabled, setPreviewEverEnabled] = useState(false);
@@ -655,8 +657,33 @@ export function StepEngine({
     if (previewHasImage) return;
     refinementAdvanceFromStepIdRef.current = null;
     pendingRefinementFocusStepIdRef.current = null;
+    pendingRefinementPreviewAdvanceRef.current = null;
+    pendingRefinementPreviewAdvanceStageRef.current = "idle";
     setAwaitingRefinementAdvance(false);
   }, [previewHasImage]);
+
+  useEffect(() => {
+    const stage = pendingRefinementPreviewAdvanceStageRef.current;
+    const pending = pendingRefinementPreviewAdvanceRef.current;
+    if (!pending) {
+      pendingRefinementPreviewAdvanceStageRef.current = "idle";
+      return;
+    }
+    if (stage === "waiting_for_start") {
+      if (!previewAutoGenerationBusy) return;
+      pendingRefinementPreviewAdvanceStageRef.current = "waiting_for_finish";
+      return;
+    }
+    if (stage !== "waiting_for_finish" || previewAutoGenerationBusy) return;
+    if (!currentStep || currentStep.id !== pending.stepId) {
+      pendingRefinementPreviewAdvanceRef.current = null;
+      pendingRefinementPreviewAdvanceStageRef.current = "idle";
+      return;
+    }
+    pendingRefinementPreviewAdvanceRef.current = null;
+    pendingRefinementPreviewAdvanceStageRef.current = "idle";
+    void goToNextStep(pending.data);
+  }, [currentStep, goToNextStep, previewAutoGenerationBusy]);
 
   const effectiveCurrentStep = useMemo(
     () => (currentStep ? personalizeStepCopy(currentStep, state?.stepData || {}, formState) : currentStep),
@@ -2401,6 +2428,13 @@ export function StepEngine({
       isRefinementSceneUploadStep &&
       typeof data === "string" &&
       (data.startsWith("http://") || data.startsWith("https://") || data.startsWith("data:image/"));
+    const shouldPauseForRefinementPreviewRefresh = Boolean(
+      previewHasImage &&
+        isRefinementQuestionStep &&
+        hasMeaningfulAnswer(data) &&
+        nextAnsweredRefinementQuestionCount > 0 &&
+        nextAnsweredRefinementQuestionCount % 2 === 0
+    );
     const uploadedSceneImageUrl =
       isSceneUploadStep &&
       typeof data === "string" &&
@@ -2418,13 +2452,9 @@ export function StepEngine({
       setPendingPreviewSceneUploadUrl(uploadedSceneImageUrl);
       setPreviewRefreshNonce((prev) => prev + 1);
     }
-    if (
-      isRefinementQuestionStep &&
-      hasMeaningfulAnswer(data) &&
-      nextAnsweredRefinementQuestionCount > 0 &&
-      nextAnsweredRefinementQuestionCount % 2 === 0
-    ) {
+    if (shouldPauseForRefinementPreviewRefresh) {
       setPreviewAutoGenerationPending(true);
+      setPreviewRefreshNonce((prev) => prev + 1);
     }
     
     console.log('[StepEngine] Step completed', {
@@ -2626,6 +2656,13 @@ export function StepEngine({
     if (leadGateLocksQuestionAreaRef.current && !isLeadStepForMetrics) {
       // Keep answers/state, but never continue loading or advancing question flow until lead capture.
       persistStepAnswer();
+      return;
+    }
+
+    if (shouldPauseForRefinementPreviewRefresh) {
+      persistStepAnswer();
+      pendingRefinementPreviewAdvanceRef.current = { stepId: currentStep.id, data };
+      pendingRefinementPreviewAdvanceStageRef.current = "waiting_for_start";
       return;
     }
 
@@ -3299,14 +3336,12 @@ export function StepEngine({
     }
   }, [hasRefinementQuestions, previewAutoGenerationPending, previewHasImage]);
   const isAutoPreviewRefreshLocked = Boolean(previewHasImage && previewAutoGenerationBusy);
-  const shouldHideQuestionPaneForAutoRefresh = Boolean(previewAutoGenerationPending || isAutoPreviewRefreshLocked);
   // Keep the question pane hidden while waiting for lead capture; re-show it once lead is captured and pricing is revealed.
   const shouldHideQuestionPaneForLeadGate = Boolean(
     previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
   );
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
-    !shouldHideQuestionPaneForAutoRefresh &&
     previewQuestionRevealReady &&
     !shouldHideQuestionPaneForLeadGate &&
     (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
@@ -3653,7 +3688,7 @@ export function StepEngine({
                       hideQuestionPane={hideQuestionPane}
                       instanceId={instanceId}
                       isBatchLoading={isBatchLoading}
-                      isFetchingNext={isFetchingNext}
+                      isFetchingNext={isFetchingNext || isAutoPreviewRefreshLocked}
                       isMobileViewport={isMobileViewport}
                       isRefinementUploadStep={isRefinementUploadStep}
                       leadCapturedForUI={leadCapturedForUI}

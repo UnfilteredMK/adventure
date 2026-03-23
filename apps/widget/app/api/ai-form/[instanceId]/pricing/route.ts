@@ -53,7 +53,7 @@ function sanitizeForLog(value: unknown, depth = 0, parentKey?: string): any {
   return String(value);
 }
 
-function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene" {
+function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene-refinement" | "scene" {
   const v = String(raw || "")
     .trim()
     .toLowerCase()
@@ -61,6 +61,7 @@ function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene" {
     .replace(/\s+/g, "-");
   if (v === "tryon" || v === "try-on") return "tryon";
   if (v === "scene-placement") return "scene-placement";
+  if (v === "scene-refinement") return "scene-refinement";
   if (v === "scene") return "scene";
   return "scene";
 }
@@ -100,13 +101,16 @@ function n(value: any): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
-function narrowPriceWindow(totalMin: number, totalMax: number): { totalMin: number; totalMax: number } {
-  const min = Math.min(totalMin, totalMax);
-  const max = Math.max(totalMin, totalMax);
-  const baseline = (min + max) / 2;
-  const nextMin = Math.max(100, Math.round(baseline * 0.8));
-  const nextMax = Math.max(nextMin + 100, Math.round(baseline * 1.2));
-  return { totalMin: nextMin, totalMax: nextMax };
+function parseRangeObject(
+  raw: any,
+  opts?: { allowNegative?: boolean }
+): { low: number; high: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const low = n((raw as any).low ?? (raw as any).min ?? (raw as any).rangeLow ?? (raw as any).range_low);
+  const high = n((raw as any).high ?? (raw as any).max ?? (raw as any).rangeHigh ?? (raw as any).range_high);
+  if (low === null || high === null) return undefined;
+  if (!opts?.allowNegative && (low <= 0 || high <= 0)) return undefined;
+  return { low: Math.min(low, high), high: Math.max(low, high) };
 }
 
 function parsePricingEstimate(
@@ -119,6 +123,13 @@ function parsePricingEstimate(
   requestId?: string;
   servicePriceRange?: { low: number; high: number };
   imagePriceRange?: { low: number; high: number };
+  baselinePriceRange?: { low: number; high: number };
+  deltaPriceRange?: { low: number; high: number };
+  deltaDirection?: string;
+  budgetTier?: string;
+  budgetTierRanges?: Record<string, { low: number; high: number }>;
+  priceDrivers?: Array<{ key: string; label: string }>;
+  calibrationKey?: string;
 } | null {
   if (!json || typeof json !== "object") return null;
 
@@ -169,23 +180,46 @@ function parsePricingEstimate(
           : typeof (json as any)?.requestId === "string"
             ? String((json as any).requestId).trim()
             : typeof (json as any)?.request_id === "string"
-              ? String((json as any).request_id).trim()
+            ? String((json as any).request_id).trim()
               : undefined;
-    const narrowed = narrowPriceWindow(totalMin, totalMax);
-    const svcRange = root?.servicePriceRange ?? root?.service_price_range;
-    const servicePriceRange =
-      typeof svcRange === "object" && svcRange !== null && typeof svcRange.low === "number" && typeof svcRange.high === "number"
-        ? { low: Math.min(svcRange.low, svcRange.high), high: Math.max(svcRange.low, svcRange.high) }
+    const servicePriceRange = parseRangeObject(root?.servicePriceRange ?? root?.service_price_range);
+    const imagePriceRange = parseRangeObject(root?.imagePriceRange ?? root?.image_price_range) ?? {
+      low: totalMin,
+      high: totalMax,
+    };
+    const baselinePriceRange = parseRangeObject(root?.baselinePriceRange ?? root?.baseline_price_range);
+    const deltaPriceRange = parseRangeObject(root?.deltaPriceRange ?? root?.delta_price_range, { allowNegative: true });
+    const budgetTierRangesRaw = root?.budgetTierRanges ?? root?.budget_tier_ranges;
+    const budgetTierRanges =
+      budgetTierRangesRaw && typeof budgetTierRangesRaw === "object"
+        ? Object.fromEntries(
+            Object.entries(budgetTierRangesRaw)
+              .map(([key, value]) => [key, parseRangeObject(value)])
+              .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[0] && entry[1]))
+          )
         : undefined;
-    const imagePriceRange = { low: totalMin, high: totalMax };
+    const rawDrivers = Array.isArray(root?.priceDrivers ?? root?.price_drivers) ? (root?.priceDrivers ?? root?.price_drivers) : [];
+    const priceDrivers = rawDrivers
+      .map((item: any) => ({
+        key: typeof item?.key === "string" ? item.key.trim() : "",
+        label: typeof item?.label === "string" ? item.label.trim() : typeof item?.key === "string" ? item.key.trim() : "",
+      }))
+      .filter((item: { key: string; label: string }) => Boolean(item.key));
     return {
-      totalMin: narrowed.totalMin,
-      totalMax: narrowed.totalMax,
+      totalMin,
+      totalMax,
       currency,
       imagePriceRange,
       ...(confidence ? { confidence } : {}),
       ...(requestId ? { requestId } : {}),
       ...(servicePriceRange ? { servicePriceRange } : {}),
+      ...(baselinePriceRange ? { baselinePriceRange } : {}),
+      ...(deltaPriceRange ? { deltaPriceRange } : {}),
+      ...(typeof root?.deltaDirection === "string" ? { deltaDirection: String(root.deltaDirection).trim().toLowerCase() } : {}),
+      ...(typeof root?.budgetTier === "string" ? { budgetTier: String(root.budgetTier).trim().toLowerCase() } : {}),
+      ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
+      ...(priceDrivers.length > 0 ? { priceDrivers } : {}),
+      ...(typeof root?.calibrationKey === "string" ? { calibrationKey: String(root.calibrationKey).trim() } : {}),
     };
   }
   return null;
@@ -468,6 +502,35 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
       : typeof body?.preview_image_url === "string"
         ? body.preview_image_url.trim()
         : null;
+  const pricingScenario =
+    typeof body?.pricingScenario === "string"
+      ? body.pricingScenario.trim().toLowerCase()
+      : typeof body?.pricing_scenario === "string"
+        ? body.pricing_scenario.trim().toLowerCase()
+        : null;
+  const baselineImageUrl =
+    typeof body?.baselineImageUrl === "string"
+      ? body.baselineImageUrl.trim()
+      : typeof body?.baseline_image_url === "string"
+        ? body.baseline_image_url.trim()
+        : null;
+  const baselinePriceRange =
+    body?.baselinePriceRange && typeof body.baselinePriceRange === "object"
+      ? body.baselinePriceRange
+      : body?.baseline_price_range && typeof body.baseline_price_range === "object"
+        ? body.baseline_price_range
+        : null;
+  const budgetRange =
+    typeof body?.budgetRange === "number" || typeof body?.budgetRange === "string"
+      ? body.budgetRange
+      : typeof body?.budget_range === "number" || typeof body?.budget_range === "string"
+        ? body.budget_range
+        : null;
+  const changedRefinementKeys = Array.isArray(body?.changedRefinementKeys)
+    ? body.changedRefinementKeys
+    : Array.isArray(body?.changed_refinement_keys)
+      ? body.changed_refinement_keys
+      : [];
 
   const upstreamPayload: Record<string, any> = {
     useCase,
@@ -476,6 +539,11 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     ...(upstreamCompanySummary ? { companySummary: upstreamCompanySummary } : {}),
     ...(upstreamServiceSummary ? { serviceSummary: upstreamServiceSummary } : {}),
     ...(previewImageUrl ? { previewImageUrl } : {}),
+    ...(pricingScenario ? { pricingScenario } : {}),
+    ...(baselineImageUrl ? { baselineImageUrl } : {}),
+    ...(baselinePriceRange ? { baselinePriceRange } : {}),
+    ...(budgetRange !== null && budgetRange !== "" ? { budgetRange } : {}),
+    ...(changedRefinementKeys.length > 0 ? { changedRefinementKeys } : {}),
     state: {
       answers: stepDataSoFar,
       askedStepIds,
@@ -698,6 +766,18 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         typeof estimate.imagePriceRange.high === "number"
           ? { low: estimate.imagePriceRange.low, high: estimate.imagePriceRange.high }
           : undefined;
+      const baselineRange =
+        estimate.baselinePriceRange &&
+        typeof estimate.baselinePriceRange.low === "number" &&
+        typeof estimate.baselinePriceRange.high === "number"
+          ? { low: estimate.baselinePriceRange.low, high: estimate.baselinePriceRange.high }
+          : undefined;
+      const deltaRange =
+        estimate.deltaPriceRange &&
+        typeof estimate.deltaPriceRange.low === "number" &&
+        typeof estimate.deltaPriceRange.high === "number"
+          ? { low: estimate.deltaPriceRange.low, high: estimate.deltaPriceRange.high }
+          : undefined;
       return NextResponse.json(
         {
           estimate: {
@@ -709,6 +789,13 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
             ...(estimate.requestId ? { requestId: estimate.requestId } : {}),
             ...(serviceRange ? { servicePriceRange: serviceRange } : {}),
             ...(imageRange ? { imagePriceRange: imageRange } : {}),
+            ...(baselineRange ? { baselinePriceRange: baselineRange } : {}),
+            ...(deltaRange ? { deltaPriceRange: deltaRange } : {}),
+            ...(estimate.deltaDirection ? { deltaDirection: estimate.deltaDirection } : {}),
+            ...(estimate.budgetTier ? { budgetTier: estimate.budgetTier } : {}),
+            ...(estimate.budgetTierRanges ? { budgetTierRanges: estimate.budgetTierRanges } : {}),
+            ...(estimate.priceDrivers ? { priceDrivers: estimate.priceDrivers } : {}),
+            ...(estimate.calibrationKey ? { calibrationKey: estimate.calibrationKey } : {}),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } }

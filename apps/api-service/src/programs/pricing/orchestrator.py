@@ -2,17 +2,88 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from programs.form_pipeline.context_builder import build_context
 from programs.pricing.replicate_vlm import estimate_pricing_with_vlm
+from programs.pricing.service_calibration import (
+    PriceRange,
+    ServiceCalibration,
+    calibration_response_payload,
+    match_service_calibration,
+    resolve_budget_tier,
+)
 
 
 _CURRENCY_RE = re.compile(r"(?i)\b(usd|cad|aud|gbp|eur)\b")
 
+_DRIVER_DEFINITIONS: dict[str, dict[str, object]] = {
+    "hardscape": {
+        "label": "Hardscape",
+        "tokens": ("hardscape", "paver", "patio", "walkway", "masonry", "retaining wall"),
+        "delta_floor": 8_000,
+    },
+    "tile": {
+        "label": "Tile",
+        "tokens": ("tile", "backsplash", "shower wall", "shower tile", "terrazzo"),
+        "delta_floor": 4_500,
+    },
+    "cabinetry": {
+        "label": "Cabinetry",
+        "tokens": ("cabinet", "cabinetry", "vanity", "built-in", "millwork"),
+        "delta_floor": 7_000,
+    },
+    "fixtures": {
+        "label": "Fixtures",
+        "tokens": ("fixture", "faucet", "hardware", "sink", "toilet", "tub", "shower", "mirror", "towel"),
+        "delta_floor": 3_000,
+    },
+    "planting_density": {
+        "label": "Planting density",
+        "tokens": ("plant", "plants", "bush", "bushes", "shrub", "tree", "garden", "flower", "sod"),
+        "delta_floor": 4_000,
+    },
+    "lighting": {
+        "label": "Lighting",
+        "tokens": ("light", "lighting", "pendant", "sconce", "recessed", "landscape lighting"),
+        "delta_floor": 2_500,
+    },
+    "layout": {
+        "label": "Layout",
+        "tokens": ("layout", "reconfigure", "move", "relocate", "expand", "open up", "island"),
+        "delta_floor": 10_000,
+    },
+    "finish_level": {
+        "label": "Finish level",
+        "tokens": ("finish", "finishes", "material", "materials", "premium", "luxury", "budget"),
+        "delta_floor": 4_000,
+    },
+    "materials": {
+        "label": "Materials",
+        "tokens": ("countertop", "stone", "marble", "quartz", "wood", "flooring", "surface"),
+        "delta_floor": 3_500,
+    },
+    "labor": {
+        "label": "Labor",
+        "tokens": ("labor", "installation", "install", "demolition"),
+        "delta_floor": 2_500,
+    },
+    "scope": {
+        "label": "Project scope",
+        "tokens": ("scope", "full", "complete", "entire", "major"),
+        "delta_floor": 3_000,
+    },
+    "equipment": {
+        "label": "Equipment",
+        "tokens": ("equipment", "unit", "system", "appliance"),
+        "delta_floor": 3_000,
+    },
+}
+
+_TIER_ORDER = ("starter", "standard", "premium", "luxury")
+
 
 def _get_preview_image_url(payload: Dict[str, Any]) -> Optional[str]:
-    """Extract preview image URL from payload (supports multiple key names)."""
     url = (
         payload.get("previewImageUrl")
         or payload.get("preview_image_url")
@@ -26,36 +97,16 @@ def _get_preview_image_url(payload: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _service_price_range_for_heuristic(text: str) -> Tuple[int, int]:
-    """
-    Return the widest typical range for a service type (for heuristic fallback).
-    Examples: Landscape $5k-$175k, Bathroom $5k-$150k, Nail salon $40-$1k.
-    """
-    t = (text or "").lower()
-    rules: List[Tuple[str, Tuple[int, int]]] = [
-        ("landscap", (5000, 175000)),
-        ("bath", (5000, 150000)),
-        ("nail", (40, 1000)),
-        ("kitchen", (10000, 150000)),
-        ("roof", (5000, 50000)),
-        ("hvac", (3000, 25000)),
-        ("pool", (15000, 200000)),
-        ("deck", (5000, 60000)),
-        ("floor", (2000, 50000)),
-        ("paint", (1000, 25000)),
-    ]
-    for key, (lo, hi) in rules:
-        if key in t:
-            return lo, hi
-    return 2000, 100000
+def _get_baseline_image_url(payload: Dict[str, Any]) -> Optional[str]:
+    url = payload.get("baselineImageUrl") or payload.get("baseline_image_url")
+    if isinstance(url, str) and url.strip():
+        u = url.strip()
+        if u.startswith("http://") or u.startswith("https://"):
+            return u
+    return None
 
 
 def _parse_money_token(raw: str) -> Optional[int]:
-    """
-    Parse a single money token to an int (USD-ish), best-effort.
-
-    Supports: "$12,000", "12000", "12k", "12.5k".
-    """
     t = str(raw or "").strip().lower()
     if not t:
         return None
@@ -79,16 +130,12 @@ def _parse_money_token(raw: str) -> Optional[int]:
 
 
 def _extract_money_range(value: Any) -> Tuple[Optional[int], Optional[int]]:
-    """
-    Extract a (low, high) range from any common payload value.
-    """
     if value is None:
         return None, None
     if isinstance(value, (int, float)):
         v = int(value)
         return (v, v) if v > 0 else (None, None)
     if isinstance(value, dict):
-        # Common shapes: { min, max }, { low, high }, { value }, etc.
         for a, b in (("min", "max"), ("low", "high"), ("rangeLow", "rangeHigh"), ("range_low", "range_high")):
             lo = _extract_money_range(value.get(a))[0]
             hi = _extract_money_range(value.get(b))[1]
@@ -96,16 +143,13 @@ def _extract_money_range(value: Any) -> Tuple[Optional[int], Optional[int]]:
                 return lo, hi
         return _extract_money_range(value.get("value"))
     if isinstance(value, list) and value:
-        # Prefer the first scalar-ish item.
         for item in value[:3]:
             lo, hi = _extract_money_range(item)
             if lo or hi:
                 return lo, hi
         return None, None
 
-    s = str(value)
-    s_norm = s.replace(",", "")
-    # Grab up to 2 money-ish tokens.
+    s_norm = str(value).replace(",", "")
     toks = re.findall(r"\$?\s*\d+(?:\.\d+)?\s*k?\b", s_norm, flags=re.IGNORECASE)
     vals: List[int] = []
     for tok in toks[:4]:
@@ -115,16 +159,12 @@ def _extract_money_range(value: Any) -> Tuple[Optional[int], Optional[int]]:
     if not vals:
         return None, None
     vals = sorted(vals)
-    if len(vals) == 1:
-        return vals[0], vals[0]
-    return vals[0], vals[-1]
+    return (vals[0], vals[-1]) if len(vals) > 1 else (vals[0], vals[0])
 
 
 def _extract_budget_hint(step_data: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
     if not isinstance(step_data, dict):
         return None, None
-
-    # Look for any key that smells like a budget answer.
     for k in list(step_data.keys()):
         key = str(k or "").strip().lower()
         if not key:
@@ -137,9 +177,7 @@ def _extract_budget_hint(step_data: Dict[str, Any]) -> Tuple[Optional[int], Opti
 
 
 def _extract_int(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value if value > 0 else None
@@ -152,10 +190,7 @@ def _extract_int(value: Any) -> Optional[int]:
             v = _extract_int(item)
             if v:
                 return v
-    s = str(value or "").strip().lower()
-    if not s:
-        return None
-    m = re.search(r"(\d{1,7})", s)
+    m = re.search(r"(\d{1,7})", str(value or "").strip().lower())
     if not m:
         return None
     try:
@@ -188,8 +223,6 @@ def _detect_currency(payload: Dict[str, Any]) -> str:
     raw = payload.get("currency") or payload.get("Currency")
     if isinstance(raw, str) and raw.strip():
         return raw.strip().upper()[:8]
-
-    # Try to infer from free-text fields.
     for k in ("serviceSummary", "service_summary", "companySummary", "company_summary"):
         v = payload.get(k)
         if isinstance(v, str):
@@ -199,278 +232,410 @@ def _detect_currency(payload: Dict[str, Any]) -> str:
     return "USD"
 
 
-def _base_range_for_service(text: str) -> Tuple[int, int, str]:
-    """
-    Lightweight heuristic baseline ranges (USD).
-
-    Returns (low, high, matched_rule).
-    """
-    t = (text or "").lower()
-
-    rules: List[Tuple[str, Tuple[int, int]]] = [
-        ("kitchen", (25000, 90000)),
-        ("bath", (15000, 60000)),
-        ("roof", (8000, 28000)),
-        ("hvac", (5000, 16000)),
-        ("landscap", (3000, 25000)),
-        ("deck", (8000, 35000)),
-        ("fence", (2500, 12000)),
-        ("floor", (3000, 25000)),
-        ("window", (4000, 22000)),
-        ("paint", (2000, 14000)),
-        ("pool", (30000, 130000)),
-        ("patio", (6000, 40000)),
-        ("driveway", (5000, 30000)),
-        ("siding", (9000, 35000)),
-        ("plumb", (500, 8000)),
-        ("electric", (800, 12000)),
-    ]
-    for key, (lo, hi) in rules:
-        if key in t:
-            return lo, hi, key
-    return 2000, 15000, "default"
-
-
 def _multiplier_from_text(text: str) -> float:
     t = (text or "").lower()
     mult = 1.0
-
-    if any(w in t for w in ("luxury", "high end", "high-end", "premium", "custom")):
-        mult *= 1.35
-    if any(w in t for w in ("budget", "basic", "affordable", "cheap")):
+    if any(w in t for w in ("luxury", "high end", "high-end", "premium", "custom", "designer")):
+        mult *= 1.25
+    if any(w in t for w in ("budget", "basic", "affordable", "cheap", "builder-grade")):
         mult *= 0.85
     if any(w in t for w in ("full", "complete", "gut", "total", "entire")):
-        mult *= 1.2
+        mult *= 1.15
     if any(w in t for w in ("partial", "refresh", "touch up", "touch-up", "minor")):
         mult *= 0.9
-
-    return max(0.6, min(2.0, mult))
-
-
-def _clamp_range(lo: int, hi: int) -> Tuple[int, int]:
-    lo_i = int(max(0, lo))
-    hi_i = int(max(lo_i, hi))
-    return lo_i, hi_i
+    return max(0.65, min(1.9, mult))
 
 
-def _align_vlm_image_range_to_budget(
+def _normalize_range(lo: int, hi: int) -> PriceRange:
+    return PriceRange(low=min(int(lo), int(hi)), high=max(int(lo), int(hi)))
+
+
+def _clamp_int(value: int, low: int, high: int) -> int:
+    return max(low, min(high, int(value)))
+
+
+def _build_visible_range(midpoint: int, calibration: ServiceCalibration) -> PriceRange:
+    service_range = calibration.normalized_service_range()
+    band_clamp = calibration.normalized_visible_band_clamp()
+    service_span = max(1, service_range.high - service_range.low)
+    width = int(round(service_span * 0.1))
+    width = max(band_clamp.low, min(band_clamp.high, width))
+    width = max(1_000, min(width, service_span))
+    mid = _clamp_int(midpoint, service_range.low, service_range.high)
+    low = int(round(mid - width / 2.0))
+    high = int(round(mid + width / 2.0))
+    if low < service_range.low:
+        shift = service_range.low - low
+        low += shift
+        high += shift
+    if high > service_range.high:
+        shift = high - service_range.high
+        low -= shift
+        high -= shift
+    low = max(service_range.low, low)
+    high = min(service_range.high, high)
+    if high <= low:
+        high = min(service_range.high, low + max(1_000, band_clamp.low))
+        if high <= low:
+            low = max(service_range.low, high - 1_000)
+    return _normalize_range(low, high)
+
+
+def _range_midpoint(price_range: PriceRange) -> int:
+    return price_range.midpoint()
+
+
+def _align_midpoint_to_budget(
     *,
-    image_low: int,
-    image_high: int,
-    service_low: int,
-    service_high: int,
-    budget_low: Optional[int],
-    budget_high: Optional[int],
-) -> Tuple[int, int]:
-    """
-    Align VLM image range with explicit budget hints from answers.
+    raw_midpoint: int,
+    calibration: ServiceCalibration,
+    budget_value: Optional[int],
+) -> int:
+    if not isinstance(budget_value, int) or budget_value <= 0:
+        return raw_midpoint
+    service_range = calibration.normalized_service_range()
+    clamped_budget = _clamp_int(budget_value, service_range.low, service_range.high)
+    blended = int(round((raw_midpoint * 0.35) + (clamped_budget * 0.65)))
+    return _clamp_int(blended, service_range.low, service_range.high)
 
-    We keep a realistic window width, but center around the selected budget so the
-    returned range tracks the user's chosen target.
-    """
-    if not (isinstance(budget_low, int) and isinstance(budget_high, int)):
-        return _clamp_range(image_low, image_high)
-    if budget_low <= 0 or budget_high <= 0:
-        return _clamp_range(image_low, image_high)
 
-    lo, hi = _clamp_range(image_low, image_high)
-    budget_mid = int(round((budget_low + budget_high) / 2.0))
-    if budget_mid <= 0:
-        return lo, hi
+def _starter_floor_midpoint(calibration: ServiceCalibration) -> int:
+    return calibration.normalized_starter_baseline().midpoint()
 
-    # Keep a useful pricing window width: neither too tiny nor absurdly wide.
-    current_width = max(1500, hi - lo)
-    if isinstance(service_low, int) and isinstance(service_high, int) and service_high > service_low > 0:
-        service_span = max(2000, service_high - service_low)
-        target_width = int(max(3000, min(20000, service_span * 0.12)))
-        width = max(3000, min(max(current_width, target_width), int(max(5000, service_span * 0.2))))
-        budget_mid = max(service_low, min(service_high, budget_mid))
+
+def _internal_starter_baseline(calibration: ServiceCalibration) -> PriceRange:
+    return calibration.normalized_starter_baseline()
+
+
+def _coerce_pricing_scenario(payload: Dict[str, Any], *, has_visible_baseline: bool) -> str:
+    raw = str(payload.get("pricingScenario") or payload.get("pricing_scenario") or "").strip().lower()
+    if raw in {"initial", "comparison", "refinement"}:
+        return raw
+    return "comparison" if has_visible_baseline else "initial"
+
+
+def _coerce_baseline_price_range(payload: Dict[str, Any]) -> Optional[PriceRange]:
+    raw = payload.get("baselinePriceRange") or payload.get("baseline_price_range")
+    lo, hi = _extract_money_range(raw)
+    if not isinstance(lo, int) or not isinstance(hi, int) or lo <= 0 or hi <= 0:
+        return None
+    return _normalize_range(lo, hi)
+
+
+def _coerce_changed_refinement_keys(payload: Dict[str, Any]) -> list[dict[str, str]]:
+    raw = payload.get("changedRefinementKeys") or payload.get("changed_refinement_keys")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, str):
+            key = item.strip()
+            label = key.replace("_", " ").replace("-", " ").strip().title()
+        elif isinstance(item, dict):
+            key = str(item.get("key") or item.get("id") or item.get("value") or "").strip()
+            label = str(item.get("label") or item.get("name") or key).strip()
+        else:
+            continue
+        if not key:
+            continue
+        out.append({"key": key[:80], "label": (label or key)[:120]})
+    return out[:10]
+
+
+def _driver_key_for_text(text: str) -> Optional[str]:
+    haystack = str(text or "").lower()
+    for key, meta in _DRIVER_DEFINITIONS.items():
+        tokens = meta.get("tokens") or ()
+        if any(token in haystack for token in tokens):
+            return key
+    return None
+
+
+def _build_price_drivers(
+    *,
+    calibration: ServiceCalibration,
+    changed_refinement_keys: list[dict[str, str]],
+    budget_tier_shift: bool,
+) -> list[dict[str, str]]:
+    drivers: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def _push(driver_key: str) -> None:
+        if not driver_key or driver_key in seen:
+            return
+        meta = _DRIVER_DEFINITIONS.get(driver_key) or {}
+        label = str(meta.get("label") or driver_key.replace("_", " ").title()).strip()
+        seen.add(driver_key)
+        drivers.append({"key": driver_key, "label": label})
+
+    for item in changed_refinement_keys:
+        matched = _driver_key_for_text(f"{item.get('key', '')} {item.get('label', '')}")
+        if matched:
+            _push(matched)
+
+    if budget_tier_shift:
+        _push("finish_level")
+
+    if not drivers:
+        for default_driver in calibration.default_price_drivers:
+            matched = _driver_key_for_text(default_driver) or default_driver.replace(" ", "_")
+            _push(matched)
+            if len(drivers) >= 3:
+                break
+
+    return drivers[:3]
+
+
+def _delta_floor_for_drivers(calibration: ServiceCalibration, drivers: Iterable[dict[str, str]]) -> int:
+    service_range = calibration.normalized_service_range()
+    service_span = max(1, service_range.high - service_range.low)
+    floor = 0
+    for driver in drivers:
+        driver_key = str(driver.get("key") or "").strip()
+        meta = _DRIVER_DEFINITIONS.get(driver_key) or {}
+        floor += int(meta.get("delta_floor") or 2_500)
+    if floor <= 0:
+        floor = 2_500
+    return min(floor, max(5_000, int(service_span * 0.4)))
+
+
+def _tier_index(tier: str) -> int:
+    try:
+        return _TIER_ORDER.index(str(tier or "").strip().lower())
+    except ValueError:
+        return -1
+
+
+def _compute_delta_range(
+    *,
+    current_range: PriceRange,
+    baseline_range: PriceRange,
+    calibration: ServiceCalibration,
+    drivers: list[dict[str, str]],
+    current_budget_tier: str,
+    baseline_budget_tier: str,
+) -> Tuple[Optional[PriceRange], Optional[str]]:
+    raw_low = current_range.low - baseline_range.high
+    raw_high = current_range.high - baseline_range.low
+    delta_range = _normalize_range(raw_low, raw_high)
+    delta_mid = _range_midpoint(delta_range)
+    direction = "flat"
+    if delta_mid > 750:
+        direction = "up"
+    elif delta_mid < -750:
+        direction = "down"
+
+    tier_shift = _tier_index(current_budget_tier) - _tier_index(baseline_budget_tier)
+    if direction == "flat" and tier_shift > 0:
+        direction = "up"
+    elif direction == "flat" and tier_shift < 0:
+        direction = "down"
+
+    if direction != "flat" and drivers:
+        target_abs_mid = max(abs(delta_mid), _delta_floor_for_drivers(calibration, drivers))
+        signed_mid = target_abs_mid if direction == "up" else -target_abs_mid
+        width = max(1_500, min(calibration.normalized_visible_band_clamp().low, 4_000))
+        delta_range = _normalize_range(int(round(signed_mid - width / 2.0)), int(round(signed_mid + width / 2.0)))
+
+    if delta_range.low == 0 and delta_range.high == 0:
+        return None, None
+    return delta_range, direction
+
+
+def _estimate_heuristic_range(
+    *,
+    basis_text: str,
+    calibration: ServiceCalibration,
+    budget_value: Optional[int],
+    quantity_hints: Dict[str, int],
+    apply_starter_floor: bool,
+) -> PriceRange:
+    if isinstance(budget_value, int) and budget_value > 0:
+        center = budget_value
     else:
-        target_width = int(max(3000, min(20000, max(current_width, budget_mid * 0.35))))
-        width = target_width
+        center = _starter_floor_midpoint(calibration)
 
-    aligned_low = int(round(budget_mid - width / 2.0))
-    aligned_high = int(round(budget_mid + width / 2.0))
+    mult = _multiplier_from_text(basis_text)
+    if isinstance(quantity_hints.get("sqft"), int):
+        sqft = int(quantity_hints["sqft"])
+        mult *= max(0.8, min(2.8, sqft / 700.0))
+    elif isinstance(quantity_hints.get("rooms"), int):
+        rooms = int(quantity_hints["rooms"])
+        mult *= max(0.85, min(1.8, rooms / 3.0))
 
-    if isinstance(service_low, int) and isinstance(service_high, int) and service_high > service_low > 0:
-        if aligned_low < service_low:
-            shift = service_low - aligned_low
-            aligned_low += shift
-            aligned_high += shift
-        if aligned_high > service_high:
-            shift = aligned_high - service_high
-            aligned_low -= shift
-            aligned_high -= shift
+    center = int(round(center * mult))
+    center = _clamp_int(center, calibration.normalized_service_range().low, calibration.normalized_service_range().high)
+    if apply_starter_floor:
+        center = max(center, _starter_floor_midpoint(calibration))
+    return _build_visible_range(center, calibration)
 
-    if aligned_high <= aligned_low:
-        aligned_high = aligned_low + 1500
 
-    return _clamp_range(aligned_low, aligned_high)
+def _estimate_current_range(
+    *,
+    payload: Dict[str, Any],
+    calibration: ServiceCalibration,
+    preview_url: Optional[str],
+    budget_value: Optional[int],
+    basis_text: str,
+    quantity_hints: Dict[str, int],
+    apply_starter_floor: bool,
+) -> tuple[PriceRange, str, str]:
+    if preview_url:
+        try:
+            vlm_result = estimate_pricing_with_vlm(payload, preview_image_url=preview_url, calibration=calibration)
+            raw_range = _normalize_range(int(vlm_result["rangeLow"]), int(vlm_result["rangeHigh"]))
+            midpoint = _range_midpoint(raw_range)
+            if apply_starter_floor:
+                midpoint = max(midpoint, _starter_floor_midpoint(calibration))
+            midpoint = _align_midpoint_to_budget(
+                raw_midpoint=midpoint,
+                calibration=calibration,
+                budget_value=budget_value,
+            )
+            return _build_visible_range(midpoint, calibration), str(vlm_result.get("basis") or "ai_v2"), str(
+                vlm_result.get("confidence") or "medium"
+            )
+        except Exception:
+            pass
+
+    return (
+        _estimate_heuristic_range(
+            basis_text=basis_text,
+            calibration=calibration,
+            budget_value=budget_value,
+            quantity_hints=quantity_hints,
+            apply_starter_floor=apply_starter_floor,
+        ),
+        "heuristic_v2",
+        "medium" if budget_value or quantity_hints else "low",
+    )
 
 
 def estimate_pricing(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Estimate a rough pricing range.
-
-    When previewImageUrl is present: uses AI (Replicate GPT-4.1-nano) to analyze the image.
-    Otherwise: uses heuristics (no model calls).
-    """
     request_id = f"pricing_{int(time.time() * 1000)}"
     preview_url = _get_preview_image_url(payload)
-
-    if preview_url:
-        try:
-            vlm_result = estimate_pricing_with_vlm(payload, preview_image_url=preview_url)
-            currency = _detect_currency(payload)
-            range_low = int(vlm_result["rangeLow"])
-            range_high = int(vlm_result["rangeHigh"])
-            svc_range = vlm_result.get("servicePriceRange") or {}
-            svc_lo = int(svc_range.get("low") or 0)
-            svc_hi = int(svc_range.get("high") or 0)
-
-            # Sanity clamp: VLM often underestimates (e.g. $1.5k–$3k for a bathroom). Ensure image range is plausible for the service.
-            ctx = build_context(payload)
-            basis_text = " ".join([
-                str(ctx.get("services_summary") or ctx.get("service_summary") or ""),
-                str(ctx.get("industry") or ""),
-                str(ctx.get("service") or ""),
-            ]).strip()
-            base_lo, base_hi, _ = _base_range_for_service(basis_text)
-            if base_lo > 0 and range_high < base_lo:
-                # VLM returned implausibly low. Clamp low to service minimum; set high to at least mid-range.
-                range_low = max(range_low, base_lo)
-                mid = (base_lo + base_hi) // 2 if base_hi > base_lo else base_lo * 2
-                range_high = max(range_high, mid)
-            elif svc_lo > 0 and range_high < svc_lo:
-                range_low = max(range_low, svc_lo)
-                mid = (svc_lo + svc_hi) // 2 if svc_hi > svc_lo else svc_lo * 2
-                range_high = max(range_high, mid)
-
-            # Cap image range to a narrow window: ~10–15% of service span (e.g. $10k–$15k), not $10k–$60k.
-            service_span = max(0, (svc_hi or 0) - (svc_lo or 0))
-            if service_span > 0:
-                target_window_pct = 0.15  # 15% of service range
-                target_window = max(8_000, min(20_000, int(service_span * target_window_pct)))
-                current_width = max(0, range_high - range_low)
-                if current_width > target_window:
-                    mid = (range_low + range_high) // 2
-                    half = target_window // 2
-                    range_low = max(svc_lo or 0, mid - half)
-                    range_high = min(svc_hi or 0, mid + half)
-                    if range_high - range_low < 1_000:
-                        range_high = min(svc_hi or 0, range_low + 1_000)
-                    range_high = max(range_low, range_high)
-
-            step_data_raw = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
-            step_data = step_data_raw if isinstance(step_data_raw, dict) else {}
-            budget_lo, budget_hi = _extract_budget_hint(step_data)
-            range_low, range_high = _align_vlm_image_range_to_budget(
-                image_low=range_low,
-                image_high=range_high,
-                service_low=svc_lo,
-                service_high=svc_hi,
-                budget_low=budget_lo,
-                budget_high=budget_hi,
-            )
-
-            notes: List[str] = ["AI estimate from image analysis."]
-            if isinstance(budget_lo, int) and isinstance(budget_hi, int) and budget_lo > 0 and budget_hi > 0:
-                notes.append("Anchored to selected budget from answers.")
-
-            return {
-                "ok": True,
-                "requestId": request_id,
-                "currency": currency,
-                "rangeLow": range_low,
-                "rangeHigh": range_high,
-                "servicePriceRange": vlm_result.get("servicePriceRange"),
-                "confidence": vlm_result.get("confidence", "medium"),
-                "basis": vlm_result.get("basis", "ai_v1"),
-                "notes": notes,
-            }
-        except Exception:
-            # Fall back to heuristic on VLM failure
-            pass
+    baseline_image_url = _get_baseline_image_url(payload)
+    baseline_price_range = _coerce_baseline_price_range(payload)
+    changed_refinement_keys = _coerce_changed_refinement_keys(payload)
 
     ctx = build_context(payload)
     services_summary = str(ctx.get("services_summary") or ctx.get("service_summary") or "").strip()
     industry = str(ctx.get("industry") or "").strip()
     service = str(ctx.get("service") or "").strip()
-    if not services_summary and not industry and not service:
+    basis_text = " ".join([services_summary, industry, service]).strip()
+    if not basis_text:
         return {
             "ok": False,
             "error": "Missing service context (provide serviceSummary/service_summary or industry/service).",
             "requestId": request_id,
         }
 
+    calibration = match_service_calibration(basis_text)
+    calibration_payload = calibration_response_payload(calibration)
+    currency = _detect_currency(payload)
+
     step_data_raw = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
     step_data = step_data_raw if isinstance(step_data_raw, dict) else {}
-
-    currency = _detect_currency(payload)
-    basis_text = " ".join([services_summary, industry, service]).strip()
-    base_lo, base_hi, matched_rule = _base_range_for_service(basis_text)
-
     budget_lo, budget_hi = _extract_budget_hint(step_data)
-    qty = _extract_quantity_hints(step_data)
+    top_level_budget = _extract_int(payload.get("budgetRange") or payload.get("budget_range") or payload.get("budget"))
+    budget_value = top_level_budget
+    if not isinstance(budget_value, int) or budget_value <= 0:
+        if isinstance(budget_hi, int) and budget_hi > 0:
+            budget_value = budget_hi
+        elif isinstance(budget_lo, int) and budget_lo > 0:
+            budget_value = budget_lo
+        else:
+            budget_value = None
 
-    text_hint = f"{basis_text} {step_data}".lower()
-    mult = _multiplier_from_text(text_hint)
+    scenario = _coerce_pricing_scenario(
+        payload,
+        has_visible_baseline=bool(baseline_price_range or baseline_image_url),
+    )
+    quantity_hints = _extract_quantity_hints(step_data)
 
-    # Light quantity scaling (only when hints exist).
-    if isinstance(qty.get("sqft"), int):
-        sqft = int(qty["sqft"])
-        # Keep conservative: up to 3x at very large sizes.
-        mult *= max(0.75, min(3.0, sqft / 600.0))
-    elif isinstance(qty.get("rooms"), int):
-        rooms = int(qty["rooms"])
-        mult *= max(0.8, min(2.0, rooms / 3.0))
+    current_range, basis, confidence = _estimate_current_range(
+        payload=payload,
+        calibration=calibration,
+        preview_url=preview_url,
+        budget_value=budget_value,
+        basis_text=basis_text,
+        quantity_hints=quantity_hints,
+        apply_starter_floor=True,
+    )
 
-    lo = int(base_lo * mult)
-    hi = int(base_hi * mult)
+    current_budget_tier = resolve_budget_tier(calibration, budget_value or _range_midpoint(current_range))
+    visible_baseline_range: Optional[PriceRange] = None
+    baseline_budget_tier = resolve_budget_tier(calibration, _internal_starter_baseline(calibration).midpoint())
+    baseline_source = None
 
-    lo, hi = _clamp_range(lo, hi)
+    if baseline_price_range is not None:
+        visible_baseline_range = baseline_price_range
+        baseline_budget_tier = resolve_budget_tier(calibration, _range_midpoint(visible_baseline_range))
+        baseline_source = "provided_price_range"
+    elif baseline_image_url:
+        visible_baseline_range, baseline_basis, baseline_confidence = _estimate_current_range(
+            payload={**payload, "previewImageUrl": baseline_image_url},
+            calibration=calibration,
+            preview_url=baseline_image_url,
+            budget_value=None,
+            basis_text=basis_text,
+            quantity_hints=quantity_hints,
+            apply_starter_floor=False,
+        )
+        baseline_budget_tier = resolve_budget_tier(calibration, _range_midpoint(visible_baseline_range))
+        baseline_source = "baseline_image"
+        if basis.startswith("heuristic") and baseline_basis.startswith("ai"):
+            basis = baseline_basis
+            confidence = baseline_confidence
 
-    # If the user gave a budget range, nudge the estimate toward it, but don't hard-clamp.
-    if isinstance(budget_lo, int) and isinstance(budget_hi, int) and budget_lo > 0 and budget_hi >= budget_lo:
-        mid_est = (lo + hi) / 2.0
-        mid_budget = (budget_lo + budget_hi) / 2.0
-        blend = 0.35
-        mid = (1.0 - blend) * mid_est + blend * mid_budget
-        width = max(hi - lo, int(0.4 * mid))
-        lo = int(max(0, mid - width / 2.0))
-        hi = int(max(lo, mid + width / 2.0))
-        lo, hi = _clamp_range(lo, hi)
+    budget_tier_shift = visible_baseline_range is not None and baseline_budget_tier != current_budget_tier
+    price_drivers = _build_price_drivers(
+        calibration=calibration,
+        changed_refinement_keys=changed_refinement_keys,
+        budget_tier_shift=budget_tier_shift,
+    )
 
-    confidence = "low"
-    if matched_rule != "default" and (budget_lo or budget_hi or qty):
-        confidence = "medium"
-
-    notes: List[str] = [
-        "Heuristic estimate (no contractor quote).",
-        f"Matched rule: {matched_rule}.",
-    ]
-    if budget_lo or budget_hi:
-        notes.append("Incorporates budget hint from answers.")
-    if qty:
-        notes.append("Incorporates size/quantity hints from answers.")
-
-    svc_lo, svc_hi = _service_price_range_for_heuristic(basis_text)
-
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "requestId": request_id,
         "currency": currency,
-        "rangeLow": int(lo),
-        "rangeHigh": int(hi),
-        "servicePriceRange": {"low": svc_lo, "high": svc_hi},
+        "rangeLow": current_range.low,
+        "rangeHigh": current_range.high,
+        "imagePriceRange": current_range.to_dict(),
+        "servicePriceRange": calibration_payload["servicePriceRange"],
         "confidence": confidence,
-        "basis": "heuristic_v1",
-        "notes": notes,
-        "inputs": {
-            "industry": industry,
-            "service": service,
-            "serviceSummary": services_summary[:600],
-            "budgetHint": {"low": budget_lo, "high": budget_hi},
-            "quantityHints": qty,
-        },
+        "basis": basis,
+        "budgetTier": current_budget_tier,
+        "budgetTierRanges": calibration_payload["budgetTierRanges"],
+        "priceDrivers": price_drivers,
+        "calibrationKey": calibration.key,
+        "notes": [
+            "Backend-authored pricing band.",
+            f"Matched calibration: {calibration.key}.",
+        ],
     }
+
+    if visible_baseline_range is not None and scenario in {"comparison", "refinement"}:
+        delta_range, delta_direction = _compute_delta_range(
+            current_range=current_range,
+            baseline_range=visible_baseline_range,
+            calibration=calibration,
+            drivers=price_drivers,
+            current_budget_tier=current_budget_tier,
+            baseline_budget_tier=baseline_budget_tier,
+        )
+        response["baselinePriceRange"] = visible_baseline_range.to_dict()
+        if delta_range is not None and delta_direction:
+            response["deltaPriceRange"] = delta_range.to_dict()
+            response["deltaDirection"] = delta_direction
+        if baseline_source:
+            response["notes"].append(f"Baseline source: {baseline_source}.")
+    else:
+        response["notes"].append("No visible baseline for upgrade delta.")
+
+    if budget_value:
+        response["notes"].append("Budget input used to place the estimate within service tiers.")
+    if quantity_hints:
+        response["notes"].append("Size/quantity hints used in fallback calibration.")
+
+    return response

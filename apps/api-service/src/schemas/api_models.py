@@ -111,6 +111,11 @@ class NewBatchRequest(BaseModel):
     service_summary: Optional[str] = Field(default=None, alias="serviceSummary")
     company_summary: Optional[str] = Field(default=None, alias="companySummary")
     no_cache: Optional[bool] = Field(default=None, alias="noCache")
+    budget_range: Optional[Any] = Field(default=None, alias="budgetRange")
+    pricing_scenario: Optional[str] = Field(default=None, alias="pricingScenario")
+    baseline_image_url: Optional[str] = Field(default=None, alias="baselineImageUrl")
+    baseline_price_range: Optional[Dict[str, Any]] = Field(default=None, alias="baselinePriceRange")
+    changed_refinement_keys: List[Dict[str, Any]] = Field(default_factory=list, alias="changedRefinementKeys")
     # Generate option thumbnails for image_choice_grid steps (style_direction, etc.)
     option_images: Optional[bool] = Field(default=None, alias="optionImages")
 
@@ -194,6 +199,13 @@ class ServicePriceRange(BaseModel):
     high: int = 0
 
 
+class PriceDriver(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    key: str
+    label: str
+
+
 class PricingResponse(BaseModel):
     """
     Response for `POST /v1/api/pricing/{instanceId}`.
@@ -207,6 +219,14 @@ class PricingResponse(BaseModel):
     range_high: int = Field(alias="rangeHigh")
     confidence: str = Field(default="low")
     service_price_range: Optional[ServicePriceRange] = Field(default=None, alias="servicePriceRange")
+    image_price_range: Optional[ServicePriceRange] = Field(default=None, alias="imagePriceRange")
+    baseline_price_range: Optional[ServicePriceRange] = Field(default=None, alias="baselinePriceRange")
+    delta_price_range: Optional[ServicePriceRange] = Field(default=None, alias="deltaPriceRange")
+    delta_direction: Optional[str] = Field(default=None, alias="deltaDirection")
+    budget_tier: Optional[str] = Field(default=None, alias="budgetTier")
+    budget_tier_ranges: Optional[Dict[str, ServicePriceRange]] = Field(default=None, alias="budgetTierRanges")
+    price_drivers: List[PriceDriver] = Field(default_factory=list, alias="priceDrivers")
+    calibration_key: Optional[str] = Field(default=None, alias="calibrationKey")
 
 
 class ExecuteFunctionRequest(BaseModel):

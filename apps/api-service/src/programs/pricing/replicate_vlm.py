@@ -11,10 +11,11 @@ import json
 import os
 import re
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import requests
+
+from programs.pricing.service_calibration import ServiceCalibration
 
 
 PRICING_VLM_MODEL = os.getenv("PRICING_VLM_MODEL", "openai/gpt-4.1-nano").strip()
@@ -119,18 +120,6 @@ def _replicate_wait_for_completion(prediction_id: str, *, timeout_sec: float) ->
     return {**last, "status": "timeout", "error": "Prediction timed out"}
 
 
-def _load_pricing_examples() -> List[Dict[str, Any]]:
-    """Load consolidated pricing examples from data/pricing_examples.json (single file, industry-agnostic)."""
-    path = Path(__file__).parent / "data" / "pricing_examples.json"
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    return data if isinstance(data, list) else []
-
-
 def _build_pricing_context_json(payload: Dict[str, Any]) -> str:
     """Build compact JSON context for the VLM, similar to question_planner planner_context_json."""
     from programs.form_pipeline.context_builder import build_context
@@ -200,7 +189,7 @@ def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _parse_vlm_output(output: Any) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+def _parse_vlm_output(output: Any) -> Optional[Tuple[Tuple[int, int], Optional[Tuple[int, int]]]]:
     """
     Parse VLM output into (image_range, service_range).
     Returns ((low, high), (low, high)) or None if invalid.
@@ -238,7 +227,7 @@ def _parse_vlm_output(output: Any) -> Optional[Tuple[Tuple[int, int], Tuple[int,
     image_range = _parse_range(obj.get("image_price_range"))
     service_range = _parse_range(obj.get("service_price_range"))
 
-    if image_range and service_range:
+    if image_range:
         return (image_range, service_range)
     return None
 
@@ -247,6 +236,7 @@ def estimate_pricing_with_vlm(
     payload: Dict[str, Any],
     *,
     preview_image_url: str,
+    calibration: ServiceCalibration,
     model_id: Optional[str] = None,
     timeout_sec: Optional[float] = None,
 ) -> Dict[str, Any]:
@@ -259,47 +249,29 @@ def estimate_pricing_with_vlm(
     timeout = float(timeout_sec or PRICING_VLM_TIMEOUT_SEC)
 
     context_json = _build_pricing_context_json(payload)
+    calibration_payload = {
+        "service_price_range": calibration.normalized_service_range().to_dict(),
+        "visible_band_clamp": calibration.normalized_visible_band_clamp().to_dict(),
+        "starter_baseline": calibration.normalized_starter_baseline().to_dict(),
+        "budget_tier_ranges": calibration.budget_tier_ranges_dict(),
+    }
 
-    # Stress: image_price_range = cost of what's shown, MUST be in typical range for the service type.
-    # Keep it a NARROW band: about 10–15% of the full service range (e.g. $10k–$15k window), not a wide spread.
     system_prompt = (
         "You are a pricing estimator for home services and similar projects. "
-        "Given an image of a completed design/preview and the service context, output JSON with exactly two keys:\n"
+        "Given an image of a completed design/preview, service context, and a matched service calibration, output JSON with exactly two keys:\n"
         "1. image_price_range: { \"low\": number, \"high\": number } — the real-world cost (USD) to achieve what's shown in the image. "
-        "CRITICAL: This must be a NARROW estimate band — about 10–15% of the full service range. "
-        "Example: if the service is bathroom ($5k–$150k), return a window of roughly $10k–$15k (e.g. $32,000–$45,000 or $28,000–$42,000), NOT a wide spread like $10k–$60k. "
-        "The (high - low) of image_price_range should be approximately 10–15% of the service range span. "
-        "Use the service_summary and service name to set the scale. For full room remodels, do NOT return under $5,000.\n"
-        "2. service_price_range: { \"low\": number, \"high\": number } — the FULL typical range customers pay for this service type (can be very wide, e.g. $5k–$150k for bathroom).\n"
+        "CRITICAL: This estimate must stay inside the provided service_price_range. "
+        "The visible width of image_price_range should land near 8-12% of the service span and also stay within visible_band_clamp. "
+        "Use the image to place the estimate within the provided budget tiers, but do not underprice obviously expensive-looking designs.\n"
+        "2. service_price_range: { \"low\": number, \"high\": number } — copy the provided calibration service_price_range exactly.\n"
         "Output ONLY valid JSON, no markdown."
     )
 
-    # Few-shot examples from consolidated pricing_examples.json (stresses wide service ranges)
-    examples = _load_pricing_examples()
-    few_shot_parts: List[str] = []
-    for ex in (examples[:4] if len(examples) > 4 else examples):
-        if not isinstance(ex, dict) or "context" not in ex or "service_price_range" not in ex:
-            continue
-        ctx = ex.get("context")
-        out = {"image_price_range": ex.get("image_price_range"), "service_price_range": ex.get("service_price_range")}
-        if isinstance(ctx, dict):
-            ctx = json.dumps(ctx, ensure_ascii=True, separators=(",", ":"))
-        few_shot_parts.append(f"Context: {ctx}\nOutput: {json.dumps(out, separators=(',', ':'))}")
-    user_prefix = ""
-    if few_shot_parts:
-        user_prefix = (
-            "Examples (image_price_range = narrow band ~10–15% of service span; service_price_range = full typical range):\n"
-            + "\n\n".join(few_shot_parts)
-            + "\n\n---\n\n"
-        )
-
     user_prompt = (
-        user_prefix
-        + f"Service context:\n{context_json}\n\n"
+        f"Service context:\n{context_json}\n\n"
+        f"Matched calibration:\n{json.dumps(calibration_payload, ensure_ascii=True, separators=(',', ':'))}\n\n"
         "The image shows a completed project for this service. Estimate the real-world cost to achieve what's shown. "
-        "image_price_range must be a NARROW band (about 10–15% of the full service range): e.g. for bathroom $5k–$150k, return something like $30k–$44k, not $10k–$60k. "
-        "Do not return under $5,000 for full room remodels. "
-        "Return JSON with image_price_range and service_price_range. service_price_range = full typical range for the service (often $5k–$150k+)."
+        "Return JSON with image_price_range and service_price_range. Copy calibration.service_price_range exactly."
     )
 
     # Replicate GPT-4.1-nano: prompt, system_prompt, image_input (array of URLs)
@@ -335,7 +307,12 @@ def estimate_pricing_with_vlm(
     if not parsed:
         raise RuntimeError("VLM returned invalid or unparseable JSON")
 
-    (img_lo, img_hi), (svc_lo, svc_hi) = parsed
+    (img_lo, img_hi), svc_range = parsed
+    svc = svc_range or (
+        calibration.normalized_service_range().low,
+        calibration.normalized_service_range().high,
+    )
+    svc_lo, svc_hi = svc
 
     return {
         "rangeLow": img_lo,

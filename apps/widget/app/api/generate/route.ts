@@ -5,7 +5,7 @@ import { logger } from '@/lib/server/logger';
 import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } from '@/lib/ai-form/utils/reference-images';
 
 type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'scene-refinement' | 'drilldown';
-type GenerationIntent = "initial" | "regenerate" | "small_improvement";
+type GenerationIntent = "initial" | "regenerate" | "small_improvement" | "budget_tier_shift";
 
 function normalizeRequestedOutputs(raw: unknown): number {
 	const n = Number(raw);
@@ -146,6 +146,7 @@ function resolveGenerationIntent(body: any, hasInputImage: boolean): GenerationI
 	const raw = String(body?.generationIntent || body?.generationMode || "").trim().toLowerCase();
 	if (raw === "initial" || raw === "new") return "initial";
 	if (raw === "small_improvement" || raw === "small-improvement" || raw === "refine") return "small_improvement";
+	if (raw === "budget_tier_shift" || raw === "budget-tier-shift") return "budget_tier_shift";
 	if (raw === "regenerate" || raw === "refresh") return "regenerate";
 	return hasInputImage ? "regenerate" : "initial";
 }
