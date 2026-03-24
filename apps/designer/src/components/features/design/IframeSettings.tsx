@@ -89,6 +89,14 @@ export const IframeSettings: React.FC<IframeSettingsProps> = ({
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Style</label>
                 <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Iframe background</label>
+                    <ColorInput
+                      label="Color behind the widget in the embed"
+                      value={config.background_color || "#ffffff"}
+                      onChange={(value) => updateConfig({ background_color: value })}
+                    />
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs">Border</span>
                     <Switch

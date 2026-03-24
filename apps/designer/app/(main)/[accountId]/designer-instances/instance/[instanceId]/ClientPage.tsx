@@ -50,6 +50,27 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
 
   const previewModeType = Boolean((currentConfig as any)?.form_status_enabled) ? "form" : "widget";
 
+  // Keep one embedded iframe mounted across Design / Settings / Launch so tab switches
+  // do not reload the widget. Updated while on Design or Launch (non-modal); frozen while
+  // on Settings so hidden preview props stay stable.
+  const lastEmbeddedPreviewRef = useRef<{
+    fullPage: boolean;
+    previewMode: 'desktop' | 'mobile' | 'iframe';
+  }>({ fullPage: true, previewMode: 'desktop' });
+  if (!isPartner && activeTab === 'design') {
+    lastEmbeddedPreviewRef.current = {
+      fullPage: true,
+      previewMode: previewMode === 'modal' ? 'desktop' : previewMode,
+    };
+  } else if (!isPartner && activeTab === 'launch' && previewMode !== 'modal') {
+    lastEmbeddedPreviewRef.current = {
+      fullPage: previewMode === 'desktop',
+      previewMode,
+    };
+  }
+  const showLaunchModal = activeTab === 'launch' && previewMode === 'modal';
+  const showEmbeddedWidgetPreview = !isPartner && !showLaunchModal;
+
   useEffect(() => {
     if (!isPlaceholderGenerateOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -342,28 +363,98 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
         </div>
         
         <div className="flex-1 min-h-0 relative bg-transparent overflow-hidden">
-          {activeTab === 'design' && !isPartner && (
-            <div className="absolute inset-0 flex flex-col min-w-0 min-h-0 bg-zinc-100 dark:bg-zinc-900">
-              {showPlaceholderNotification && (currentConfig as any)?.gallery_show_placeholder_images !== false && (
-                <div className="absolute top-4 left-4 right-4 z-10 max-w-md">
-                  <SubcategoryGalleryNotification
-                    instanceId={instanceId}
-                    onDismiss={() => setShowPlaceholderNotification(false)}
-                    onClick={openPlaceholderImagesFlow}
-                  />
-                </div>
-              )}
+          {showLaunchModal && (
+            <div className="absolute inset-0 z-[5] bg-zinc-100 dark:bg-zinc-900 overflow-auto">
+              <div
+                className="min-h-full w-full flex items-center justify-center p-8"
+                style={{
+                  backgroundColor: currentConfig.modal_backdrop_color
+                    ? `${currentConfig.modal_backdrop_color}${Math.round((currentConfig.modal_backdrop_opacity || 0.5) * 255)
+                        .toString(16)
+                        .padStart(2, '0')}`
+                    : 'rgba(0, 0, 0, 0.5)',
+                }}
+              >
+                <div
+                  className="rounded-lg shadow-2xl overflow-hidden flex flex-col"
+                  style={{
+                    backgroundColor: currentConfig.modal_background_color || '#ffffff',
+                    borderRadius: currentConfig.modal_border_radius ? `${currentConfig.modal_border_radius}px` : '12px',
+                    height: currentConfig.modal_height || '80%',
+                    maxHeight: currentConfig.modal_max_height ? `${currentConfig.modal_max_height}px` : '800px',
+                    maxWidth: currentConfig.modal_max_width ? `${currentConfig.modal_max_width}px` : '600px',
+                    width: currentConfig.modal_width || '80%',
+                  }}
+                >
+                  {currentConfig.modal_show_close_button !== false && (
+                    <div className="flex justify-end p-4 border-b border-border/60 flex-shrink-0">
+                      <button
+                        className="transition-colors duration-200"
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: currentConfig.modal_close_button_color || '#6b7280',
+                          cursor: 'pointer',
+                          fontSize: '20px',
+                          padding: '4px',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = currentConfig.modal_close_button_hover_color || '#374151';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = currentConfig.modal_close_button_color || '#6b7280';
+                        }}
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
 
-              <div className="flex-1 w-full min-h-0 min-w-0 overflow-hidden flex flex-col">
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    <WidgetPageView
+                      instanceId={instanceId}
+                      previewMode="desktop"
+                      liveConfig={previewDesignConfig}
+                      mode={previewModeType}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showEmbeddedWidgetPreview && (
+            <div
+              className={`absolute inset-0 flex flex-col min-w-0 min-h-0 bg-zinc-100 dark:bg-zinc-900 ${
+                activeTab === 'settings' ? 'invisible pointer-events-none' : ''
+              }`}
+              aria-hidden={activeTab === 'settings'}
+            >
+              {activeTab === 'design' &&
+                showPlaceholderNotification &&
+                (currentConfig as any)?.gallery_show_placeholder_images !== false && (
+                  <div className="absolute top-4 left-4 right-4 z-10 max-w-md">
+                    <SubcategoryGalleryNotification
+                      instanceId={instanceId}
+                      onDismiss={() => setShowPlaceholderNotification(false)}
+                      onClick={openPlaceholderImagesFlow}
+                    />
+                  </div>
+                )}
+
+              <div className="relative flex-1 w-full min-h-0 min-w-0 overflow-hidden flex flex-col">
                 <WidgetPageView
                   instanceId={instanceId}
-                  fullPage={true}
-                  previewMode={previewMode === 'modal' ? 'desktop' : previewMode}
+                  fullPage={lastEmbeddedPreviewRef.current.fullPage}
+                  previewMode={lastEmbeddedPreviewRef.current.previewMode}
                   liveConfig={previewDesignConfig}
                   mode={previewModeType}
                 />
 
-                {isPlaceholderManageOpen && (placeholderGalleryCount ?? 0) > 0 && (
+                {activeTab === 'design' && isPlaceholderManageOpen && (placeholderGalleryCount ?? 0) > 0 && (
                   <div
                     className="absolute inset-0 z-30"
                     role="dialog"
@@ -385,7 +476,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
                   </div>
                 )}
 
-                {isPlaceholderGenerateOpen && (
+                {activeTab === 'design' && isPlaceholderGenerateOpen && (
                   <div
                     className="absolute inset-0 z-30"
                     role="dialog"
@@ -400,12 +491,10 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
                         try {
                           const count = await refreshPlaceholderGalleryCount();
                           if (count > 0) {
-                            // Auto-enable placeholders now that images exist.
                             updateConfig({ gallery_show_placeholder_images: true } as any);
                             window.dispatchEvent(new CustomEvent('designer-refresh-widget-preview'));
                           }
                           setIsPlaceholderGenerateOpen(false);
-                          // If images now exist, allow manage/reorder immediately.
                           if (count > 0) setIsPlaceholderManageOpen(true);
                         } catch {}
                       }}
@@ -415,110 +504,15 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
               </div>
             </div>
           )}
-          
+
           {activeTab === 'settings' && (
-            <div className="flex-1 h-full bg-transparent overflow-auto">
-              <SettingsInputViewerLazy 
+            <div className="absolute inset-0 z-10 flex-1 h-full bg-background overflow-auto">
+              <SettingsInputViewerLazy
                 instanceId={instanceId}
                 selectedItem={selectedSettingsItem}
                 onComplete={() => {}}
               />
             </div>
-          )}
-          
-          {activeTab === 'launch' && (
-            <>
-              {previewMode === 'modal' ? (
-                // Modal preview mode
-                <div className="absolute inset-0 bg-zinc-100 dark:bg-zinc-900 overflow-auto">
-                  <div
-                    className="min-h-full w-full flex items-center justify-center p-8"
-                    style={{
-                      backgroundColor: currentConfig.modal_backdrop_color
-                        ? `${currentConfig.modal_backdrop_color}${Math.round((currentConfig.modal_backdrop_opacity || 0.5) * 255)
-                            .toString(16)
-                            .padStart(2, '0')}`
-                        : 'rgba(0, 0, 0, 0.5)',
-                    }}
-                  >
-                    <div
-                      className="rounded-lg shadow-2xl overflow-hidden flex flex-col"
-                      style={{
-                        backgroundColor: currentConfig.modal_background_color || '#ffffff',
-                        borderRadius: currentConfig.modal_border_radius ? `${currentConfig.modal_border_radius}px` : '12px',
-                        height: currentConfig.modal_height || '80%',
-                        maxHeight: currentConfig.modal_max_height ? `${currentConfig.modal_max_height}px` : '800px',
-                        maxWidth: currentConfig.modal_max_width ? `${currentConfig.modal_max_width}px` : '600px',
-                        width: currentConfig.modal_width || '80%',
-                      }}
-                    >
-                      {/* Modal header */}
-                      {currentConfig.modal_show_close_button !== false && (
-                        <div className="flex justify-end p-4 border-b border-border/60 flex-shrink-0">
-                          <button
-                            className="transition-colors duration-200"
-                            style={{
-                              backgroundColor: 'transparent',
-                              border: 'none',
-                              borderRadius: '4px',
-                              color: currentConfig.modal_close_button_color || '#6b7280',
-                              cursor: 'pointer',
-                              fontSize: '20px',
-                              padding: '4px',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.color = currentConfig.modal_close_button_hover_color || '#374151';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.color = currentConfig.modal_close_button_color || '#6b7280';
-                            }}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Modal content */}
-                      <div className="flex-1 min-h-0 overflow-auto">
-                        <WidgetPageView
-                          instanceId={instanceId}
-                          previewMode="desktop"
-                          liveConfig={previewDesignConfig}
-                          mode={previewModeType}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                // Regular preview modes (desktop, mobile, iframe)
-                <div className="absolute inset-0 flex flex-col min-w-0 min-h-0 bg-zinc-100 dark:bg-zinc-900">
-                  {previewMode === 'desktop' ? (
-                    <div className="flex-1 w-full min-h-0 min-w-0 overflow-hidden flex flex-col">
-                      <WidgetPageView
-                        instanceId={instanceId}
-                        fullPage={true}
-                        previewMode={previewMode}
-                        liveConfig={previewDesignConfig}
-                        mode={previewModeType}
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-full h-full overflow-auto flex items-center justify-center">
-                      <WidgetPageView
-                        instanceId={instanceId}
-                        fullPage={false}
-                        previewMode={previewMode}
-                        liveConfig={previewDesignConfig}
-                        mode={previewModeType}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
           )}
         </div>
       </div>

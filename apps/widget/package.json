@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@adventure/ai-form-ui-contract": "file:../../shared/api/ai-form-ui-contract",
+    "@adventure/refinement-server": "file:../../shared/api/refinement-server",
     "@ai-sdk/react": "^1.2.12",
     "@aws-sdk/client-s3": "^3.842.0",
     "@aws-sdk/s3-request-presigner": "^3.842.0",

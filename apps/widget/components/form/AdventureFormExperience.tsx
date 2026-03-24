@@ -17,6 +17,7 @@ import { getOrCreateSessionId, hasSessionStarted, markSessionStarted, clearSessi
 import { withWidgetDesignDefaults } from "@/lib/widget-design-defaults";
 import { extractAIFormConfig } from "@/lib/ai-form/config/extract-ai-form-config";
 import { ExperienceStateProvider } from "./state/ExperienceState";
+import { BrandHeader } from "@/components/widget/BrandHeader";
 import { buildDeterministicStyleStep } from "./steps/static/deterministic-style-step";
 
 interface AIFormPageRendererProps {
@@ -68,6 +69,10 @@ export function AdventureFormExperience({
     return useWidgetDefaults && init ? (withWidgetDesignDefaults(init as any, initialInstanceData?.name) as any) : init;
   });
   const [instanceData, setInstanceData] = useState<any>(initialInstanceData || null);
+  const instanceDataRef = useRef<any>(initialInstanceData || null);
+  useEffect(() => {
+    instanceDataRef.current = instanceData;
+  }, [instanceData]);
   const [rawDesignConfig, setRawDesignConfig] = useState<DesignSettings | null>(null);
   const [flowPlan, setFlowPlan] = useState<FlowPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -221,7 +226,11 @@ export function AdventureFormExperience({
             injectedDesignRef.current = nextDesignRaw as Partial<DesignSettings>;
             const base = baseDesignRef.current || defaultDesignSettings;
             const merged = { ...(base as any), ...((injectedDesignRef.current as any) || {}) } as DesignSettings;
-            setDesignConfig(useWidgetDefaults ? withWidgetDesignDefaults(merged as any, instanceData?.name) : merged);
+            setDesignConfig(
+              useWidgetDefaults
+                ? withWidgetDesignDefaults(merged as any, instanceDataRef.current?.name)
+                : merged
+            );
           }
           if (isPlaygroundThemeMsg) {
             try { window.parent?.postMessage({ type: "SIF_PLAYGROUND_THEME_ACK", v: 1 }, replyOrigin); } catch {}
@@ -251,7 +260,9 @@ export function AdventureFormExperience({
         // Only update theme when we actually received design settings (UPDATE_CONFIG, legacy flowConfig.design, or playground theme).
         if (nextDesignRaw && typeof nextDesignRaw === "object" && !Array.isArray(nextDesignRaw)) {
           const nextConfig = { ...defaultDesignSettings, ...(nextDesignRaw as any) } as DesignSettings;
-          const filledNext = useWidgetDefaults ? withWidgetDesignDefaults(nextConfig as any, instanceData?.name) : nextConfig;
+          const filledNext = useWidgetDefaults
+            ? withWidgetDesignDefaults(nextConfig as any, instanceDataRef.current?.name)
+            : nextConfig;
           baseDesignRef.current = filledNext;
           setDesignConfig(filledNext);
         }
@@ -269,7 +280,7 @@ export function AdventureFormExperience({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [isDemoRoute, useWidgetDefaults, instanceData]);
+  }, [isDemoRoute, useWidgetDefaults]);
 
   useEffect(() => {
     // Don't reset sessionStartedRef - it should persist across re-renders
@@ -1074,8 +1085,10 @@ export function AdventureFormExperience({
     instanceData?.config?.form_show_branding_header !== false &&
     instanceData?.config?.form_show_branding !== false;
 
+  const resolvedDesign = (designConfig || defaultDesignSettings) as DesignSettings;
+
   return (
-    <FormThemeProvider config={designConfig || defaultDesignSettings}>
+    <FormThemeProvider config={resolvedDesign}>
       <ExperienceStateProvider>
         <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
           {dspyMeta?.lintFailed && (
@@ -1083,29 +1096,34 @@ export function AdventureFormExperience({
               We adjusted wording for clarity
             </div>
           )}
-          <StepEngine 
-            instanceId={instanceId} 
-            sessionScopeKey={sessionScopeKey}
-            flowPlan={flowPlan} 
-            onMeta={recordMeta}
-            showBrandingHeader={showBrandingHeader}
-            formUI={{
-              showProgressBar: instanceData?.config?.form_show_progress_bar,
-              showStepDescriptions: instanceData?.config?.form_show_step_descriptions,
-            }}
-            config={{
-              businessContext: instanceData?.businessContext || instanceData?.config?.businessContext,
-              industry: instanceData?.industry || instanceData?.config?.industry,
-              useCase:
-                instanceUseCase ||
-                instanceData?.use_case ||
-                instanceData?.useCase ||
-                instanceData?.config?.useCase ||
-                instanceData?.config?.use_case,
-              previewPricing: formConfig?.previewPricing,
-              leadCaptureRequired: formConfig?.leadCaptureRequired,
-            }}
-          />
+          {useWidgetDefaults ? (
+            <BrandHeader config={resolvedDesign} containerWidth={1024} hideInMobile={false} />
+          ) : null}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <StepEngine
+              instanceId={instanceId}
+              sessionScopeKey={sessionScopeKey}
+              flowPlan={flowPlan}
+              onMeta={recordMeta}
+              showBrandingHeader={showBrandingHeader}
+              formUI={{
+                showProgressBar: instanceData?.config?.form_show_progress_bar,
+                showStepDescriptions: instanceData?.config?.form_show_step_descriptions,
+              }}
+              config={{
+                businessContext: instanceData?.businessContext || instanceData?.config?.businessContext,
+                industry: instanceData?.industry || instanceData?.config?.industry,
+                useCase:
+                  instanceUseCase ||
+                  instanceData?.use_case ||
+                  instanceData?.useCase ||
+                  instanceData?.config?.useCase ||
+                  instanceData?.config?.use_case,
+                previewPricing: formConfig?.previewPricing,
+                leadCaptureRequired: formConfig?.leadCaptureRequired,
+              }}
+            />
+          </div>
         </div>
       </ExperienceStateProvider>
     </FormThemeProvider>

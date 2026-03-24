@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
-import type { Database, Json } from "@/types/database";
+import type { Database } from "@/types/database";
 import {
   isSystemOwnedSubcategory,
   listCatalogImages,
@@ -11,55 +11,14 @@ import {
   SUBCATEGORY_IMAGE_CATALOG_SEED_COUNT,
 } from "@/lib/subcategory-image-catalog";
 import {
-  appendSupportedSubcategoryComponents,
-  buildPlannerCategoriesFromStoredComponents,
-  buildRefinementCategoryQuestion,
-  buildRefinementCoverage,
-  buildMissingRefinementOptions,
-  buildStoredSubcategoryComponentsFromPlannerCategories,
-  getGeneratableRefinementComponents,
-  hasReadyRefinementLibraryForComponents,
-  listRefinementImages,
-  parseStoredSubcategoryComponents,
-  persistGeneratedRefinementImages,
-  REFINEMENT_LIBRARY_MIN_CATEGORIES,
-  REFINEMENT_LIBRARY_MIN_IMAGES_PER_CATEGORY,
-  REFINEMENT_LIBRARY_MAX_CATEGORIES,
-  REFINEMENT_LIBRARY_TARGET_CATEGORIES,
-  REFINEMENT_OPTION_MODEL_ID,
-  type StoredSubcategoryComponent,
-} from "@/lib/refinement-image-library";
+  ensureRefinementLibraryForSubcategory,
+  resolveDspyServiceBaseUrls,
+} from "@adventure/refinement-server";
 
 export const dynamic = "force-dynamic";
 
-function normalizeServiceUrl(raw: unknown): string {
-  let s = String(raw || "").trim();
-  if (!s) return "";
-  if (!/^https?:\/\//i.test(s)) s = `https://${s.replace(/^\/+/, "")}`;
-  return s.replace(/\/+$/, "");
-}
-
 function resolveFormServiceBaseUrls(): string[] {
-  const isRuntimeProduction =
-    process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
-  const serverDevModeFlag = String(process.env.AI_FORM_DEV_MODE || "").trim().toLowerCase();
-  const clientDevModeFlag = isRuntimeProduction
-    ? ""
-    : String(process.env.NEXT_PUBLIC_AI_FORM_DEV_MODE || "").trim().toLowerCase();
-  const forceDev = serverDevModeFlag === "true" || clientDevModeFlag === "true";
-  const forceProd = serverDevModeFlag === "false" || clientDevModeFlag === "false";
-  const isDevMode = forceDev || (!forceProd && !isRuntimeProduction);
-  const devUrl = normalizeServiceUrl(process.env.DEV_DSPY_SERVICE_URL || "");
-  const prodUrl = normalizeServiceUrl(process.env.PROD_DSPY_SERVICE_URL || process.env.DSPY_SERVICE_URL || "");
-  const urls: string[] = [];
-  if (isDevMode) {
-    if (devUrl) urls.push(devUrl);
-    if (prodUrl) urls.push(prodUrl);
-  } else {
-    if (prodUrl) urls.push(prodUrl);
-    if (devUrl) urls.push(devUrl);
-  }
-  return Array.from(new Set(urls)).filter(Boolean);
+  return resolveDspyServiceBaseUrls();
 }
 
 function logSeed(label: string, data: Record<string, unknown>) {
@@ -106,30 +65,6 @@ async function callFormServiceUpstream(params: {
     }
   }
   return { error: lastErr, ok: false };
-}
-
-async function persistSubcategoryComponents(params: {
-  subcategoryId: string;
-  supabase: any;
-  components: StoredSubcategoryComponent[];
-}): Promise<{ ok: true; components: StoredSubcategoryComponent[] } | { ok: false; error: string }> {
-  const normalized = parseStoredSubcategoryComponents(params.components);
-  const update = await params.supabase
-    .from("categories_subcategories")
-    .update({
-      subcategory_components: normalized as unknown as Json,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", params.subcategoryId);
-
-  if (update.error) {
-    return {
-      ok: false,
-      error: update.error.message || "Failed to persist subcategory taxonomy",
-    };
-  }
-
-  return { ok: true, components: normalized };
 }
 
 export async function POST(request: NextRequest) {
@@ -243,10 +178,6 @@ export async function POST(request: NextRequest) {
       refinementSkippedExisting: 0,
       refinementStoredImages: 0,
       skippedCustom: 0,
-      taxonomyAugmentedSubcategories: 0,
-      taxonomyCreatedSubcategories: 0,
-      taxonomySkippedExisting: 0,
-      taxonomyUnsupportedSubcategories: 0,
     };
 
     logSeed("start", {
@@ -394,253 +325,48 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      let storedComponents = parseStoredSubcategoryComponents(subcategory?.subcategory_components);
-      const existingSupportedComponents = getGeneratableRefinementComponents(storedComponents);
-      const needsTaxonomyCreation = storedComponents.length === 0;
-      const needsTaxonomyAugmentation =
-        !needsTaxonomyCreation && existingSupportedComponents.length < REFINEMENT_LIBRARY_MIN_CATEGORIES;
-
-      if (needsTaxonomyCreation || needsTaxonomyAugmentation) {
-        summary.refinementPlannerCalls += 1;
-        const additionalTargetCount = Math.max(
-          1,
-          REFINEMENT_LIBRARY_TARGET_CATEGORIES - existingSupportedComponents.length,
-        );
-        const plannerResult = await callFormServiceUpstream({
-          baseUrls,
-          path: "/v1/api/refinement-category-planner/plan",
-          payload: {
-            categoryId,
-            categoryName,
-            companySummary: (instance as any)?.company_summary || null,
-            existingComponents: storedComponents,
-            maxCategories: needsTaxonomyCreation
-              ? REFINEMENT_LIBRARY_MAX_CATEGORIES
-              : Math.min(REFINEMENT_LIBRARY_MAX_CATEGORIES, additionalTargetCount),
-            minCategories: needsTaxonomyCreation ? REFINEMENT_LIBRARY_MIN_CATEGORIES : 0,
-            serviceSummary,
-            subcategoryId,
-            subcategoryName,
-            targetCategories: needsTaxonomyCreation ? REFINEMENT_LIBRARY_TARGET_CATEGORIES : additionalTargetCount,
-          },
-        });
-
-        if (!plannerResult.ok) {
-          summary.failures.push({
-            error: typeof plannerResult.error === "string" ? plannerResult.error : "Failed to plan refinement categories",
-            subcategoryId,
-          });
-          logSeed("taxonomy_planner_failed", {
-            error: plannerResult.error,
-            instanceId,
-            subcategoryId,
-          });
-        } else if (!Array.isArray(plannerResult.json?.categories)) {
-          summary.failures.push({
-            error: "Refinement planner response was missing normalized categories",
-            subcategoryId,
-          });
-          logSeed("taxonomy_planner_missing_categories", {
-            instanceId,
-            subcategoryId,
-          });
-        } else {
-          const plannedComponents = buildStoredSubcategoryComponentsFromPlannerCategories(
-            plannerResult.json.categories,
-          );
-          const nextComponents = needsTaxonomyCreation
-            ? plannedComponents.slice(0, REFINEMENT_LIBRARY_TARGET_CATEGORIES)
-            : appendSupportedSubcategoryComponents({
-                additions: plannedComponents,
-                existing: storedComponents,
-                maxSupportedCount: REFINEMENT_LIBRARY_TARGET_CATEGORIES,
-              });
-          const changed = JSON.stringify(nextComponents) !== JSON.stringify(storedComponents);
-
-          if (changed && nextComponents.length > 0) {
-            const persistResult = await persistSubcategoryComponents({
-              components: nextComponents,
-              subcategoryId,
-              supabase: admin,
-            });
-            if (!persistResult.ok) {
-              summary.failures.push({
-                error: persistResult.error,
-                subcategoryId,
-              });
-              logSeed("taxonomy_persist_failed", {
-                error: persistResult.error,
-                instanceId,
-                subcategoryId,
-              });
-            } else {
-              storedComponents = persistResult.components;
-              (subcategory as any).subcategory_components = persistResult.components as unknown as Json;
-              if (needsTaxonomyCreation) {
-                summary.taxonomyCreatedSubcategories += 1;
-                logSeed("taxonomy_created", {
-                  componentKeys: storedComponents.map((item) => item.key),
-                  instanceId,
-                  subcategoryId,
-                });
-              } else {
-                summary.taxonomyAugmentedSubcategories += 1;
-                logSeed("taxonomy_augmented", {
-                  componentKeys: storedComponents.map((item) => item.key),
-                  instanceId,
-                  subcategoryId,
-                });
-              }
-            }
-          }
-        }
-      } else {
-        summary.taxonomySkippedExisting += 1;
-        logSeed("taxonomy_skip_existing", {
-          componentKeys: storedComponents.map((item) => item.key),
-          instanceId,
-          subcategoryId,
-        });
-      }
-
-      const taxonomyComponents = parseStoredSubcategoryComponents(
-        (subcategory as any)?.subcategory_components ?? storedComponents,
-      );
-      const generatableComponents = getGeneratableRefinementComponents(taxonomyComponents);
-
-      if (generatableComponents.length === 0) {
-        summary.taxonomyUnsupportedSubcategories += 1;
-        logSeed("taxonomy_no_generatable_components", {
-          componentKeys: taxonomyComponents.map((item) => item.key),
-          instanceId,
-          subcategoryId,
-        });
-        continue;
-      }
-
-      const unsupportedComponentKeys = taxonomyComponents
-        .filter((item) => !generatableComponents.some((candidate) => candidate.key === item.key))
-        .map((item) => item.key);
-      if (unsupportedComponentKeys.length > 0) {
-        logSeed("taxonomy_skip_unsupported_components", {
-          instanceId,
-          subcategoryId,
-          unsupportedComponentKeys,
-        });
-      }
-
-      let refinementRows = await listRefinementImages({
+      const refinementResult = await ensureRefinementLibraryForSubcategory({
+        baseUrls,
         categoryId,
+        categoryName,
+        companySummary: (instance as any)?.company_summary ?? null,
         instanceId,
+        mode: "instance_seed",
+        serviceSummary,
         subcategoryId,
+        subcategoryName,
         supabase: admin,
+        existingSubcategoryComponents: (subcategory as any)?.subcategory_components,
+        log: logSeed,
       });
 
-      if (hasReadyRefinementLibraryForComponents(refinementRows, generatableComponents)) {
+      if (refinementResult.plannerCalled) {
+        summary.refinementPlannerCalls += 1;
+      }
+      if (refinementResult.skipped) {
         summary.refinementSkippedExisting += 1;
-        logSeed("refinement_skip_existing", {
-          instanceId,
-          subcategoryId,
-          usableCategories: generatableComponents.length,
-        });
-        continue;
-      }
-
-      let subcategoryStoredRefinements = 0;
-      for (const plannedCategory of buildPlannerCategoriesFromStoredComponents(generatableComponents)) {
-        const coverage = buildRefinementCoverage(refinementRows);
-        const existingCount = coverage.get(plannedCategory.canonical_key)?.count || 0;
-        const missingCount = Math.max(0, REFINEMENT_LIBRARY_MIN_IMAGES_PER_CATEGORY - existingCount);
-        if (missingCount <= 0) continue;
-
-        const missingOptions = buildMissingRefinementOptions({
-          categoryKey: plannedCategory.canonical_key,
-          existingRows: refinementRows,
-          missingCount,
-        });
-        if (missingOptions.length === 0) continue;
-
-        const optionResult = await callFormServiceUpstream({
-          baseUrls,
-          path: "/v1/api/option-images/generate",
-          payload: {
-            industry: categoryName,
-            instanceId,
-            modelId: REFINEMENT_OPTION_MODEL_ID,
-            options: missingOptions.map((option) => ({
-              imagePrompt: option.imagePrompt,
-              label: option.label,
-              value: option.value,
-            })),
-            question: buildRefinementCategoryQuestion({
-              categoryLabel: plannedCategory.label,
-              subcategoryName,
-            }),
-            service: subcategoryName,
-            serviceSummary,
-            session: {
-              instanceId,
-              sessionId: `refinement-seed:${subcategoryId}:${plannedCategory.canonical_key}`,
-            },
-            stepId: `refinement-seed:${subcategoryId}:${plannedCategory.canonical_key}`,
-          },
-        });
-
-        if (!optionResult.ok) {
-          summary.failures.push({
-            error:
-              typeof optionResult.error === "string"
-                ? optionResult.error
-                : `Failed to generate refinement images for ${plannedCategory.canonical_key}`,
-            subcategoryId,
-          });
-          continue;
-        }
-        if (!Array.isArray(optionResult.json?.options)) {
-          summary.failures.push({
-            error: `Refinement image response was missing options for ${plannedCategory.canonical_key}`,
-            subcategoryId,
-          });
-          continue;
-        }
-
-        const storedRefinementImages = await persistGeneratedRefinementImages({
-          categoryId,
-          categoryName,
-          generatedOptions: optionResult.json.options,
-          instanceId,
-          options: missingOptions,
-          plannedCategory,
-          serviceSummary,
-          subcategoryId,
-          subcategoryName,
-          supabase: admin,
-        });
-
-        if (storedRefinementImages > 0) {
-          subcategoryStoredRefinements += storedRefinementImages;
-          summary.refinementStoredImages += storedRefinementImages;
-          refinementRows = await listRefinementImages({
-            categoryId,
-            instanceId,
-            subcategoryId,
-            supabase: admin,
-          });
-        }
-      }
-
-      if (subcategoryStoredRefinements > 0) {
-        summary.refinementSeededSubcategories += 1;
-        logSeed("refinement_stored_success", {
-          instanceId,
-          storedRefinements: subcategoryStoredRefinements,
-          subcategoryId,
-        });
-      } else if (!hasReadyRefinementLibraryForComponents(refinementRows, generatableComponents)) {
+        logSeed("refinement_skip_existing", { instanceId, subcategoryId });
+      } else if (!refinementResult.ok) {
         summary.failures.push({
-          error: "Refinement library is still below minimum coverage after seeding",
+          error: refinementResult.error || "Refinement library seed failed",
           subcategoryId,
         });
+        logSeed("refinement_seed_failed", {
+          error: refinementResult.error,
+          instanceId,
+          subcategoryId,
+        });
+      } else {
+        const n = refinementResult.storedImages || 0;
+        summary.refinementStoredImages += n;
+        if (n > 0) {
+          summary.refinementSeededSubcategories += 1;
+          logSeed("refinement_stored_success", {
+            instanceId,
+            storedRefinements: n,
+            subcategoryId,
+          });
+        }
       }
     }
 

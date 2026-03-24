@@ -516,12 +516,12 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             )
         return response_obj
 
-    @compat_router.post("/refinement-category-planner/plan")
-    @router.post("/refinement-category-planner/plan")
-    async def refinement_category_plan(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        from programs.refinement_category_planner.orchestrator import plan_refinement_categories  # noqa: E402
+    @compat_router.post("/refinement-library-planner/plan")
+    @router.post("/refinement-library-planner/plan")
+    async def refinement_library_plan(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
+        from programs.refinement_library_planner.orchestrator import plan_refinement_library  # noqa: E402
 
-        planned = plan_refinement_categories(payload)
+        planned = plan_refinement_library(payload)
         if not planned.get("ok"):
             error = str(planned.get("error") or "").strip().lower()
             status = HTTP_400_BAD_REQUEST if error == "missing_service_context" else 500

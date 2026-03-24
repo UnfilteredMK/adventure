@@ -5,10 +5,10 @@ import re
 
 import dspy
 
-from programs.refinement_category_planner.signature import RefinementCategoryPlannerSignature
+from programs.refinement_library_planner.signature import RefinementLibraryPlannerSignature
 
 
-def _extract_first_plan_json_object(text: str) -> dict | None:
+def _extract_first_json_with_keys(text: str, required_keys: set[str]) -> dict | None:
     s = str(text or "")
     if not s:
         return None
@@ -45,7 +45,7 @@ def _extract_first_plan_json_object(text: str) -> dict | None:
                         parsed = json.loads(blob)
                     except Exception:
                         break
-                    if isinstance(parsed, dict) and isinstance(parsed.get("categories"), list):
+                    if isinstance(parsed, dict) and required_keys.issubset(parsed.keys()):
                         return parsed
                     break
         i = start + 1
@@ -65,41 +65,39 @@ def _sanitize_plan_json(raw: object) -> str:
     parsed: dict | None = None
     try:
         loaded = json.loads(text)
-        if isinstance(loaded, dict) and isinstance(loaded.get("categories"), list):
+        if isinstance(loaded, dict):
             parsed = loaded
     except Exception:
-        parsed = _extract_first_plan_json_object(text)
+        parsed = _extract_first_json_with_keys(text, {"components", "optionSeeds"})
     if not isinstance(parsed, dict):
         return text
     return json.dumps(parsed, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
 
-class RefinementCategoryPlannerProgram(dspy.Module):
+class RefinementLibraryPlannerProgram(dspy.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.prog = dspy.Predict(RefinementCategoryPlannerSignature)
+        self.prog = dspy.Predict(RefinementLibraryPlannerSignature)
 
     def forward(  # type: ignore[override]
         self,
         *,
         planner_context_json: str,
-        target_categories: int,
-        min_categories: int,
-        max_categories: int,
+        target_component_count: int,
+        target_options_per_component: int,
     ):
         pred = self.prog(
             planner_context_json=planner_context_json,
-            target_categories=target_categories,
-            min_categories=min_categories,
-            max_categories=max_categories,
+            target_component_count=int(target_component_count),
+            target_options_per_component=int(target_options_per_component),
         )
         try:
-            cleaned = _sanitize_plan_json(getattr(pred, "refinement_category_plan_json", None))
+            cleaned = _sanitize_plan_json(getattr(pred, "refinement_library_plan_json", None))
             if cleaned:
-                setattr(pred, "refinement_category_plan_json", cleaned)
+                setattr(pred, "refinement_library_plan_json", cleaned)
         except Exception:
             pass
         return pred
 
 
-__all__ = ["RefinementCategoryPlannerProgram"]
+__all__ = ["RefinementLibraryPlannerProgram"]

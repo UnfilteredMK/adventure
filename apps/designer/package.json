@@ -30,9 +30,11 @@
     "db:pull": "supabase db pull --schema public && cp supabase/migrations/*_schema.sql supabase/rls/policies.sql",
     "db:new": "supabase migration new",
     "db:push": "supabase db push",
-    "sort:configs": "node ../../scripts/sort-configs.js"
+    "sort:configs": "node ../../scripts/sort-configs.js",
+    "backfill:refinement-library": "tsx scripts/backfill-refinement-library.ts"
   },
   "dependencies": {
+    "@adventure/refinement-server": "file:../../shared/api/refinement-server",
     "@aws-sdk/client-s3": "^3.842.0",
     "@aws-sdk/s3-request-presigner": "^3.842.0",
     "@hookform/resolvers": "^3.10.0",
@@ -126,6 +128,7 @@
     "jscodeshift": "^0.15.2",
     "kill-port": "^2.0.1",
     "supabase": "^2.30.4",
+    "tsx": "^4.19.2",
     "typescript": "5.8.3"
   }
 }

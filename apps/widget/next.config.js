@@ -3,7 +3,7 @@ const nextConfig = {
   distDir: '.next',
   // Prevent OpenTelemetry from being bundled into vendor-chunks (avoids "Cannot find module './vendor-chunks/@opentelemetry.js'")
   // Next.js 14 uses experimental.serverComponentsExternalPackages; serverExternalPackages is Next 15+
-  transpilePackages: ["@adventure/ai-form-ui-contract"],
+  transpilePackages: ["@adventure/ai-form-ui-contract", "@adventure/refinement-server"],
   eslint: {
     ignoreDuringBuilds: true,
   },

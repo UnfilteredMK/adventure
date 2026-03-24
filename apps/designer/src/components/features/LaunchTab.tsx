@@ -3,7 +3,6 @@ import { Button } from "../ui/button";
 import { ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { DesignSettings } from "@mage/types";
-import { StandaloneSettings } from "./design/StandaloneSettings";
 import { ModalSettings } from "./design/ModalSettings";
 import { IframeSettings } from "./design/IframeSettings";
 import { useInstance } from "@/contexts/InstanceContext";
@@ -18,20 +17,18 @@ interface LaunchTabProps {
   updateConfig: (updates: Partial<DesignSettings>) => void;
 }
 
-export const LaunchTab: React.FC<LaunchTabProps> = ({ 
+export const LaunchTab: React.FC<LaunchTabProps> = ({
   config,
-  instanceId, 
+  instanceId,
   openSections,
   toggleSection,
-  updateConfig
+  updateConfig,
 }) => {
   const { toast } = useToast();
   const { user } = useAuth();
   const { currentInstance } = useInstance();
   const [embedCode, setEmbedCode] = useState<string | null>(null);
   const [modalEmbedCode, setModalEmbedCode] = useState<string | null>(null);
-  const [formEmbedCode, setFormEmbedCode] = useState<string | null>(null);
-  const [formModalEmbedCode, setFormModalEmbedCode] = useState<string | null>(null);
   const [showMadeWith, setShowMadeWith] = useState(false);
 
   useEffect(() => {
@@ -72,13 +69,14 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
     return withProtocol.replace(/\/+$/g, "");
   }, []);
 
-  // Unified experience: both internal + form launch URLs use /adventure/:instanceId
-  const widgetUrl = useMemo(() => `${widgetBaseUrl}/adventure/${instanceId}`, [widgetBaseUrl, instanceId]);
-  const formUrl = useMemo(() => `${widgetBaseUrl}/adventure/${instanceId}`, [widgetBaseUrl, instanceId]);
+  const adventureUrl = useMemo(
+    () => `${widgetBaseUrl}/adventure/${instanceId}`,
+    [widgetBaseUrl, instanceId]
+  );
 
   const madeWithHref = process.env.NEXT_PUBLIC_SITE_URL || "https://adventure.app";
 
-  const buildWidgetIframeEmbedCode = useCallback(() => {
+  const buildIframeEmbedCode = useCallback(() => {
     const productName = "Adventure";
     const madeWith = showMadeWith
       ? `\n<div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px;">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
@@ -87,7 +85,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
     const iframeWidth = config.iframe_width || "900";
     const iframeHeight = config.iframe_height || "600";
     const iframeBorderRadius = config.iframe_border_radius || 12;
-    const iframeBorderWidth = config.iframe_border === false ? 0 : (config.iframe_border_width || 1);
+    const iframeBorderWidth = config.iframe_border === false ? 0 : config.iframe_border_width || 1;
     const iframeBorderColor = config.iframe_border_color || "#e5e7eb";
     const iframeBackgroundColor = config.background_color || "#fff7ed";
     const iframeShadow = config.iframe_shadow || "medium";
@@ -103,7 +101,6 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
       medium: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
       none: "none",
       subtle: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
-      // Backwards compatibility (old UI used "small")
       small: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
     };
 
@@ -111,7 +108,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
 
     return `<div style="display: flex; justify-content: center; margin: 20px 0;">
   <iframe 
-    src="${widgetUrl}"
+    src="${adventureUrl}"
     width="${iframeWidth}"
     height="${iframeHeight}"
     style="border-radius: ${iframeBorderRadius}px; border: ${iframeBorderWidth}px solid ${iframeBorderColor}; background-color: ${iframeBackgroundColor}; box-shadow: ${resolvedShadow};"
@@ -120,7 +117,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
     scrolling="${iframeScrolling}"
     sandbox="${iframeSandbox}"
     referrerpolicy="${iframeReferrerPolicy}"
-    ${iframeAllowTransparency ? 'allowtransparency="true"' : ''}
+    ${iframeAllowTransparency ? 'allowtransparency="true"' : ""}
   ></iframe>
 </div>${madeWith}
 
@@ -165,30 +162,30 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
   window.addEventListener('unload', notifyIframes);
 })();
 </script>`;
-  }, [config, madeWithHref, showMadeWith, widgetUrl]);
+  }, [adventureUrl, config, madeWithHref, showMadeWith]);
 
-  const buildWidgetPopupEmbedCode = useCallback(() => {
+  const buildPopupEmbedCode = useCallback(() => {
     const productName = "Adventure";
     const madeWith = showMadeWith
       ? `\n    <div style="text-align: center; font-size: 12px; padding: 8px 12px; color: #6b7280; border-top: 1px solid rgba(0,0,0,0.06);">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
       : "";
 
-    // Extract modal configuration from config
-    const modalWidth = config.modal_width || '80%';
-    const modalHeight = config.modal_height || '80%';
+    const modalWidth = config.modal_width || "80%";
+    const modalHeight = config.modal_height || "80%";
     const modalMaxWidth = config.modal_max_width || 1200;
     const modalMaxHeight = config.modal_max_height || 1000;
     const modalBorderRadius = config.modal_border_radius || 12;
-    const modalBackdropColor = config.modal_backdrop_color || '#374151';
+    const modalBackdropColor = config.modal_backdrop_color || "#374151";
     const modalBackdropOpacity = config.modal_backdrop_opacity || 0.2;
-    const modalBackgroundColor = config.modal_background_color || '#ffffff';
-    const modalAnimationType = config.modal_animation_type || 'fade';
+    const modalBackgroundColor = config.modal_background_color || "#ffffff";
+    const modalAnimationType = config.modal_animation_type || "fade";
     const modalAnimationDuration = config.modal_animation_duration || 300;
     const modalCloseOnBackdrop = config.modal_close_on_backdrop !== false;
     const modalCloseOnEscape = config.modal_close_on_escape !== false;
-    
-    // Convert opacity to hex
-    const backdropOpacityHex = Math.round(modalBackdropOpacity * 255).toString(16).padStart(2, '0');
+
+    const backdropOpacityHex = Math.round(modalBackdropOpacity * 255)
+      .toString(16)
+      .padStart(2, "0");
     const backdropColor = `${modalBackdropColor}${backdropOpacityHex}`;
 
     return `<!-- ${productName} AI Widget Modal -->
@@ -210,7 +207,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
     flex-direction: column;
   ">
     <div style="flex: 1 1 auto; overflow: auto;">
-      <iframe src="${widgetUrl}" width="100%" height="100%" frameborder="0" loading="lazy" scrolling="auto" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer-when-downgrade" allowtransparency="true" style="display: block;"></iframe>
+      <iframe src="${adventureUrl}" width="100%" height="100%" frameborder="0" loading="lazy" scrolling="auto" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer-when-downgrade" allowtransparency="true" style="display: block;"></iframe>
     </div>
 ${madeWith}
   </div>
@@ -228,7 +225,7 @@ ${madeWith}
   font-weight: 500;
   transition: background-color 0.2s;
 " onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
-  Open ${productName} Widget
+  Open ${productName}
 </button>
 
 <script>
@@ -276,203 +273,29 @@ ${modalCloseOnBackdrop ? `  modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       hideModal();
     }
-  });` : ''}
+  });` : ""}
 ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && modal.style.display === 'block') {
       hideModal();
     }
-  });` : ''}
+  });` : ""}
 })();
 </script>`;
-  }, [config, madeWithHref, showMadeWith, widgetUrl]);
+  }, [adventureUrl, config, madeWithHref, showMadeWith]);
 
-  const buildFormIframeEmbedCode = useCallback(() => {
-    const madeWith = showMadeWith
-      ? `\n<div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px;">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
-      : "";
+  const hasAiForm = Boolean((config as any)?.form_status_enabled);
 
-    const iframeWidth = config.iframe_width || "900";
-    const iframeHeight = config.iframe_height || "600";
-    const iframeBorderRadius = config.iframe_border_radius || 12;
-    const iframeBorderWidth = config.iframe_border === false ? 0 : (config.iframe_border_width || 1);
-    const iframeBorderColor = config.iframe_border_color || "#e5e7eb";
-    const iframeBackgroundColor = config.background_color || "#fff7ed";
-    const iframeShadow = config.iframe_shadow || "medium";
-    const iframeLoading = config.iframe_loading || "lazy";
-    const iframeScrolling = config.iframe_scrolling || "auto";
-    const iframeSandbox = config.iframe_sandbox || "allow-scripts allow-same-origin allow-forms";
-    const iframeReferrerPolicy = config.iframe_referrerpolicy || "no-referrer-when-downgrade";
-    const iframeAllowTransparency = config.iframe_allowtransparency !== false;
-
-    const shadowStyles: Record<string, string> = {
-      glow: "0 0 15px rgba(99, 102, 241, 0.3)",
-      large: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
-      medium: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-      none: "none",
-      subtle: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
-      small: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
-    };
-
-    const resolvedShadow = shadowStyles[String(iframeShadow)] ?? shadowStyles.medium;
-
-    return `<div style="display: flex; justify-content: center; margin: 20px 0;">
-  <iframe 
-    src="${formUrl}"
-    width="${iframeWidth}"
-    height="${iframeHeight}"
-    style="border-radius: ${iframeBorderRadius}px; border: ${iframeBorderWidth}px solid ${iframeBorderColor}; background-color: ${iframeBackgroundColor}; box-shadow: ${resolvedShadow};"
-    frameborder="0"
-    loading="${iframeLoading}"
-    scrolling="${iframeScrolling}"
-    sandbox="${iframeSandbox}"
-    referrerpolicy="${iframeReferrerPolicy}"
-    ${iframeAllowTransparency ? 'allowtransparency="true"' : ''}
-  ></iframe>
-</div>${madeWith}`;
-  }, [config, formUrl, madeWithHref, showMadeWith]);
-
-  const buildFormPopupEmbedCode = useCallback(() => {
-    const productName = "Adventure";
-    const madeWith = showMadeWith
-      ? `\n    <div style="text-align: center; font-size: 12px; padding: 8px 12px; color: #6b7280; border-top: 1px solid rgba(0,0,0,0.06);">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
-      : "";
-
-    const modalWidth = config.modal_width || '80%';
-    const modalHeight = config.modal_height || '80%';
-    const modalMaxWidth = config.modal_max_width || 1200;
-    const modalMaxHeight = config.modal_max_height || 1000;
-    const modalBorderRadius = config.modal_border_radius || 12;
-    const modalBackdropColor = config.modal_backdrop_color || '#374151';
-    const modalBackdropOpacity = config.modal_backdrop_opacity || 0.2;
-    const modalBackgroundColor = config.modal_background_color || '#ffffff';
-    const modalAnimationType = config.modal_animation_type || 'fade';
-    const modalAnimationDuration = config.modal_animation_duration || 300;
-    const modalCloseOnBackdrop = config.modal_close_on_backdrop !== false;
-    const modalCloseOnEscape = config.modal_close_on_escape !== false;
-    
-    const backdropOpacityHex = Math.round(modalBackdropOpacity * 255).toString(16).padStart(2, '0');
-    const backdropColor = `${modalBackdropColor}${backdropOpacityHex}`;
-
-    return `<!-- ${productName} AI Form Modal -->
-<div id="ai-form-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; background-color: ${backdropColor};">
-  <div class="modal-container" style="
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: ${modalWidth};
-    height: ${modalHeight};
-    max-width: ${modalMaxWidth}px;
-    max-height: ${modalMaxHeight}px;
-    background: ${modalBackgroundColor};
-    border-radius: ${modalBorderRadius}px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  ">
-    <div style="flex: 1 1 auto; overflow: auto;">
-      <iframe src="${formUrl}" width="100%" height="100%" frameborder="0" loading="lazy" scrolling="auto" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer-when-downgrade" allowtransparency="true" style="display: block;"></iframe>
-    </div>
-${madeWith}
-  </div>
-</div>
-
-<!-- Trigger Button -->
-<button id="open-ai-form" style="
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 16px;
-  font-weight: 500;
-  transition: background-color 0.2s;
-" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
-  Open ${productName} Form
-</button>
-
-<script>
-(function() {
-  const modal = document.getElementById('ai-form-modal');
-  const openBtn = document.getElementById('open-ai-form');
-  const modalContainer = modal.querySelector('.modal-container');
-
-  const animationDuration = ${modalAnimationDuration};
-  const animationType = '${modalAnimationType}';
-  
-  function showModal() {
-    modal.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-    
-    setTimeout(() => {
-      modal.style.opacity = '1';
-      if (animationType === 'fade') {
-        modalContainer.style.opacity = '1';
-        modalContainer.style.transform = 'translate(-50%, -50%) scale(1)';
-      }
-    }, 10);
-  }
-  
-  function hideModal() {
-    if (animationType === 'fade') {
-      modal.style.opacity = '0';
-      modalContainer.style.opacity = '0';
-      modalContainer.style.transform = 'translate(-50%, -50%) scale(0.95)';
-    }
-    setTimeout(() => {
-      modal.style.display = 'none';
-      document.body.style.overflow = '';
-    }, animationDuration);
-  }
-
-  modal.style.transition = \`opacity \${animationDuration}ms ease\`;
-  modalContainer.style.transition = \`all \${animationDuration}ms ease\`;
-  modal.style.opacity = '0';
-  modalContainer.style.opacity = '0';
-  modalContainer.style.transform = 'translate(-50%, -50%) scale(0.95)';
-
-  openBtn.addEventListener('click', showModal);
-${modalCloseOnBackdrop ? `  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      hideModal();
-    }
-  });` : ''}
-${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal.style.display === 'block') {
-      hideModal();
-    }
-  });` : ''}
-})();
-</script>`;
-  }, [config, formUrl, madeWithHref, showMadeWith]);
-
-  const hasFlowConfig = Boolean((config as any)?.form_status_enabled);
-
-  const ensureWidgetIframeCode = useCallback(() => {
-    const next = buildWidgetIframeEmbedCode();
+  const ensureIframeCode = useCallback(() => {
+    const next = buildIframeEmbedCode();
     setEmbedCode(next);
     return next;
-  }, [buildWidgetIframeEmbedCode]);
+  }, [buildIframeEmbedCode]);
 
-  const ensureWidgetPopupCode = useCallback(() => {
-    const next = buildWidgetPopupEmbedCode();
+  const ensurePopupCode = useCallback(() => {
+    const next = buildPopupEmbedCode();
     setModalEmbedCode(next);
     return next;
-  }, [buildWidgetPopupEmbedCode]);
-
-  const ensureFormIframeCode = useCallback(() => {
-    const next = buildFormIframeEmbedCode();
-    setFormEmbedCode(next);
-    return next;
-  }, [buildFormIframeEmbedCode]);
-
-  const ensureFormPopupCode = useCallback(() => {
-    const next = buildFormPopupEmbedCode();
-    setFormModalEmbedCode(next);
-    return next;
-  }, [buildFormPopupEmbedCode]);
+  }, [buildPopupEmbedCode]);
 
   const copy = useCallback(
     async (text: string, label: string) => {
@@ -539,89 +362,49 @@ ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
   );
 
   return (
-    <div className="space-y-6 pt-2">
-      <div className="space-y-3">
-        <div className="px-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Widget</h4>
+    <div className="space-y-4 pt-2">
+      <p className="px-1 text-xs text-muted-foreground leading-relaxed">
+        Direct link and embed codes point at{" "}
+        <code className="rounded bg-muted/50 px-1 py-0.5 font-mono text-[11px]">/adventure/{instanceId}</code>
+        {hasAiForm ? " (AI form when enabled for this instance, otherwise the classic widget)." : "."}
+      </p>
+
+      <Card title="Open in browser" description="Same URL visitors get in an embed.">
+        <div className="flex">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => window.open(adventureUrl, "_blank")}
+          >
+            Open
+          </Button>
         </div>
+      </Card>
 
-        <Card title="Open" description="Standalone page preview">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-xs text-muted-foreground">Open the widget in a new tab</div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0 h-8 text-xs"
-              onClick={() => window.open(widgetUrl, "_blank")}
-            >
-              Open
-            </Button>
-          </div>
-          <div className="mt-3">
-            <StandaloneSettings
-              config={config}
-              updateConfig={updateConfig}
-              isOpen={openSections.launch?.["standalone-settings"] || false}
-              onToggle={() => toggleSection("launch", "standalone-settings")}
-            />
-          </div>
-        </Card>
-
-        <Card title="Embed" description="Copy/paste iframe code">
-          <div className="mb-3">
-            <IframeSettings
-              config={config}
-              updateConfig={updateConfig}
-              isOpen={openSections.launch?.["iframe-settings"] || false}
-              onToggle={() => toggleSection("launch", "iframe-settings")}
-            />
-          </div>
-          <CodeBlock code={embedCode} ensureCode={ensureWidgetIframeCode} copyLabel="Widget embed code copied" />
-        </Card>
-
-        <Card title="Popup" description="Copy/paste HTML + JS">
-          <div className="mb-3">
-            <ModalSettings
-              config={config}
-              updateConfig={updateConfig}
-              isOpen={openSections.launch?.["modal-settings"] || false}
-              onToggle={() => toggleSection("launch", "modal-settings")}
-            />
-          </div>
-          <CodeBlock code={modalEmbedCode} ensureCode={ensureWidgetPopupCode} copyLabel="Widget popup code copied" />
-        </Card>
-      </div>
-
-      {hasFlowConfig ? (
-        <div className="space-y-3">
-          <div className="px-1">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Form</h4>
-            <p className="text-xs text-muted-foreground mt-1">Uses the same embed/popup settings as the widget.</p>
-          </div>
-
-          <Card title="Open" description="Standalone page preview">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs text-muted-foreground">Open the form in a new tab</div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 h-8 text-xs"
-                onClick={() => window.open(formUrl, "_blank")}
-              >
-                Open
-              </Button>
-            </div>
-          </Card>
-
-          <Card title="Embed" description="Copy/paste iframe code">
-            <CodeBlock code={formEmbedCode} ensureCode={ensureFormIframeCode} copyLabel="Form embed code copied" />
-          </Card>
-
-          <Card title="Popup" description="Copy/paste HTML + JS">
-            <CodeBlock code={formModalEmbedCode} ensureCode={ensureFormPopupCode} copyLabel="Form popup code copied" />
-          </Card>
+      <Card title="Iframe embed" description="Optional exit-intent helper script included below the iframe.">
+        <div className="mb-3">
+          <IframeSettings
+            config={config}
+            updateConfig={updateConfig}
+            isOpen={openSections.launch?.["iframe-settings"] || false}
+            onToggle={() => toggleSection("launch", "iframe-settings")}
+          />
         </div>
-      ) : null}
+        <CodeBlock code={embedCode} ensureCode={ensureIframeCode} copyLabel="Iframe embed code copied" />
+      </Card>
+
+      <Card title="Popup" description="Modal + trigger button; paste as HTML/JS on your site.">
+        <div className="mb-3">
+          <ModalSettings
+            config={config}
+            updateConfig={updateConfig}
+            isOpen={openSections.launch?.["modal-settings"] || false}
+            onToggle={() => toggleSection("launch", "modal-settings")}
+          />
+        </div>
+        <CodeBlock code={modalEmbedCode} ensureCode={ensurePopupCode} copyLabel="Popup embed code copied" />
+      </Card>
     </div>
   );
-}; 
+};

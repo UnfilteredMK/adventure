@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useFormTheme } from "../../demo/FormThemeProvider";
+import { coerceDesignBoolean } from "@/lib/coerce-design-boolean";
 
 interface BrandingHeaderProps {
   className?: string;
@@ -9,8 +10,11 @@ interface BrandingHeaderProps {
 
 export function BrandingHeader({ className }: BrandingHeaderProps) {
   const { theme, config } = useFormTheme();
-  const showLogo = config.logo_enabled !== false && Boolean(config.logo_url);
-  const showBrand = config.brand_name_enabled !== false && Boolean(config.brand_name);
+  const headerOn = coerceDesignBoolean(config.header_enabled, true);
+  const logoOn = coerceDesignBoolean(config.logo_enabled, false);
+  const brandOn = coerceDesignBoolean(config.brand_name_enabled, true);
+  const showLogo = headerOn && logoOn && Boolean(config.logo_url);
+  const showBrand = headerOn && brandOn && Boolean(config.brand_name);
 
   if (!showLogo && !showBrand) return null;
 

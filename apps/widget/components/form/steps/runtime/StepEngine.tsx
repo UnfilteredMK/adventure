@@ -167,6 +167,9 @@ export function StepEngine({
   const [maxVisitedIndex, setMaxVisitedIndex] = useState(0);
   const [formState, setFormState] = useState<FormState | null>(null);
   const leadCapturedForUI = Boolean(formState?.leadCaptured);
+  // Mirrors instances.config.lead_capture_enabled via extractAIFormConfig → leadCaptureRequired.
+  const previewLeadGateActive = config?.leadCaptureRequired !== false;
+  const effectiveLeadCompleteForPreviewFlow = leadCapturedForUI || !previewLeadGateActive;
   // Backend-owned call cap for this session. Not persisted; not hard-coded.
   const backendMaxCallsRef = useRef<number | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
@@ -527,7 +530,7 @@ export function StepEngine({
   const [awaitingRefinementAdvance, setAwaitingRefinementAdvance] = useState(false);
   useEffect(() => {
     if (!previewHasImage || !flowPlan?.sessionId || !instanceId) return;
-    if (!leadCapturedForUI) return;
+    if (!effectiveLeadCompleteForPreviewFlow) return;
     if (refinementsFetchedRef.current) return;
     refinementsFetchedRef.current = true;
 
@@ -626,7 +629,18 @@ export function StepEngine({
           console.warn("[StepEngine] Refinements fetch failed", e);
         }
       });
-  }, [previewHasImage, flowPlan?.sessionId, instanceId, leadCapturedForUI, addSteps, currentStep?.id, patchStep, state?.currentStepIndex, state?.stepData, state?.steps]);
+  }, [
+    previewHasImage,
+    flowPlan?.sessionId,
+    instanceId,
+    effectiveLeadCompleteForPreviewFlow,
+    addSteps,
+    currentStep?.id,
+    patchStep,
+    state?.currentStepIndex,
+    state?.stepData,
+    state?.steps,
+  ]);
 
   useEffect(() => {
     if (!awaitingRefinementAdvance) return;
@@ -891,7 +905,7 @@ export function StepEngine({
   // Remove their dedicated steps from the guided sequence, but keep their values in stepData
   // so future image generations and refinements still have the data.
   useEffect(() => {
-    if (!leadCapturedForUI) return;
+    if (!effectiveLeadCompleteForPreviewFlow) return;
     if (!previewHasImage) return;
     if (!state?.steps?.length) return;
     const hasInlineControlSteps = state.steps.some((step: any) =>
@@ -899,7 +913,7 @@ export function StepEngine({
     );
     if (!hasInlineControlSteps) return;
     removeStepsByIds(belowPreviewControlStepIds);
-  }, [belowPreviewControlStepIds, leadCapturedForUI, previewHasImage, removeStepsByIds, state?.steps]);
+  }, [belowPreviewControlStepIds, effectiveLeadCompleteForPreviewFlow, previewHasImage, removeStepsByIds, state?.steps]);
 
   // When lead is captured: switch to Guided tab so user sees next questions immediately.
   useEffect(() => {
@@ -907,7 +921,7 @@ export function StepEngine({
   }, [leadCapturedForUI]);
 
   useEffect(() => {
-    if (!leadCapturedForUI) return;
+    if (!effectiveLeadCompleteForPreviewFlow) return;
     if (!previewHasImage) return;
     if (!currentStep || !state?.steps?.length) return;
     const currentStepId = String(currentStep.id || "");
@@ -932,11 +946,19 @@ export function StepEngine({
     if (typeof previousVisibleIndex === "number" && previousVisibleIndex >= 0) {
       goToStep(previousVisibleIndex);
     }
-  }, [belowPreviewControlStepIds, currentStep, goToStep, leadCapturedForUI, previewHasImage, state?.currentStepIndex, state?.steps]);
+  }, [
+    belowPreviewControlStepIds,
+    currentStep,
+    goToStep,
+    effectiveLeadCompleteForPreviewFlow,
+    previewHasImage,
+    state?.currentStepIndex,
+    state?.steps,
+  ]);
 
   // If we blocked an auto-advance due to the preview gate, resume once lead is captured.
   useEffect(() => {
-    if (!leadCapturedForUI) return;
+    if (!effectiveLeadCompleteForPreviewFlow) return;
     const pending = pendingPreviewAdvanceRef.current;
     if (pending) {
       if (!currentStep || currentStep.id !== pending.stepId) {
@@ -968,7 +990,17 @@ export function StepEngine({
     leadCapturedAdvanceStepIdRef.current = currentStep.id;
     const stepData = (state?.stepData as Record<string, unknown>)?.[currentStep.id] ?? {};
     void goToNextStep(stepData);
-  }, [belowPreviewControlStepIds, currentStep, goToNextStep, goToStep, leadCapturedForUI, previewHasImage, state?.currentStepIndex, state?.stepData, state?.steps]);
+  }, [
+    belowPreviewControlStepIds,
+    currentStep,
+    goToNextStep,
+    goToStep,
+    effectiveLeadCompleteForPreviewFlow,
+    previewHasImage,
+    state?.currentStepIndex,
+    state?.stepData,
+    state?.steps,
+  ]);
 
   // --- Pricing estimate (AI) ---
   const pricingEstimateAbortRef = useRef<AbortController | null>(null);
@@ -983,7 +1015,7 @@ export function StepEngine({
     if (!flowPlan?.sessionId) return;
     if (!instanceId) return;
     if (!state?.stepData || !state?.steps) return;
-    if (!leadCapturedForUI) return;
+    if (!effectiveLeadCompleteForPreviewFlow) return;
     if (!pricingContextHash) return;
 
 	    if (pricingEstimateInFlightHashRef.current === pricingContextHash) return;
@@ -1177,7 +1209,7 @@ export function StepEngine({
     flowPlan?.sessionId,
     formState,
     instanceId,
-    leadCapturedForUI,
+    effectiveLeadCompleteForPreviewFlow,
     pricingContextHash,
     state?.stepData,
     state?.steps,
@@ -3085,7 +3117,7 @@ export function StepEngine({
   // Show ease feedback after the first preview image exists (hero generated),
   // while still respecting lead capture and one-time submission.
   const showEasePrompt =
-    leadCapturedForUI &&
+    effectiveLeadCompleteForPreviewFlow &&
     previewHasImage &&
     !flowCompleted &&
     !easeFeedbackSent;
@@ -3189,16 +3221,16 @@ export function StepEngine({
     previewEverEnabled,
     progressPercentage: progress?.percentage ?? null,
     setPreviewEverEnabled,
-    suppressDeterministicStepInsert: Boolean(leadCapturedForUI && previewHasImage),
+    suppressDeterministicStepInsert: Boolean(effectiveLeadCompleteForPreviewFlow && previewHasImage),
     state,
     updateStepData,
   });
 
   const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
 
-  // Gate question pane + bottom bar (prompt/budget/uploads) until lead capture is completed.
+  // Gate question pane + bottom bar until lead capture is completed (skipped when lead_capture_enabled is false).
   const leadGateLocksQuestionArea = Boolean(
-    previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
+    previewEnabled && previewHasImage && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow
   );
   useEffect(() => {
     leadGateLocksQuestionAreaRef.current = leadGateLocksQuestionArea;
@@ -3328,12 +3360,12 @@ export function StepEngine({
     // When moving forward: hide on the captured step to prevent stale content flash.
     // When backtracking: always show—user explicitly navigated back to see the question.
     // When lead captured: always show—unlock to reveal the next guided question.
-    if (!currentId || (currentId === capturedId && !isBacktrackingInForm && !leadCapturedForUI)) {
+    if (!currentId || (currentId === capturedId && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow)) {
       setPreviewQuestionRevealReady(false);
       return;
     }
     setPreviewQuestionRevealReady(true);
-  }, [currentStep?.id, previewEnabled, previewHasImage, isBacktrackingInForm, leadCapturedForUI]);
+  }, [currentStep?.id, previewEnabled, previewHasImage, isBacktrackingInForm, effectiveLeadCompleteForPreviewFlow]);
   const previewLayoutActive = Boolean(
     (usePreviewDominantLayout || useDesktopPreviewLayout) &&
       (previewHasImage || previewVisible || !previewQuestionRevealReady)
@@ -3351,9 +3383,9 @@ export function StepEngine({
     }
   }, [hasRefinementQuestions, previewAutoGenerationPending, previewHasImage]);
   const isAutoPreviewRefreshLocked = Boolean(previewHasImage && previewAutoGenerationBusy);
-  // Keep the question pane hidden while waiting for lead capture; re-show it once lead is captured and pricing is revealed.
+  // Keep the question pane hidden while waiting for lead capture; skipped when lead capture is disabled in config.
   const shouldHideQuestionPaneForLeadGate = Boolean(
-    previewEnabled && previewHasImage && !isBacktrackingInForm && !leadCapturedForUI
+    previewEnabled && previewHasImage && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow
   );
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
@@ -3400,7 +3432,7 @@ export function StepEngine({
       previewEnabled: Boolean(previewEnabled),
       previewVisible: Boolean(previewVisible),
       previewHasImage: Boolean(previewHasImage),
-      leadCaptured: Boolean(leadCapturedForUI),
+      leadCaptured: Boolean(effectiveLeadCompleteForPreviewFlow),
       showQuestionPane: Boolean(showQuestionPaneUnderPreview && !leadGateLocksQuestionArea),
       showEaseFeedback: Boolean(showEasePrompt),
       showReflectionFeedback: Boolean(flowCompleted && !reflectionFeedbackSent),
@@ -3409,7 +3441,7 @@ export function StepEngine({
     flowCompleted,
     isDesktopViewport,
     isMobileViewport,
-    leadCapturedForUI,
+    effectiveLeadCompleteForPreviewFlow,
     leadGateLocksQuestionArea,
     previewEnabled,
     previewHasImage,
@@ -3503,10 +3535,10 @@ export function StepEngine({
     const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
     // After lead modal is completed, budget/upload are hidden visually — hide from jogger only then.
     const withoutBudgetUploadWhenLeadCaptured =
-      leadCapturedForUI && previewHasImage
+      effectiveLeadCompleteForPreviewFlow && previewHasImage
         ? withoutRefinementUpload.filter(({ step }) => !belowPreviewControlStepIds.has(String((step as any)?.id || "")))
         : withoutRefinementUpload;
-    if (leadCapturedForUI && previewHasImage) return withoutBudgetUploadWhenLeadCaptured;
+    if (effectiveLeadCompleteForPreviewFlow && previewHasImage) return withoutBudgetUploadWhenLeadCaptured;
     // Before lead capture: only show batch-1 and earlier. Hide batch-2+ until lead form is filled.
     const effectiveRevealBatchOrder = Math.min(stepJoggerRevealBatchOrder ?? 1, 1);
     return withoutBudgetUploadWhenLeadCaptured.filter(({ step }) => {
@@ -3706,7 +3738,7 @@ export function StepEngine({
                       isFetchingNext={isFetchingNext || isAutoPreviewRefreshLocked}
                       isMobileViewport={isMobileViewport}
                       isRefinementUploadStep={isRefinementUploadStep}
-                      leadCapturedForUI={leadCapturedForUI}
+                      leadCapturedForUI={effectiveLeadCompleteForPreviewFlow}
                       leadGateLocksQuestionArea={leadGateLocksQuestionArea}
 	                      adventureInputMode={adventureInputMode}
 	                      setAdventureInputMode={setAdventureInputMode}

@@ -4,83 +4,17 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import {
+  buildRefinementCatalogForWidget,
+  coerceSubcategoryComponentsForWidget,
+  ensureRefinementLibraryForSubcategory,
+  resolveDspyServiceBaseUrls,
+} from "@adventure/refinement-server";
 import { logger } from "@/lib/server/logger";
 import { createSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type RefinementCatalogOption = {
-  label: string;
-  value: string;
-  imageUrl: string;
-};
-
-type RefinementCatalogItem = {
-  key: string;
-  label: string;
-  priority: number;
-  options: RefinementCatalogOption[];
-};
-
-function coerceSubcategoryComponents(
-  raw: unknown,
-): Array<{ key: string; label: string; priority: number }> {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const items: Array<{ key: string; label: string; priority: number }> = [];
-  for (const [index, entry] of raw.entries()) {
-    if (!entry || typeof entry !== "object") continue;
-    const key = typeof (entry as any).key === "string" ? (entry as any).key.trim() : "";
-    if (!key) continue;
-    const dedupeKey = key.toLowerCase();
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-    const label =
-      typeof (entry as any).label === "string" && (entry as any).label.trim()
-        ? (entry as any).label.trim()
-        : key;
-    const priorityRaw = Number((entry as any).priority);
-    items.push({
-      key,
-      label,
-      priority: Number.isFinite(priorityRaw) ? priorityRaw : index + 1,
-    });
-  }
-  return items;
-}
-
-function normalizeServiceUrl(raw: string): string {
-  let s = String(raw || "").trim();
-  if (!s) return "";
-  if (!/^https?:\/\//i.test(s)) s = `https://${s.replace(/^\/+/, "")}`;
-  return s.replace(/\/+$/, "");
-}
-
-function resolveFormServiceBaseUrls(): string[] {
-  const isRuntimeProduction =
-    process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
-  const serverDevModeFlag = String(process.env.AI_FORM_DEV_MODE || "").trim().toLowerCase();
-  const clientDevModeFlag = isRuntimeProduction
-    ? ""
-    : String(process.env.NEXT_PUBLIC_AI_FORM_DEV_MODE || "").trim().toLowerCase();
-  const forceDev = serverDevModeFlag === "true" || clientDevModeFlag === "true";
-  const forceProd = serverDevModeFlag === "false" || clientDevModeFlag === "false";
-  const isDevMode = forceDev || (!forceProd && !isRuntimeProduction);
-
-  const devUrl = normalizeServiceUrl(process.env.DEV_DSPY_SERVICE_URL || "");
-  const prodUrl = normalizeServiceUrl(process.env.DSPY_SERVICE_URL || process.env.PROD_DSPY_SERVICE_URL || "");
-
-  const urls: string[] = [];
-  if (isDevMode) {
-    if (devUrl) urls.push(devUrl);
-    if (prodUrl) urls.push(prodUrl);
-  } else {
-    if (prodUrl) urls.push(prodUrl);
-    if (devUrl) urls.push(devUrl);
-  }
-  return Array.from(new Set(urls));
-}
 
 function normalizeOptionalString(value: unknown): string | null {
   if (typeof value === "string") {
@@ -116,54 +50,6 @@ function isReadyRefinementImage(row: any): boolean {
     String(meta?.generated_for || "").trim() === "refinement_option" &&
     String(meta?.refinement_status || "").trim() === "ready"
   );
-}
-
-function buildRefinementCatalog(rows: any[], rawComponents: unknown): RefinementCatalogItem[] {
-  const components = coerceSubcategoryComponents(rawComponents);
-  if (components.length === 0) return [];
-
-  const buckets = new Map<
-    string,
-    RefinementCatalogItem & {
-      seenVariationKeys: Set<string>;
-    }
-  >();
-  for (const component of components) {
-    buckets.set(component.key, {
-      ...component,
-      options: [],
-      seenVariationKeys: new Set<string>(),
-    });
-  }
-
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (!isReadyRefinementImage(row)) continue;
-    const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : null;
-    const key = normalizeOptionalString(meta?.refinement_category_key);
-    const imageUrl = normalizeOptionalString(row?.image_url);
-    if (!key || !imageUrl || !buckets.has(key)) continue;
-
-    const bucket = buckets.get(key)!;
-    const value = normalizeOptionalString(meta?.refinement_variation_key) || String(row?.id || "");
-    const label =
-      normalizeOptionalString(meta?.refinement_variation_label) ||
-      normalizeOptionalString(meta?.option_label) ||
-      value;
-    if (!value || !label) continue;
-
-    const dedupeKey = value.toLowerCase();
-    if (bucket.seenVariationKeys.has(dedupeKey)) continue;
-    bucket.seenVariationKeys.add(dedupeKey);
-    bucket.options.push({ label, value, imageUrl });
-  }
-
-  return Array.from(buckets.values())
-    .map(({ seenVariationKeys: _seenVariationKeys, ...item }) => ({
-      ...item,
-      options: item.options.slice(0, 8),
-    }))
-    .filter((item) => item.options.length >= 2)
-    .sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 }
 
 export async function POST(
@@ -268,48 +154,11 @@ export async function POST(
         .limit(500),
     ]);
 
-    const mergedImages = [
+    let mergedImages = [
       ...(Array.isArray(accountImages.data) ? accountImages.data : []),
       ...(Array.isArray(globalImages.data) ? globalImages.data : []),
     ];
-    const componentCount = coerceSubcategoryComponents((subcategory as any)?.subcategory_components).length;
-    const componentKeys = coerceSubcategoryComponents((subcategory as any)?.subcategory_components)
-      .map((component) => String(component.key || "").trim())
-      .filter(Boolean);
-    const readyImageCount = mergedImages.filter((row) => isReadyRefinementImage(row)).length;
-    const refinementCatalog = buildRefinementCatalog(
-      mergedImages,
-      (subcategory as any)?.subcategory_components,
-    );
-
-    if (refinementCatalog.length === 0) {
-      logger.info("[refinements] EMPTY", {
-        reqId,
-        instanceId,
-        selectedServiceId,
-        reason: "empty_refinement_catalog",
-        componentCount,
-        componentKeys,
-        readyImageCount,
-      });
-      return NextResponse.json({
-        ok: true,
-        miniSteps: [],
-        requestId: reqId,
-        schemaVersion: "1",
-        ...(debugEnabled
-          ? {
-              debug: {
-                reason: "empty_refinement_catalog",
-                selectedServiceId,
-                componentCount,
-                componentKeys,
-                readyImageCount,
-              },
-            }
-          : {}),
-      });
-    }
+    let refinedSubcategory: typeof subcategory = subcategory;
 
     const serviceSummary =
       typeof (subcategory as any)?.service_summary === "string" && String((subcategory as any).service_summary).trim()
@@ -343,6 +192,123 @@ export async function POST(
           ? String((instance as any).config.service).trim()
           : null;
 
+    const componentCount = coerceSubcategoryComponentsForWidget((refinedSubcategory as any)?.subcategory_components).length;
+    const componentKeys = coerceSubcategoryComponentsForWidget((refinedSubcategory as any)?.subcategory_components)
+      .map((component) => String(component.key || "").trim())
+      .filter(Boolean);
+    const readyImageCount = mergedImages.filter((row) => isReadyRefinementImage(row)).length;
+    let refinementCatalog = buildRefinementCatalogForWidget(
+      mergedImages,
+      (refinedSubcategory as any)?.subcategory_components,
+    );
+
+    if (refinementCatalog.length === 0) {
+      const repairBaseUrls = resolveDspyServiceBaseUrls();
+      const plannerServiceSummary =
+        (serviceSummary && serviceSummary.trim()) ||
+        [industryName, serviceName || "Service"].filter(Boolean).join(": ") ||
+        `${industryName} service`;
+      if (repairBaseUrls.length > 0) {
+        const repair = await ensureRefinementLibraryForSubcategory({
+          baseUrls: repairBaseUrls,
+          categoryId: typeof (refinedSubcategory as any)?.category_id === "string" ? String((refinedSubcategory as any).category_id) : null,
+          categoryName: industryName,
+          companySummary:
+            typeof (instance as any)?.company_summary === "string" && String((instance as any).company_summary).trim()
+              ? String((instance as any).company_summary).trim()
+              : null,
+          instanceId,
+          mode: "lazy_repair",
+          serviceSummary: plannerServiceSummary,
+          subcategoryId: selectedServiceId,
+          subcategoryName: serviceName || "Service",
+          supabase: admin.supabase,
+          existingSubcategoryComponents: (refinedSubcategory as any)?.subcategory_components,
+          log: (label, data) => {
+            logger.info(`[refinements-repair] ${label}`, { reqId, instanceId, selectedServiceId, ...data });
+          },
+        });
+
+        if (!repair.ok && repair.plannerCalled) {
+          logger.warn("[refinements] repair_failed", {
+            reqId,
+            instanceId,
+            selectedServiceId,
+            error: repair.error,
+          });
+        }
+
+        if (repair.ok && repair.componentsPersisted) {
+          const { data: subFresh, error: subFreshErr } = await admin.supabase
+            .from("categories_subcategories")
+            .select("id, subcategory, category_id, service_summary, subcategory_components, categories(name)")
+            .eq("id", selectedServiceId)
+            .single();
+          if (!subFreshErr && subFresh) {
+            refinedSubcategory = subFresh as typeof subcategory;
+          }
+
+          const [accountImages2, globalImages2] = await Promise.all([
+            accountId
+              ? admin.supabase
+                  .from("images")
+                  .select(selectCols)
+                  .eq("subcategory_id", selectedServiceId)
+                  .eq("account_id", accountId)
+                  .eq("status", "completed")
+                  .order("created_at", { ascending: false })
+                  .limit(500)
+              : Promise.resolve({ data: [], error: null }),
+            admin.supabase
+              .from("images")
+              .select(selectCols)
+              .eq("subcategory_id", selectedServiceId)
+              .is("account_id", null)
+              .eq("status", "completed")
+              .order("created_at", { ascending: false })
+              .limit(500),
+          ]);
+          mergedImages = [
+            ...(Array.isArray(accountImages2.data) ? accountImages2.data : []),
+            ...(Array.isArray(globalImages2.data) ? globalImages2.data : []),
+          ];
+          refinementCatalog = buildRefinementCatalogForWidget(
+            mergedImages,
+            (refinedSubcategory as any)?.subcategory_components,
+          );
+        }
+      }
+
+      if (refinementCatalog.length === 0) {
+        logger.info("[refinements] EMPTY", {
+          reqId,
+          instanceId,
+          selectedServiceId,
+          reason: "empty_refinement_catalog",
+          componentCount,
+          componentKeys,
+          readyImageCount,
+        });
+        return NextResponse.json({
+          ok: true,
+          miniSteps: [],
+          requestId: reqId,
+          schemaVersion: "1",
+          ...(debugEnabled
+            ? {
+                debug: {
+                  reason: "empty_refinement_catalog",
+                  selectedServiceId,
+                  componentCount,
+                  componentKeys,
+                  readyImageCount,
+                },
+              }
+            : {}),
+        });
+      }
+    }
+
     const payload = {
       ...(body && typeof body === "object" ? body : {}),
       sessionId,
@@ -352,7 +318,7 @@ export async function POST(
         businessContext,
         serviceSummary,
         industry: {
-          id: typeof (subcategory as any)?.category_id === "string" ? String((subcategory as any).category_id) : null,
+          id: typeof (refinedSubcategory as any)?.category_id === "string" ? String((refinedSubcategory as any).category_id) : null,
           name: industryName,
         },
         service: {
@@ -363,7 +329,7 @@ export async function POST(
       refinementCatalog,
     };
 
-    const baseUrls = resolveFormServiceBaseUrls();
+    const baseUrls = resolveDspyServiceBaseUrls();
     if (baseUrls.length === 0) {
       return NextResponse.json(
         { ok: false, error: "DSPY_SERVICE_URL not configured" },

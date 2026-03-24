@@ -1,4 +1,5 @@
 import { defaultDesignSettings, type DesignSettings, hexToRgba } from "@/types/design";
+import { coerceDesignBoolean } from "@/lib/coerce-design-boolean";
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
@@ -68,11 +69,17 @@ export function withWidgetDesignDefaults(
   instanceDisplayName?: string | null
 ): DesignSettings {
   const raw = (input || {}) as DesignSettings;
+  const r = raw as Record<string, unknown>;
+  const headerIn = raw.header_enabled ?? r.headerEnabled;
+  const logoIn = raw.logo_enabled ?? r.logoEnabled;
+  const brandEnabledIn = raw.brand_name_enabled ?? r.brandNameEnabled;
+
   const hasBrandName = raw.brand_name != null && String(raw.brand_name).trim() !== "";
   const instanceName = instanceDisplayName != null ? String(instanceDisplayName).trim() : "";
+  const fillBrandFromInstance = coerceDesignBoolean(brandEnabledIn, true);
   const enrichedRaw = {
     ...(raw as any),
-    ...(!hasBrandName && instanceName ? { brand_name: instanceName } : {}),
+    ...(!hasBrandName && instanceName && fillBrandFromInstance ? { brand_name: instanceName } : {}),
   } as DesignSettings;
 
   const themeKey = String((raw as any)?.color_theme || "").trim().toLowerCase();
@@ -138,13 +145,13 @@ export function withWidgetDesignDefaults(
     container_padding_left: raw.container_padding_left ?? 16,
 
     // Header / branding
-    header_enabled: raw.header_enabled ?? true,
+    header_enabled: coerceDesignBoolean(headerIn, true),
     header_alignment: raw.header_alignment ?? "center",
-    brand_name_enabled: raw.brand_name_enabled ?? true,
+    brand_name_enabled: coerceDesignBoolean(brandEnabledIn, true),
     brand_name_color: raw.brand_name_color ?? text,
     brand_name_font_family: raw.brand_name_font_family ?? fontFamily,
     brand_name_font_size: raw.brand_name_font_size ?? 22,
-    logo_enabled: raw.logo_enabled ?? false,
+    logo_enabled: coerceDesignBoolean(logoIn, false),
     logo_height: raw.logo_height ?? 40,
     sticky_header: raw.sticky_header ?? false,
 
@@ -232,9 +239,16 @@ export function withWidgetDesignDefaults(
     overlay_font_size: raw.overlay_font_size ?? 13,
   };
 
-  return {
+  const merged = {
     ...(defaultDesignSettings as any),
     ...(derived as any),
     ...(enrichedRaw as any),
+  } as DesignSettings;
+
+  return {
+    ...merged,
+    header_enabled: coerceDesignBoolean(merged.header_enabled, true),
+    brand_name_enabled: coerceDesignBoolean(merged.brand_name_enabled, true),
+    logo_enabled: coerceDesignBoolean(merged.logo_enabled, false),
   } as DesignSettings;
 }

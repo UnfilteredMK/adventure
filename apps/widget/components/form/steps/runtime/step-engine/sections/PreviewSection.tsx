@@ -102,7 +102,7 @@ export function PreviewSection({
             enabled={true}
             instanceId={instanceId}
             sessionId={sessionId}
-            leadGateEnabled={true}
+            leadGateEnabled={config?.leadCaptureRequired !== false}
             transparentChrome={true}
             config={config}
             stepDataSoFar={stepDataSoFar}

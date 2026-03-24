@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronDown } from 'lucide-react';
-import { ColorInput, NumberInput, SelectInput } from '../FormComponents';
+import { ColorInput, NumberInput } from '../FormComponents';
 import { Switch } from '../../ui/switch';
 import { DesignSettings } from '@/types/design';
 
@@ -46,13 +46,6 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                     <Switch
                       checked={config.modal_close_on_backdrop !== false}
                       onCheckedChange={(checked) => updateConfig({ modal_close_on_backdrop: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs">Show close button</span>
-                    <Switch
-                      checked={config.modal_show_close_button !== false}
-                      onCheckedChange={(checked) => updateConfig({ modal_show_close_button: checked })}
                     />
                   </div>
                   <div className="flex items-center justify-between">
@@ -106,55 +99,17 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                 </div>
               </div>
 
-              {/* Close Button Styling */}
+              {/* Open/close timing (generated snippet uses a fade transition only) */}
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Close Button</label>
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Color</label>
-                    <ColorInput
-                      label="Close button color"
-                      value={config.modal_close_button_color || '#6b7280'}
-                      onChange={(value) => updateConfig({ modal_close_button_color: value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Hover</label>
-                    <ColorInput
-                      label="Close button hover color"
-                      value={config.modal_close_button_hover_color || '#374151'}
-                      onChange={(value) => updateConfig({ modal_close_button_hover_color: value })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Modal Animation */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Animation</label>
-                <div className="space-y-2">
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Type</label>
-                    <SelectInput
-                      value={config.modal_animation_type || 'fade'}
-                      onChange={(value) => updateConfig({ modal_animation_type: value as any })}
-                      options={[
-                        { label: 'Fade', value: 'fade' },
-                        { label: 'Slide Up', value: 'slide-up' },
-                        { label: 'Slide Down', value: 'slide-down' },
-                        { label: 'Scale', value: 'scale' }
-                      ]}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Duration (ms)</label>
-                    <NumberInput
-                      value={config.modal_animation_duration || 300}
-                      onChange={(value) => updateConfig({ modal_animation_duration: value })}
-                      min={100}
-                      max={1000}
-                    />
-                  </div>
+                <label className="text-xs font-medium text-muted-foreground">Transition</label>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Duration (ms)</label>
+                  <NumberInput
+                    value={config.modal_animation_duration || 300}
+                    onChange={(value) => updateConfig({ modal_animation_duration: value })}
+                    min={100}
+                    max={1000}
+                  />
                 </div>
               </div>
 
@@ -203,18 +158,6 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                         max={1000}
                       />
                     </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Position</label>
-                    <SelectInput
-                      value={config.modal_position || 'center'}
-                      onChange={(value) => updateConfig({ modal_position: value as any })}
-                      options={[
-                        { label: 'Center', value: 'center' },
-                        { label: 'Top', value: 'top' },
-                        { label: 'Bottom', value: 'bottom' }
-                      ]}
-                    />
                   </div>
                 </div>
               </div>

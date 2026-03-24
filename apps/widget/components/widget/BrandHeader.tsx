@@ -2,6 +2,7 @@
 
 import { DesignSettings, getBackgroundColor } from "../../types";
 import { motion, useReducedMotion } from "framer-motion";
+import { coerceDesignBoolean } from "@/lib/coerce-design-boolean";
 
 interface BrandHeaderProps {
   config: DesignSettings;
@@ -11,12 +12,13 @@ interface BrandHeaderProps {
 
 export function BrandHeader({ config, containerWidth = 1024, hideInMobile = false }: BrandHeaderProps) {
   const reduceMotion = useReducedMotion();
-  // Check if header is enabled and if we have any visible branding elements
-  const hasLogo = config.logo_enabled && config.logo_url;
-  const hasBrandName = config.brand_name_enabled && config.brand_name;
-  
-  // Hide header if disabled, no branding elements, or explicitly hidden in mobile
-  if (!config.header_enabled || (!hasLogo && !hasBrandName) || hideInMobile) {
+  const headerOn = coerceDesignBoolean(config.header_enabled, true);
+  const logoOn = coerceDesignBoolean(config.logo_enabled, false);
+  const brandOn = coerceDesignBoolean(config.brand_name_enabled, true);
+  const hasLogo = logoOn && Boolean(config.logo_url);
+  const hasBrandName = brandOn && Boolean(config.brand_name);
+
+  if (!headerOn || (!hasLogo && !hasBrandName) || hideInMobile) {
     return null;
   }
 

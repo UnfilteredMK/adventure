@@ -42,7 +42,7 @@ export function AdventureWidgetExperience({
   embedded = false,
 }: WidgetProps) {
   const [designConfig, setDesignConfig] = useState<DesignSettings>(() =>
-    withWidgetDesignDefaults(initialDesignConfig as any)
+    withWidgetDesignDefaults(initialDesignConfig as any, initialInstanceData?.name)
   );
   const [instanceData, setInstanceData] = useState<any>(() => initialInstanceData || null);
 
@@ -61,9 +61,12 @@ export function AdventureWidgetExperience({
       if (data.type === "UPDATE_CONFIG" && data.config) {
         try {
           const nextConfig = data.config as DesignSettings;
-          const filled = withWidgetDesignDefaults(nextConfig as any);
-          setDesignConfig(filled);
           setInstanceData((prev: any) => {
+            const instanceName =
+              (prev && typeof prev.name === "string" && prev.name.trim()) ||
+              (typeof initialInstanceData?.name === "string" && String(initialInstanceData.name).trim()) ||
+              undefined;
+            setDesignConfig(withWidgetDesignDefaults(nextConfig as any, instanceName));
             if (!prev || typeof prev !== "object") return prev;
             return { ...prev, config: nextConfig };
           });

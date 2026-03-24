@@ -263,7 +263,7 @@ export const DesignTabV2: React.FC<DesignTabV2Props> = React.memo(
                 <div className="text-xs text-muted-foreground">Show the widget header area</div>
               </div>
               <Switch
-                checked={config.header_enabled}
+                checked={config.header_enabled ?? true}
                 onCheckedChange={(v) => updateConfig({ header_enabled: v })}
               />
             </div>
@@ -285,8 +285,10 @@ export const DesignTabV2: React.FC<DesignTabV2Props> = React.memo(
                 <div className="text-xs text-muted-foreground">Show the brand name text</div>
               </div>
               <Switch
-                checked={config.brand_name_enabled}
-                onCheckedChange={(v) => updateConfig({ brand_name_enabled: v })}
+                checked={config.brand_name_enabled ?? true}
+                onCheckedChange={(v) =>
+                  updateConfig(v ? { brand_name_enabled: true, header_enabled: true } : { brand_name_enabled: false })
+                }
               />
             </div>
 
@@ -305,8 +307,10 @@ export const DesignTabV2: React.FC<DesignTabV2Props> = React.memo(
                 <div className="text-xs text-muted-foreground">Show a logo image</div>
               </div>
               <Switch
-                checked={config.logo_enabled}
-                onCheckedChange={(v) => updateConfig({ logo_enabled: v })}
+                checked={config.logo_enabled ?? false}
+                onCheckedChange={(v) =>
+                  updateConfig(v ? { logo_enabled: true, header_enabled: true } : { logo_enabled: false })
+                }
               />
             </div>
 

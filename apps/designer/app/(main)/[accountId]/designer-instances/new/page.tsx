@@ -405,6 +405,7 @@ export default function NewInstancePage() {
               form_status_enabled: true,
               form_show_progress_bar: true,
               form_show_step_descriptions: true,
+              lead_capture_enabled: true,
               // Form experiences typically don't rely on the gallery.
               gallery_show_placeholder_images: false,
             }
