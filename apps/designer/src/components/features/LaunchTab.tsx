@@ -170,10 +170,11 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
       ? `\n    <div style="text-align: center; font-size: 12px; padding: 8px 12px; color: #6b7280; border-top: 1px solid rgba(0,0,0,0.06);">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
       : "";
 
-    const modalWidth = config.modal_width || "80%";
-    const modalHeight = config.modal_height || "80%";
-    const modalMaxWidth = config.modal_max_width || 1200;
-    const modalMaxHeight = config.modal_max_height || 1000;
+    // Fill the viewport with margin; pixel caps are what you set in Popup settings (widget/form area).
+    const modalWidth = "calc(100vw - 24px)";
+    const modalHeight = "calc(100dvh - 48px)";
+    const modalMaxWidth = Math.max(200, Number(config.modal_max_width) || 900);
+    const modalMaxHeight = Math.max(200, Number(config.modal_max_height) || 900);
     const modalBorderRadius = config.modal_border_radius || 12;
     const modalBackdropColor = config.modal_backdrop_color || "#374151";
     const modalBackdropOpacity = config.modal_backdrop_opacity || 0.2;

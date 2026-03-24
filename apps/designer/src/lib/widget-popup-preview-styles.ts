@@ -25,11 +25,10 @@ export function widgetPopupPreviewBackdropStyle(config: DesignSettings): CSSProp
   return { backgroundColor: `${modalBackdropColor}${hex}` };
 }
 
+/** Panel uses viewport fill up to these pixel caps (same idea as the pasted embed). */
 export function widgetPopupPreviewPanelStyle(config: DesignSettings): CSSProperties {
-  const modalWidth = config.modal_width || '80%';
-  const modalHeight = config.modal_height || '80%';
-  const modalMaxWidth = config.modal_max_width || 1200;
-  const modalMaxHeight = config.modal_max_height || 1000;
+  const modalMaxWidth = Math.max(200, Number(config.modal_max_width) || 900);
+  const modalMaxHeight = Math.max(200, Number(config.modal_max_height) || 900);
   const modalBorderRadius = config.modal_border_radius ?? 12;
   const modalBackgroundColor = config.modal_background_color || '#ffffff';
   const modalAnimationDuration = config.modal_animation_duration ?? 300;
@@ -38,12 +37,12 @@ export function widgetPopupPreviewPanelStyle(config: DesignSettings): CSSPropert
     backgroundColor: modalBackgroundColor,
     borderRadius: `${modalBorderRadius}px`,
     boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-    height: modalHeight,
+    height: 'calc(100dvh - 48px)',
     maxHeight: `${modalMaxHeight}px`,
     maxWidth: `${modalMaxWidth}px`,
     transitionProperty: 'opacity, transform, width, height, max-width, max-height, background-color, border-radius, box-shadow',
     transitionDuration: `${modalAnimationDuration}ms`,
     transitionTimingFunction: 'ease',
-    width: modalWidth,
+    width: 'calc(100vw - 24px)',
   };
 }

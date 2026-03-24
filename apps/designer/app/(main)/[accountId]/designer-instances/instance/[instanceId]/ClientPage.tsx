@@ -383,7 +383,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
                   role="dialog"
                   aria-modal="true"
                   aria-label="Popup preview"
-                  className="relative flex min-h-0 min-w-0 max-h-[calc(100dvh-4rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden"
+                  className="relative flex min-h-0 min-w-0 flex-col overflow-hidden"
                   style={widgetPopupPreviewPanelStyle(currentConfig)}
                 >
                   {currentConfig.modal_show_close_button !== false && (

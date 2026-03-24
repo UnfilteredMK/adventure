@@ -157,8 +157,8 @@ export const defaultDesignSettingsV2: DesignSettingsV2 = {
 
   modal_width: "80%",
   modal_height: "80%",
-  modal_max_width: 600,
-  modal_max_height: 800,
+  modal_max_width: 900,
+  modal_max_height: 900,
   modal_backdrop_color: "#000000",
   modal_backdrop_opacity: 0.5,
   modal_background_color: "#ffffff",

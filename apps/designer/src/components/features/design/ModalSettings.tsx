@@ -106,52 +106,22 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Size</label>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Width</label>
-                      <input
-                        type="text"
-                        value={config.modal_width || '80%'}
-                        onChange={(e) => updateConfig({ modal_width: e.target.value })}
-                        className="w-full px-2 py-1 text-xs border border-border rounded"
-                        placeholder="80%"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Height</label>
-                      <input
-                        type="text"
-                        value={config.modal_height || '80%'}
-                        onChange={(e) => updateConfig({ modal_height: e.target.value })}
-                        className="w-full px-2 py-1 text-xs border border-border rounded"
-                        placeholder="80%"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Max width</label>
-                      <NumberInput
-                        value={config.modal_max_width || 600}
-                        onChange={(value) => updateConfig({ modal_max_width: value })}
-                        min={300}
-                        max={1200}
-                        commitOnBlur
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Max height</label>
-                      <NumberInput
-                        value={config.modal_max_height || 800}
-                        onChange={(value) => updateConfig({ modal_max_height: value })}
-                        min={400}
-                        max={1000}
-                        commitOnBlur
-                      />
-                    </div>
-                  </div>
+                <label className="text-xs font-medium text-muted-foreground">Widget area (px)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberInput
+                    label="Max width"
+                    value={config.modal_max_width ?? 900}
+                    onChange={(value) => updateConfig({ modal_max_width: value })}
+                    min={200}
+                    commitOnBlur
+                  />
+                  <NumberInput
+                    label="Max height"
+                    value={config.modal_max_height ?? 900}
+                    onChange={(value) => updateConfig({ modal_max_height: value })}
+                    min={200}
+                    commitOnBlur
+                  />
                 </div>
               </div>
             </div>
