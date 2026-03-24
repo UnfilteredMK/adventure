@@ -65,6 +65,7 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                       onChange={(value) => updateConfig({ modal_backdrop_opacity: value })}
                       min={0}
                       max={1}
+                      commitOnBlur
                     />
                   </div>
                   <ColorInput
@@ -84,6 +85,7 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                       onChange={(value) => updateConfig({ modal_border_radius: value })}
                       min={0}
                       max={50}
+                      commitOnBlur
                     />
                   </div>
                 </div>
@@ -98,6 +100,7 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                     onChange={(value) => updateConfig({ modal_animation_duration: value })}
                     min={100}
                     max={1000}
+                    commitOnBlur
                   />
                 </div>
               </div>
@@ -135,6 +138,7 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                         onChange={(value) => updateConfig({ modal_max_width: value })}
                         min={300}
                         max={1200}
+                        commitOnBlur
                       />
                     </div>
                     <div className="space-y-1">
@@ -144,6 +148,7 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                         onChange={(value) => updateConfig({ modal_max_height: value })}
                         min={400}
                         max={1000}
+                        commitOnBlur
                       />
                     </div>
                   </div>

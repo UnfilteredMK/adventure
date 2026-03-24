@@ -281,16 +281,17 @@ export const ColorInput = ({
   );
 };
 
-// NumberInput Component - Immediate updates for designer
-export const NumberInput = ({ 
-  label, 
-  value, 
-  onChange, 
-  min, 
-  max, 
+// NumberInput Component - Immediate updates for designer (or commitOnBlur to avoid save/preview spam while typing)
+export const NumberInput = ({
+  label,
+  value,
+  onChange,
+  min,
+  max,
   placeholder,
-  unit 
-}: { 
+  unit,
+  commitOnBlur = false,
+}: {
   label?: string;
   value: number;
   onChange: (value: number) => void;
@@ -298,6 +299,8 @@ export const NumberInput = ({
   max?: number;
   placeholder?: string;
   unit?: string;
+  /** When true, only calls onChange on blur (after clamping). Use for min/max fields where partial digits would thrash config. */
+  commitOnBlur?: boolean;
 }) => {
   const [localValue, setLocalValue] = useState(value.toString());
 
@@ -308,28 +311,25 @@ export const NumberInput = ({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
-    // Allow empty string and valid number formats
     if (newValue === '' || /^-?\d*\.?\d*$/.test(newValue)) {
       setLocalValue(newValue);
-      
-      // Immediate update for valid numbers, but don't constrain during typing
+
+      if (commitOnBlur) {
+        return;
+      }
+
       const numValue = parseFloat(newValue);
       if (!isNaN(numValue)) {
-        // Only constrain if the value is completely outside the range
-        // Allow intermediate values during typing
         if (min !== undefined && max !== undefined) {
           if (numValue >= min && numValue <= max) {
             onChange(numValue);
           } else if (numValue < min && newValue.length >= min.toString().length) {
-            // Only constrain if we've typed enough digits to be sure it's below min
             onChange(min);
             setLocalValue(min.toString());
           } else if (numValue > max && newValue.length >= max.toString().length) {
-            // Only constrain if we've typed enough digits to be sure it's above max
             onChange(max);
             setLocalValue(max.toString());
           } else {
-            // Allow intermediate values during typing
             onChange(numValue);
           }
         } else {
@@ -340,8 +340,26 @@ export const NumberInput = ({
   };
 
   const handleBlur = () => {
-    // Ensure value is constrained on blur
     const numValue = parseFloat(localValue);
+
+    if (commitOnBlur) {
+      if (isNaN(numValue) || localValue.trim() === '') {
+        setLocalValue(value.toString());
+        return;
+      }
+      let constrainedValue = numValue;
+      if (min !== undefined && numValue < min) {
+        constrainedValue = min;
+      } else if (max !== undefined && numValue > max) {
+        constrainedValue = max;
+      }
+      setLocalValue(constrainedValue.toString());
+      if (constrainedValue !== value) {
+        onChange(constrainedValue);
+      }
+      return;
+    }
+
     if (!isNaN(numValue)) {
       let constrainedValue = numValue;
       if (min !== undefined && numValue < min) {
@@ -349,7 +367,7 @@ export const NumberInput = ({
       } else if (max !== undefined && numValue > max) {
         constrainedValue = max;
       }
-      
+
       if (constrainedValue !== numValue) {
         setLocalValue(constrainedValue.toString());
         onChange(constrainedValue);

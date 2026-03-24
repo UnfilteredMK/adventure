@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useSupabaseClientWithAuth } from '@/hooks/useSupabaseClientWithAuth';
 import { useAuth } from './AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -71,19 +71,41 @@ export const InstanceProvider: React.FC<InstanceProviderProps> = ({ children }) 
   const [lastSaveError, setLastSaveError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cachedInstances, setCachedInstances] = useState<Map<string, { instance: Instance; config: DesignSettings; flowConfig: FlowConfig | null; timestamp: number }>>(new Map());
-  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  /** Always matches last committed `currentConfig` + synchronous updates in `updateConfig` (avoids stale merges when typing fast). */
+  const latestConfigRef = useRef<DesignSettings>(defaultDesignSettingsV2);
+  const currentInstanceRef = useRef<Instance | null>(null);
+  const currentFlowConfigRef = useRef<FlowConfig | null>(null);
+  const sessionRef = useRef(session);
+  const configSaveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshWidgetAfterNextSaveRef = useRef(false);
 
   // Cache expiration time (5 minutes)
   const CACHE_EXPIRY = 5 * 60 * 1000;
 
-  // Cleanup timeouts on unmount
+  useEffect(() => {
+    latestConfigRef.current = currentConfig;
+  }, [currentConfig]);
+
+  useEffect(() => {
+    currentInstanceRef.current = currentInstance;
+  }, [currentInstance]);
+
+  useEffect(() => {
+    currentFlowConfigRef.current = currentFlowConfig;
+  }, [currentFlowConfig]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
   useEffect(() => {
     return () => {
-      if (saveTimeout) {
-        clearTimeout(saveTimeout);
+      if (configSaveDebounceRef.current) {
+        clearTimeout(configSaveDebounceRef.current);
       }
     };
-  }, [saveTimeout]);
+  }, []);
 
   // Get cached instance data
   const getCachedInstance = useCallback((instanceId: string) => {
@@ -289,120 +311,111 @@ export const InstanceProvider: React.FC<InstanceProviderProps> = ({ children }) 
     }
   }, [currentInstance, currentConfig, session, cacheInstance]);
 
-  // Update config (debounced save for live preview)
-  const updateConfig = useCallback(async (updates: Partial<DesignSettings>) => {
-    if (!currentInstance) {
-      // Allow local preview updates even when no instance is loaded yet (prevents hard crashes).
-      const mergedConfig = { ...currentConfig, ...updates } as DesignSettings;
+  // Update config (debounced save). Merge uses latestConfigRef so rapid input (e.g. width/height) never loses characters.
+  const updateConfig = useCallback(
+    (updates: Partial<DesignSettings>) => {
+      const base = latestConfigRef.current;
+      const mergedConfig = { ...base, ...updates } as DesignSettings;
       const orderedLocalConfig = compactDesignConfigToV2(mergedConfig, { fillDefaults: true }) as DesignSettings;
+      latestConfigRef.current = orderedLocalConfig;
       setCurrentConfig(orderedLocalConfig);
-      return;
-    }
 
-    setLastSaveError(null);
-
-    // Debug logging for gallery_columns
-    if (updates.gallery_columns !== undefined) {
-      console.log('updateConfig called with gallery_columns:', updates.gallery_columns, 'type:', typeof updates.gallery_columns);
-    }
-
-    // Update local config immediately for responsive UI (this triggers live preview).
-    // Keep this as a cheap merge, then apply a stable key order for readability/debugging.
-    const mergedConfig = { ...currentConfig, ...updates } as DesignSettings;
-    const orderedLocalConfig = compactDesignConfigToV2(mergedConfig, { fillDefaults: true }) as DesignSettings;
-    setCurrentConfig(orderedLocalConfig);
-
-    const shouldRefreshAfterSave =
-      Object.prototype.hasOwnProperty.call(updates, 'form_status_enabled') &&
-      Boolean((currentConfig as any)?.form_status_enabled) !== Boolean((orderedLocalConfig as any)?.form_status_enabled);
-
-    // Update cache
-    cacheInstance(currentInstance.id, currentInstance, orderedLocalConfig, currentFlowConfig);
-
-    // Keep the instance object in sync for any consumers reading `currentInstance.config`
-    setCurrentInstance((prev) => (prev ? ({ ...prev, config: orderedLocalConfig } as any) : prev));
-
-    // Clear existing timeout
-    if (saveTimeout) {
-      clearTimeout(saveTimeout);
-    }
-
-    // Set saving state immediately for visual feedback
-    setIsSaving(true);
-
-    // Debounce the actual save to database (500ms delay)
-    const timeout = setTimeout(async () => {
-      try {
-        const apiUrl = `/api/instances/${currentInstance.id}/config?t=${Date.now()}`;
-        
-        // Debug logging for the config being sent
-        console.log('Sending config to API:', JSON.stringify(orderedLocalConfig, null, 2));
-        if (orderedLocalConfig.gallery_columns !== undefined) {
-          console.log('gallery_columns in config being sent:', orderedLocalConfig.gallery_columns, 'type:', typeof orderedLocalConfig.gallery_columns);
-        }
-        
-        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-        const attemptSave = async (attempt: number): Promise<any> => {
-          const accessToken = session?.access_token;
-          const headers: Record<string, string> = {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Content-Type': 'application/json',
-            'Expires': '0',
-            'Pragma': 'no-cache',
-          };
-          if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
-
-          const response = await fetch(apiUrl, {
-            method: 'PUT',
-            headers,
-            body: JSON.stringify({ config: orderedLocalConfig }),
-          });
-
-          if (!response.ok) {
-            const status = response.status;
-            const errorData = await response.json().catch(() => ({}));
-            const msg = (errorData as any)?.error || 'Failed to update config';
-            // Retry a couple times for transient backend/network issues.
-            if ((status === 500 || status === 503) && attempt < 2) {
-              await sleep(250 * Math.pow(2, attempt));
-              return attemptSave(attempt + 1);
-            }
-            throw new Error(msg);
-          }
-
-          return response.json().catch(() => ({}));
-        };
-
-        const result = await attemptSave(0);
-        if (result.rowsUpdated === 0) {}
-        if (result?.config && typeof result.config === 'object' && !Array.isArray(result.config)) {
-          const ordered = result.config as DesignSettings;
-          setCurrentConfig(ordered);
-          setCurrentInstance((prev) => (prev ? ({ ...prev, config: ordered } as any) : prev));
-          cacheInstance(currentInstance.id, { ...currentInstance, config: ordered } as any, ordered, currentFlowConfig);
-        }
-
-        if (shouldRefreshAfterSave) {
-          try {
-            window.dispatchEvent(new Event('designer-refresh-widget-preview'));
-          } catch {}
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to save changes';
-        setLastSaveError(message);
-        toast({
-          title: 'Save Error',
-          description: 'Failed to save changes. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsSaving(false);
+      const inst = currentInstanceRef.current;
+      if (!inst) {
+        return;
       }
-    }, 500);
 
-    setSaveTimeout(timeout);
-  }, [currentInstance, currentConfig, cacheInstance, session, saveTimeout, toast]);
+      setLastSaveError(null);
+
+      if (updates.gallery_columns !== undefined) {
+        console.log('updateConfig called with gallery_columns:', updates.gallery_columns, 'type:', typeof updates.gallery_columns);
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(updates, 'form_status_enabled') &&
+        Boolean((base as any)?.form_status_enabled) !== Boolean((orderedLocalConfig as any)?.form_status_enabled)
+      ) {
+        refreshWidgetAfterNextSaveRef.current = true;
+      }
+
+      const flow = currentFlowConfigRef.current;
+      cacheInstance(inst.id, inst, orderedLocalConfig, flow);
+      setCurrentInstance((prev) => (prev ? ({ ...prev, config: orderedLocalConfig } as any) : prev));
+
+      if (configSaveDebounceRef.current) {
+        clearTimeout(configSaveDebounceRef.current);
+      }
+
+      configSaveDebounceRef.current = setTimeout(async () => {
+        configSaveDebounceRef.current = null;
+        const instance = currentInstanceRef.current;
+        if (!instance) return;
+
+        const toSave = latestConfigRef.current;
+        setIsSaving(true);
+
+        try {
+          const apiUrl = `/api/instances/${instance.id}/config?t=${Date.now()}`;
+          console.log('Sending config to API:', JSON.stringify(toSave, null, 2));
+
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          const attemptSave = async (attempt: number): Promise<any> => {
+            const accessToken = sessionRef.current?.access_token;
+            const headers: Record<string, string> = {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Content-Type': 'application/json',
+              Expires: '0',
+              Pragma: 'no-cache',
+            };
+            if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+
+            const response = await fetch(apiUrl, {
+              method: 'PUT',
+              headers,
+              body: JSON.stringify({ config: toSave }),
+            });
+
+            if (!response.ok) {
+              const status = response.status;
+              const errorData = await response.json().catch(() => ({}));
+              const msg = (errorData as any)?.error || 'Failed to update config';
+              if ((status === 500 || status === 503) && attempt < 2) {
+                await sleep(250 * Math.pow(2, attempt));
+                return attemptSave(attempt + 1);
+              }
+              throw new Error(msg);
+            }
+
+            return response.json().catch(() => ({}));
+          };
+
+          await attemptSave(0);
+
+          // Do not replace local config from the response — it can race with continued typing and revert partial input.
+          cacheInstance(instance.id, { ...instance, config: toSave } as any, toSave, currentFlowConfigRef.current);
+
+          if (refreshWidgetAfterNextSaveRef.current) {
+            refreshWidgetAfterNextSaveRef.current = false;
+            try {
+              window.dispatchEvent(new Event('designer-refresh-widget-preview'));
+            } catch {}
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to save changes';
+          setLastSaveError(message);
+          toast({
+            title: 'Save Error',
+            description: 'Failed to save changes. Please try again.',
+            variant: 'destructive',
+          });
+        } finally {
+          setIsSaving(false);
+        }
+      }, 500);
+    },
+    [cacheInstance, toast]
+  );
 
   // flow_config is deprecated/removed — keep a local FlowConfig object only for legacy UI state.
   // Persist form-mode enablement via `instances.config.form_status_enabled`.
