@@ -14,6 +14,33 @@ interface IframeWidgetPreviewProps {
   style?: React.CSSProperties;
 }
 
+/** Skeleton placeholder while the preview iframe boots — distinct from a generic spinner. */
+function PreviewIframeLoader({ variant }: { variant: 'mobile' | 'iframe' | 'desktop' }) {
+  const accent =
+    variant === 'mobile'
+      ? 'bg-blue-500/30 dark:bg-blue-400/25'
+      : variant === 'iframe'
+        ? 'bg-purple-500/30 dark:bg-purple-400/25'
+        : 'bg-primary/35';
+
+  return (
+    <div
+      className="flex w-48 max-w-[72%] flex-col gap-3"
+      role="status"
+      aria-label="Loading preview"
+    >
+      <div className={`h-1 w-14 rounded-full ${accent} animate-pulse`} />
+      <div className="h-[5.5rem] w-full rounded-xl bg-muted/70 dark:bg-slate-700/50 animate-pulse" />
+      <div className="h-2 w-full rounded-full bg-muted-foreground/15 animate-pulse delay-75" />
+      <div className="h-2 w-[85%] rounded-full bg-muted-foreground/12 animate-pulse delay-150" />
+      <div className="mt-0.5 flex gap-2">
+        <div className="h-9 flex-1 rounded-lg bg-muted-foreground/12 animate-pulse delay-200" />
+        <div className="h-9 w-14 rounded-lg bg-muted-foreground/12 animate-pulse delay-300" />
+      </div>
+    </div>
+  );
+}
+
 const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
   className,
   fullPage = false,
@@ -324,10 +351,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
             {/* Loading State */}
             {!isIframeLoaded && !iframeError && (
               <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-slate-900">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Loading widget preview...</p>
-                </div>
+                <PreviewIframeLoader variant="mobile" />
               </div>
             )}
             
@@ -385,10 +409,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
             {/* Loading State */}
             {!isIframeLoaded && !iframeError && (
               <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-slate-900">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-2"></div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Loading widget preview...</p>
-                </div>
+                <PreviewIframeLoader variant="iframe" />
               </div>
             )}
             
@@ -435,10 +456,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
       {/* Loading State */}
       {!isIframeLoaded && !iframeError && (
         <div className="absolute inset-0 flex items-center justify-center bg-background">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-            <p className="text-sm text-muted-foreground">Loading widget preview...</p>
-          </div>
+          <PreviewIframeLoader variant="desktop" />
         </div>
       )}
       

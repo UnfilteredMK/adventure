@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { getStripeSecretKey } from "../config";
+import { getStripeSecretKey, getResolvedStripeMode, type StripeMode } from "../config";
 
 interface CreditPurchaseRequest {
   amount: number;
@@ -22,7 +22,7 @@ export class ManualCreditPurchaseService {
   public supabase: any;
   private stripe: Stripe;
 
-  constructor() {
+  constructor(mode: StripeMode = getResolvedStripeMode()) {
     const cookieStore = cookies();
     this.supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,7 +36,7 @@ export class ManualCreditPurchaseService {
       }
     );
 
-    this.stripe = new Stripe(getStripeSecretKey('test'), {
+    this.stripe = new Stripe(getStripeSecretKey(mode), {
       apiVersion: '2023-10-16',
     });
   }

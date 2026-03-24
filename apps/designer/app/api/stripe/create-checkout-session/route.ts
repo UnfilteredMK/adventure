@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { SubscriptionService } from '@/lib/stripe';
-import { type StripeMode } from "@/lib/stripe/config";
+import { type StripeMode, getResolvedStripeMode } from "@/lib/stripe/config";
 
 export async function POST(request: Request) {
   try {
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { planName, mode = "test", accountId } = await request.json() as { 
+    const { planName, mode = getResolvedStripeMode(), accountId } = await request.json() as { 
       planName: "basic" | "pro" | "enterprise" | "partner"; 
       mode?: StripeMode;
       accountId: string;

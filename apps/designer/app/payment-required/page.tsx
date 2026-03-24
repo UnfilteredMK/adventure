@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from '@/contexts/AuthContext';
 import { useAccount } from '@/contexts/AccountContext';
+import { useStripeMode } from '@/hooks/use-stripe-mode';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, AlertTriangle, CreditCard, CheckCircle, Check } from "lucide-react";
@@ -31,6 +32,7 @@ interface Plan {
 function PaymentRequiredPageContent() {
   const { session } = useAuth();
   const { currentAccount } = useAccount();
+  const { mode: stripeMode } = useStripeMode();
   const [loading, setLoading] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
   const [resolving, setResolving] = useState(false);
@@ -87,7 +89,8 @@ function PaymentRequiredPageContent() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          mode: "test"
+          mode: stripeMode,
+          accountId: currentAccount?.id,
         })
       });
 
@@ -110,7 +113,8 @@ function PaymentRequiredPageContent() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          mode: "test"
+          mode: stripeMode,
+          accountId: currentAccount?.id,
         })
       });
 
@@ -207,7 +211,8 @@ function PaymentRequiredPageContent() {
         },
         body: JSON.stringify({
           planName,
-          mode: 'test' // or 'live' based on your environment
+          mode: stripeMode,
+          accountId: currentAccount?.id,
         }),
       })
 

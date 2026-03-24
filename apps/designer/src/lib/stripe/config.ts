@@ -1,6 +1,8 @@
-export type StripeMode = "test" | "live";
+import { getResolvedStripeMode, type StripeMode } from "./resolved-mode";
 
-export function getStripeSecretKey(mode: StripeMode = "test"): string {
+export type { StripeMode } from "./resolved-mode";
+
+export function getStripeSecretKey(mode: StripeMode = getResolvedStripeMode()): string {
   // First try the new format with separate test/live keys
   const testKey = process.env.STRIPE_TEST_SECRET_KEY;
   const liveKey = process.env.STRIPE_SECRET_KEY;
@@ -24,7 +26,7 @@ export function getStripeSecretKey(mode: StripeMode = "test"): string {
   return key;
 }
 
-export function getStripeWebhookSecret(mode: StripeMode = "test"): string {
+export function getStripeWebhookSecret(mode: StripeMode = getResolvedStripeMode()): string {
   // First try the new format with separate test/live webhook secrets
   const testSecret = process.env.STRIPE_TEST_WEBHOOK_SECRET;
   const liveSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -48,7 +50,7 @@ export function getStripeWebhookSecret(mode: StripeMode = "test"): string {
   return secret;
 }
 
-export function getStripePriceId(creditAmount: number, mode: StripeMode = "test"): string {
+export function getStripePriceId(creditAmount: number, mode: StripeMode = getResolvedStripeMode()): string {
   const priceId = mode === "test" 
     ? process.env[`STRIPE_PRICE_ID_${creditAmount}_CREDITS_TEST`]
     : process.env[`STRIPE_PRICE_ID_${creditAmount}_CREDITS_LIVE`];
@@ -58,4 +60,6 @@ export function getStripePriceId(creditAmount: number, mode: StripeMode = "test"
   }
   
   return priceId;
-} 
+}
+
+export { getResolvedStripeMode } from "./resolved-mode";

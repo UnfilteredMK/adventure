@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
-import { getStripeSecretKey, StripeMode } from "../config";
+import { getStripeSecretKey, getResolvedStripeMode, StripeMode } from "../config";
 import { Plan, UserSubscription } from "@/types";
 import Stripe from "stripe";
 import { createClient } from '@supabase/supabase-js';
@@ -20,7 +20,7 @@ export class SubscriptionService {
   /**
    * Check if user has an active subscription and create one if needed
    */
-  async ensureUserSubscription(userId: string, mode: StripeMode = "test"): Promise<UserSubscription | null> {
+  async ensureUserSubscription(userId: string, mode: StripeMode = getResolvedStripeMode()): Promise<UserSubscription | null> {
     try {
       // First, clean up any duplicate subscriptions
       await this.cleanupDuplicateSubscriptions(userId);
@@ -60,7 +60,7 @@ export class SubscriptionService {
   /**
    * Check if account has an active subscription and create one if needed
    */
-  async ensureAccountSubscription(accountId: string, mode: StripeMode = "test"): Promise<UserSubscription | null> {
+  async ensureAccountSubscription(accountId: string, mode: StripeMode = getResolvedStripeMode()): Promise<UserSubscription | null> {
     try {
       // First, clean up any duplicate subscriptions
       await this.cleanupDuplicateAccountSubscriptions(accountId);
@@ -103,7 +103,7 @@ export class SubscriptionService {
   async createTrialSubscriptionForPlan(
     userId: string, 
     planId: string, 
-    mode: StripeMode = "test", 
+    mode: StripeMode = getResolvedStripeMode(), 
     userEmail?: string, 
     existingStripeCustomerId?: string
   ): Promise<UserSubscription | null> {
@@ -173,7 +173,7 @@ export class SubscriptionService {
    */
   async reactivateCancelledSubscription(
     userId: string,
-    mode: StripeMode = "test"
+    mode: StripeMode = getResolvedStripeMode()
   ): Promise<string | null> {
     try {
       // Check if user has had a trial before
@@ -330,7 +330,7 @@ export class SubscriptionService {
   async createCheckoutSession(
     accountId: string,
     planName: "basic" | "pro" | "enterprise" | "partner",
-    mode: StripeMode = "test",
+    mode: StripeMode = getResolvedStripeMode(),
     userEmail?: string,
     isAccountBased: boolean = false,
     userId?: string,
@@ -433,7 +433,7 @@ export class SubscriptionService {
   async createCheckoutSessionNoTrial(
     accountId: string,
     planName: "basic" | "pro" | "enterprise" | "partner",
-    mode: StripeMode = "test",
+    mode: StripeMode = getResolvedStripeMode(),
     userEmail?: string,
     userId?: string,
     baseUrl?: string
@@ -621,7 +621,7 @@ export class SubscriptionService {
   async upgradePlan(
     userId: string,
     planName: "basic" | "pro" | "enterprise",
-    mode: StripeMode = "test"
+    mode: StripeMode = getResolvedStripeMode()
   ): Promise<boolean> {
     try {
       // Get the most recent active/trialing subscription

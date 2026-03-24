@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ManualCreditPurchaseService } from "@/lib/stripe";
+import { getResolvedStripeMode, type StripeMode } from "@/lib/stripe/config";
 
 export async function POST(request: NextRequest) {
   try {
-    const { amount, accountId } = await request.json();
+    const { amount, accountId, mode: bodyMode } = await request.json() as {
+      amount: number;
+      accountId: string;
+      mode?: StripeMode;
+    };
+    const mode = bodyMode ?? getResolvedStripeMode();
 
     if (!amount || amount < 20) {
       return NextResponse.json(
@@ -19,7 +25,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const service = new ManualCreditPurchaseService();
+    const service = new ManualCreditPurchaseService(mode);
 
     const { data: { user }, error: userError } = await service.supabase.auth.getUser();
 

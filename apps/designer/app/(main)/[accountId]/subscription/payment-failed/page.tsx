@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAccountSubscription } from '@/hooks/use-account-subscription';
+import { useStripeMode } from '@/hooks/use-stripe-mode';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +45,7 @@ export default function PaymentFailedPage() {
   const { toast } = useToast();
   
   const accountId = params?.accountId as string;
+  const { mode: stripeMode } = useStripeMode();
   const error = searchParams.get('error') || 'Payment processing failed';
 
   const { status, isOwner, loading: subscriptionLoading, error: subscriptionError } = useAccountSubscription(
@@ -191,7 +193,7 @@ export default function PaymentFailedPage() {
         },
         body: JSON.stringify({
           planName,
-          mode: 'test', // or 'live' based on your environment
+          mode: stripeMode,
           accountId,
         }),
       })

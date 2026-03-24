@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useCredits } from '@/contexts/CreditContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAccountSubscription } from '@/hooks/use-account-subscription';
+import { useStripeMode } from '@/hooks/use-stripe-mode';
 import { useCreditPurchaseStatus } from '@/hooks/use-credit-purchase-status';
 import { SettingsShell } from '@/components/layout/SettingsShell';
 import { 
@@ -52,6 +53,7 @@ export default function BillingPage() {
   const { session } = useAuth();
   const { updateCredits, refreshCredits } = useCredits();
   const accountId = params.accountId as string;
+  const { mode: stripeMode } = useStripeMode();
   const { /* addPendingPurchase */ } = useCreditPurchaseStatus(accountId);
 
   const { isOwner: isAccountOwner } = useAccountSubscription(accountId ?? null, {
@@ -242,7 +244,7 @@ export default function BillingPage() {
     setLoading(true);
     setPaymentProcessing(true);
     try {
-      const requestData = { amount, accountId: accountId };
+      const requestData = { amount, accountId: accountId, mode: stripeMode };
       
       const response = await fetch("/api/stripe/manual-credit-purchase", {
         method: "POST",
@@ -282,7 +284,7 @@ export default function BillingPage() {
       const response = await fetch("/api/stripe/create-customer-portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "test", accountId: accountId })
+        body: JSON.stringify({ mode: stripeMode, accountId: accountId })
       });
 
       if (!response.ok) {
@@ -380,7 +382,7 @@ export default function BillingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planName: fullPlan.name.toLowerCase() as "basic" | "pro" | "enterprise",
-          mode: "test",
+          mode: stripeMode,
           accountId: accountId
         })
       });
@@ -411,7 +413,7 @@ export default function BillingPage() {
       const response = await fetch("/api/stripe/create-customer-portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "test", accountId: accountId })
+        body: JSON.stringify({ mode: stripeMode, accountId: accountId })
       });
 
       if (!response.ok) {
@@ -444,7 +446,7 @@ export default function BillingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planName: selectedPlan.name.toLowerCase() as "basic" | "pro" | "enterprise",
-          mode: "test",
+          mode: stripeMode,
           accountId: accountId
         })
       });

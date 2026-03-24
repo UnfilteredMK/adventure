@@ -1,14 +1,19 @@
 import { useState, useEffect } from "react";
+import {
+  getResolvedStripeMode,
+  type StripeMode,
+} from "@/lib/stripe/resolved-mode";
 
-export type StripeMode = "test" | "live";
+export type { StripeMode };
 
 export function useStripeMode() {
   const [mode, setMode] = useState<StripeMode>(() => {
     if (typeof window !== "undefined") {
-      return (localStorage.getItem("stripeMode") as StripeMode) || "test"
+      const stored = localStorage.getItem("stripeMode");
+      if (stored === "test" || stored === "live") return stored;
     }
-    return "test"
-  })
+    return getResolvedStripeMode();
+  });
 
   useEffect(() => {
     localStorage.setItem("stripeMode", mode)

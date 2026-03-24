@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
 import { UserSubscription } from '@/types';
 import { SubscriptionService } from '../subscriptions/subscription-service';
-import { getStripeSecretKey, StripeMode } from '../config';
+import { getStripeSecretKey, getResolvedStripeMode, StripeMode } from '../config';
 import Stripe from 'stripe';
 
 export class CreditService {
@@ -188,7 +188,7 @@ export class CreditService {
       const creditsToPurchase = this.calculateCreditsFromAmountWithPrice(amount, (typedSubscription as any).additional_credit_price);
 
       // Create Stripe payment intent for immediate purchase
-      const stripe = new Stripe(getStripeSecretKey('test'), {
+      const stripe = new Stripe(getStripeSecretKey(getResolvedStripeMode()), {
         apiVersion: '2023-10-16',
       });
 
@@ -329,7 +329,7 @@ export class CreditService {
       const creditsToPurchase = this.calculateCreditsFromAmountWithPrice(amount, (typedSubscription as any).additional_credit_price);
 
       // Create Stripe payment intent for immediate purchase
-      const stripe = new Stripe(getStripeSecretKey('test'), {
+      const stripe = new Stripe(getStripeSecretKey(getResolvedStripeMode()), {
         apiVersion: '2023-10-16',
       });
 

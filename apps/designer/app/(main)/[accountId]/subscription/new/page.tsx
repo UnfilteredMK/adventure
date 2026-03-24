@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAccount } from '@/contexts/AccountContext';
 import { useAccountSubscription } from '@/hooks/use-account-subscription';
+import { useStripeMode } from '@/hooks/use-stripe-mode';
 import { useToast } from '@/hooks/use-toast';
 import { ArrowLeft, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,7 @@ export default function NewSubscriptionPage() {
   const params = useParams();
   const { toast } = useToast();
   const accountId = params?.accountId as string;
+  const { mode: stripeMode } = useStripeMode();
 
   const { isOwner, loading: subscriptionLoading, error: subscriptionError } = useAccountSubscription(
     accountId ?? null,
@@ -184,7 +186,7 @@ export default function NewSubscriptionPage() {
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planName, mode: 'test', accountId }),
+        body: JSON.stringify({ planName, mode: stripeMode, accountId }),
       });
       if (!response.ok) {
         throw new Error('Failed to create checkout session');
