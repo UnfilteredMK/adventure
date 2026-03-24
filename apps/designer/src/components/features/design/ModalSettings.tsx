@@ -35,62 +35,52 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
       
       {isOpen && (
         <div className="border-t border-border/30">
-          <div className="space-y-3 p-4">
-            <div className="space-y-3">
-              {/* Modal Behavior */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Interaction</label>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs">Backdrop click closes</span>
-                    <Switch
-                      checked={config.modal_close_on_backdrop !== false}
-                      onCheckedChange={(checked) => updateConfig({ modal_close_on_backdrop: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs">Escape closes</span>
-                    <Switch
-                      checked={config.modal_close_on_escape !== false}
-                      onCheckedChange={(checked) => updateConfig({ modal_close_on_escape: checked })}
-                    />
-                  </div>
-                </div>
+          <div className="space-y-4 p-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/30 pb-3">
+              <span className="text-xs text-muted-foreground">Embed only</span>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={config.modal_close_on_backdrop !== false}
+                  onCheckedChange={(checked) => updateConfig({ modal_close_on_backdrop: checked })}
+                />
+                <span className="text-xs">Backdrop click</span>
               </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={config.modal_close_on_escape !== false}
+                  onCheckedChange={(checked) => updateConfig({ modal_close_on_escape: checked })}
+                />
+                <span className="text-xs">Escape</span>
+              </div>
+            </div>
 
-              {/* Modal Styling */}
-              <div className="space-y-2">
+            <div className="space-y-3">
+              <div className="space-y-3">
                 <label className="text-xs font-medium text-muted-foreground">Style</label>
                 <div className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground">Backdrop opacity</label>
                     <NumberInput
-                      value={config.modal_backdrop_opacity || 0.5}
+                      value={config.modal_backdrop_opacity ?? 0.5}
                       onChange={(value) => updateConfig({ modal_backdrop_opacity: value })}
                       min={0}
                       max={1}
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Backdrop color</label>
-                    <ColorInput
-                      label="Backdrop color"
-                      value={config.modal_backdrop_color || '#000000'}
-                      onChange={(value) => updateConfig({ modal_backdrop_color: value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Background</label>
-                    <ColorInput
-                      label="Modal background color"
-                      value={config.modal_background_color || '#ffffff'}
-                      onChange={(value) => updateConfig({ modal_background_color: value })}
-                    />
-                  </div>
+                  <ColorInput
+                    label="Backdrop"
+                    value={config.modal_backdrop_color || '#000000'}
+                    onChange={(value) => updateConfig({ modal_backdrop_color: value })}
+                  />
+                  <ColorInput
+                    label="Panel"
+                    value={config.modal_background_color || '#ffffff'}
+                    onChange={(value) => updateConfig({ modal_background_color: value })}
+                  />
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground">Corner radius</label>
                     <NumberInput
-                      value={config.modal_border_radius || 12}
+                      value={config.modal_border_radius ?? 12}
                       onChange={(value) => updateConfig({ modal_border_radius: value })}
                       min={0}
                       max={50}
@@ -99,13 +89,12 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                 </div>
               </div>
 
-              {/* Open/close timing (generated snippet uses a fade transition only) */}
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Transition</label>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Duration (ms)</label>
                   <NumberInput
-                    value={config.modal_animation_duration || 300}
+                    value={config.modal_animation_duration ?? 300}
                     onChange={(value) => updateConfig({ modal_animation_duration: value })}
                     min={100}
                     max={1000}
@@ -113,7 +102,6 @@ export const ModalSettings: React.FC<ModalSettingsProps> = ({
                 </div>
               </div>
 
-              {/* Modal Size */}
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Size</label>
                 <div className="space-y-3">

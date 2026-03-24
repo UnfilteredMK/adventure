@@ -156,11 +156,46 @@ export function ImageChoiceGridStep({
         </span>
       )
     : null;
-  const resolvedHeaderInlineControl = selectionCounter || headerInlineControl
+  const styleSelectionHeader =
+    isStyleStep && multiple && selectionCounter ? (
+      <div
+        className={cn(
+          "flex max-w-full flex-col items-end gap-0.5 sm:flex-row sm:items-baseline sm:gap-2.5",
+          headerInlineControl ? "sm:items-center" : null,
+          compactInPreview ? "items-center text-center sm:items-center" : null
+        )}
+      >
+        <span
+          className={cn(
+            "text-[11px] leading-snug text-muted-foreground sm:text-sm",
+            compactInPreview
+              ? "text-center"
+              : "text-right max-w-[14rem] sm:max-w-[min(100%,20rem)]"
+          )}
+        >
+          {compactInPreview ? (
+            <>Pick {minSelections}–{Number(maxSelections)} styles</>
+          ) : (
+            <>
+              <span className="sm:hidden">
+                Pick {minSelections}–{Number(maxSelections)} styles
+              </span>
+              <span className="hidden sm:inline">
+                Select at least {minSelections} examples (up to {Number(maxSelections)})
+              </span>
+            </>
+          )}
+        </span>
+        {selectionCounter}
+      </div>
+    ) : (
+      selectionCounter
+    );
+  const resolvedHeaderInlineControl = styleSelectionHeader || headerInlineControl
     ? (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:justify-start">
           {headerInlineControl}
-          {selectionCounter}
+          {styleSelectionHeader}
         </div>
       )
     : undefined;

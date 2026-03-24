@@ -30,7 +30,7 @@ const WidgetPageViewComponent: React.FC<WidgetPageViewProps> = ({
       <IframeWidgetPreview
         instanceId={instanceId}
         liveConfig={liveConfig}
-        className="w-full h-full"
+        className={["w-full", "h-full", "min-h-0", className].filter(Boolean).join(" ")}
         fullPage={true}
         previewMode={previewMode}
         mode={mode}

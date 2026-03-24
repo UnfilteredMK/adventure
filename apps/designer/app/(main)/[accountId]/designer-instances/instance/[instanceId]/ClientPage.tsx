@@ -3,7 +3,7 @@
 import { useInstance } from '@/contexts/InstanceContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAccountPlan } from '@/hooks/use-account-plan';
-import { Loader2, ChevronLeft, Monitor, Smartphone, Code, Rocket, Maximize2, X, RefreshCw } from 'lucide-react';
+import { Loader2, ChevronLeft, Monitor, Smartphone, Code, Rocket, AppWindow, X, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState, useRef } from 'react';
 import LeftSidebar from '@/components/designer/LeftSidebar';
@@ -13,6 +13,10 @@ import SettingsInputViewerLazy from '@/components/features/SettingsInputViewerLa
 import { SubcategoryGalleryNotification } from '@/components/features/SubcategoryGalleryNotification';
 import { PlaceholderImagesGenerateModal } from '@/components/features/PlaceholderImagesGenerateModal';
 import { PlaceholderImagesPanel } from '@/components/features/PlaceholderImagesPanel';
+import {
+  widgetPopupPreviewBackdropStyle,
+  widgetPopupPreviewPanelStyle,
+} from '@/lib/widget-popup-preview-styles';
 
 interface Props {
   accountId: string;
@@ -33,10 +37,12 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
   } = useInstance();
   const { isPartner, loading: planLoading } = useAccountPlan();
   const [activeTab, setActiveTab] = useState<'design' | 'settings' | 'launch'>('settings');
-  const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile' | 'iframe' | 'modal'>('desktop');
+  const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile' | 'iframe' | 'popup'>('desktop');
   const [isExpanded, setIsExpanded] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [openSections, setOpenSections] = useState<Record<string, Record<string, boolean>>>({});
+  const [openSections, setOpenSections] = useState<Record<string, Record<string, boolean>>>({
+    settings: { instance: true },
+  });
   const [selectedSettingsItem, setSelectedSettingsItem] = useState<string>('basic-info');
   const [showPlaceholderNotification, setShowPlaceholderNotification] = useState(true);
   const [isPlaceholderGenerateOpen, setIsPlaceholderGenerateOpen] = useState(false);
@@ -44,6 +50,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
   const [placeholderGalleryCount, setPlaceholderGalleryCount] = useState<number | null>(null);
   const [isRefreshingSession, setIsRefreshingSession] = useState(false);
   const hasLoadedInstance = useRef(false);
+  const serviceSettingsDefaultNavigatedRef = useRef(false);
 
   // Unified /adventure preview: `instances.config` is the single source of truth.
   const previewDesignConfig = currentConfig;
@@ -51,7 +58,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
   const previewModeType = Boolean((currentConfig as any)?.form_status_enabled) ? "form" : "widget";
 
   // Keep one embedded iframe mounted across Design / Settings / Launch so tab switches
-  // do not reload the widget. Updated while on Design or Launch (non-modal); frozen while
+  // do not reload the widget. Updated while on Design or Launch (not popup overlay); frozen while
   // on Settings so hidden preview props stay stable.
   const lastEmbeddedPreviewRef = useRef<{
     fullPage: boolean;
@@ -60,16 +67,17 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
   if (!isPartner && activeTab === 'design') {
     lastEmbeddedPreviewRef.current = {
       fullPage: true,
-      previewMode: previewMode === 'modal' ? 'desktop' : previewMode,
+      previewMode: previewMode === 'popup' ? 'desktop' : previewMode,
     };
-  } else if (!isPartner && activeTab === 'launch' && previewMode !== 'modal') {
+  } else if (!isPartner && activeTab === 'launch' && previewMode !== 'popup') {
     lastEmbeddedPreviewRef.current = {
       fullPage: previewMode === 'desktop',
       previewMode,
     };
   }
-  const showLaunchModal = activeTab === 'launch' && previewMode === 'modal';
-  const showEmbeddedWidgetPreview = !isPartner && !showLaunchModal;
+  const showPopupPreview =
+    !isPartner && previewMode === 'popup' && (activeTab === 'design' || activeTab === 'launch');
+  const showEmbeddedWidgetPreview = !isPartner && !showPopupPreview;
 
   useEffect(() => {
     if (!isPlaceholderGenerateOpen) return;
@@ -84,6 +92,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
 
   useEffect(() => {
     hasLoadedInstance.current = false;
+    serviceSettingsDefaultNavigatedRef.current = false;
   }, [instanceId]);
 
   useEffect(() => {
@@ -121,19 +130,19 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
     if (!currentInstance) return;
     if (activeTab !== 'settings') return;
     if (selectedSettingsItem !== 'basic-info') return;
-    if (Object.keys(openSections.settings || {}).length > 0) return;
+    if ((currentInstance as any)?.instance_type !== 'service') return;
+    if (serviceSettingsDefaultNavigatedRef.current) return;
 
-    if ((currentInstance as any)?.instance_type === 'service') {
-      setSelectedSettingsItem('industry-services');
-      setOpenSections((prev) => ({
-        ...prev,
-        settings: {
-          ...(prev.settings || {}),
-          instance: true,
-        },
-      }));
-    }
-  }, [activeTab, currentInstance, openSections.settings, selectedSettingsItem]);
+    serviceSettingsDefaultNavigatedRef.current = true;
+    setSelectedSettingsItem('industry-services');
+    setOpenSections((prev) => ({
+      ...prev,
+      settings: {
+        ...(prev.settings || {}),
+        instance: true,
+      },
+    }));
+  }, [activeTab, currentInstance, selectedSettingsItem]);
 
   // Set correct initial tab based on plan type
   useEffect(() => {
@@ -147,6 +156,13 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
       }
     }
   }, [isPartner, planLoading]);
+
+  // Editing popup embed settings on Launch should match the canvas: those controls drive the Popup overlay preview.
+  useEffect(() => {
+    if (activeTab !== 'launch') return;
+    if (!openSections.launch?.['modal-settings']) return;
+    setPreviewMode('popup');
+  }, [activeTab, openSections.launch?.['modal-settings']]);
 
   const fetchPlaceholderGalleryCount = async () => {
     const res = await fetch(`/api/sample_image_gallery?instanceId=${instanceId}`, { cache: "no-store" });
@@ -201,10 +217,6 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
     if (isPartner && tab === 'design') {
       console.log('Partner plan: Blocked access to design tab');
       return;
-    }
-    // Modal preview is only supported on the Launch tab.
-    if (tab === 'design' && previewMode === 'modal') {
-      setPreviewMode('desktop');
     }
     setActiveTab(tab as 'design' | 'settings' | 'launch');
     if (tab !== 'design') {
@@ -336,17 +348,15 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
                     <Code className="h-3 w-3 mr-1" />
                     Code
                   </Button>
-                  {activeTab === 'launch' && (
-                    <Button
-                      variant={previewMode === 'modal' ? 'default' : 'ghost'}
-                      size="sm"
-                      className="h-8 rounded-full px-3 text-xs"
-                      onClick={() => setPreviewMode('modal')}
-                    >
-                      <Maximize2 className="h-3 w-3 mr-1" />
-                      Modal
-                    </Button>
-                  )}
+                  <Button
+                    variant={previewMode === 'popup' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-xs"
+                    onClick={() => setPreviewMode('popup')}
+                  >
+                    <AppWindow className="h-3 w-3 mr-1" />
+                    Popup
+                  </Button>
                 </div>
               )}
               <Link 
@@ -363,73 +373,60 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
         </div>
         
         <div className="flex-1 min-h-0 relative bg-transparent overflow-hidden">
-          {showLaunchModal && (
-            <div className="absolute inset-0 z-[5] bg-zinc-100 dark:bg-zinc-900 overflow-auto">
+          {showPopupPreview ? (
+            <div className="absolute inset-0 z-[5] overflow-y-auto overflow-x-hidden bg-zinc-900">
               <div
-                className="min-h-full w-full flex items-center justify-center p-8"
-                style={{
-                  backgroundColor: currentConfig.modal_backdrop_color
-                    ? `${currentConfig.modal_backdrop_color}${Math.round((currentConfig.modal_backdrop_opacity || 0.5) * 255)
-                        .toString(16)
-                        .padStart(2, '0')}`
-                    : 'rgba(0, 0, 0, 0.5)',
-                }}
+                className="flex min-h-full w-full items-center justify-center px-3 py-8 sm:px-6 sm:py-10"
+                style={widgetPopupPreviewBackdropStyle(currentConfig)}
               >
                 <div
-                  className="rounded-lg shadow-2xl overflow-hidden flex flex-col"
-                  style={{
-                    backgroundColor: currentConfig.modal_background_color || '#ffffff',
-                    borderRadius: currentConfig.modal_border_radius ? `${currentConfig.modal_border_radius}px` : '12px',
-                    height: currentConfig.modal_height || '80%',
-                    maxHeight: currentConfig.modal_max_height ? `${currentConfig.modal_max_height}px` : '800px',
-                    maxWidth: currentConfig.modal_max_width ? `${currentConfig.modal_max_width}px` : '600px',
-                    width: currentConfig.modal_width || '80%',
-                  }}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Popup preview"
+                  className="relative flex min-h-0 min-w-0 max-h-[calc(100dvh-4rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden"
+                  style={widgetPopupPreviewPanelStyle(currentConfig)}
                 >
                   {currentConfig.modal_show_close_button !== false && (
-                    <div className="flex justify-end p-4 border-b border-border/60 flex-shrink-0">
-                      <button
-                        className="transition-colors duration-200"
-                        style={{
-                          backgroundColor: 'transparent',
-                          border: 'none',
-                          borderRadius: '4px',
-                          color: currentConfig.modal_close_button_color || '#6b7280',
-                          cursor: 'pointer',
-                          fontSize: '20px',
-                          padding: '4px',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = currentConfig.modal_close_button_hover_color || '#374151';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = currentConfig.modal_close_button_color || '#6b7280';
-                        }}
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="absolute right-2 top-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border/50 bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground"
+                      style={{
+                        color: currentConfig.modal_close_button_color || undefined,
+                      }}
+                      aria-label="Close (preview)"
+                      title="Close button preview"
+                      onMouseEnter={(e) => {
+                        const hover = currentConfig.modal_close_button_hover_color;
+                        if (hover) e.currentTarget.style.color = hover;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = currentConfig.modal_close_button_color || '';
+                      }}
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   )}
-
-                  <div className="flex-1 min-h-0 overflow-auto">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2 pt-1">
                     <WidgetPageView
                       instanceId={instanceId}
+                      fullPage
                       previewMode="desktop"
                       liveConfig={previewDesignConfig}
                       mode={previewModeType}
+                      className="min-h-0 flex-1"
                     />
                   </div>
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {showEmbeddedWidgetPreview && (
             <div
-              className={`absolute inset-0 flex flex-col min-w-0 min-h-0 bg-zinc-100 dark:bg-zinc-900 ${
-                activeTab === 'settings' ? 'invisible pointer-events-none' : ''
+              className={`absolute inset-0 z-0 flex min-h-0 min-w-0 flex-col bg-zinc-100 dark:bg-zinc-900 ${
+                activeTab === 'settings' ? 'hidden' : ''
               }`}
               aria-hidden={activeTab === 'settings'}
             >
@@ -506,7 +503,7 @@ export default function ClientDesignInstancePage({ accountId, instanceId }: Prop
           )}
 
           {activeTab === 'settings' && (
-            <div className="absolute inset-0 z-10 flex-1 h-full bg-background overflow-auto">
+            <div className="absolute inset-0 z-20 flex min-h-0 flex-1 flex-col overflow-auto bg-background">
               <SettingsInputViewerLazy
                 instanceId={instanceId}
                 selectedItem={selectedSettingsItem}

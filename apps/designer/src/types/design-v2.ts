@@ -76,7 +76,13 @@ export interface DesignSettingsV2 {
   modal_height: string;
   modal_max_width: number;
   modal_max_height: number;
+  modal_backdrop_color: string;
+  modal_backdrop_opacity: number;
+  modal_background_color: string;
+  modal_border_radius: number;
   modal_show_close_button: boolean;
+  modal_close_button_color: string;
+  modal_close_button_hover_color: string;
   modal_close_on_backdrop: boolean;
   modal_close_on_escape: boolean;
   modal_animation_type: "fade" | "slide-up" | "slide-down" | "scale";
@@ -153,7 +159,13 @@ export const defaultDesignSettingsV2: DesignSettingsV2 = {
   modal_height: "80%",
   modal_max_width: 600,
   modal_max_height: 800,
+  modal_backdrop_color: "#000000",
+  modal_backdrop_opacity: 0.5,
+  modal_background_color: "#ffffff",
+  modal_border_radius: 12,
   modal_show_close_button: true,
+  modal_close_button_color: "#6b7280",
+  modal_close_button_hover_color: "#374151",
   modal_close_on_backdrop: true,
   modal_close_on_escape: true,
   modal_animation_type: "fade",

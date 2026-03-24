@@ -159,9 +159,9 @@ export default function LeftSidebar({
               </TabsList>
             </div>
             
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {!isPartner && (
-                <TabsContent value="design" className="mt-0 h-full overflow-y-auto pb-24">
+                <TabsContent value="design" className="mt-0 min-h-0 flex-1 overflow-y-auto pb-24">
                   <div className="space-y-4">
                     <DesignTabV2
                       config={currentConfig as any}
@@ -444,7 +444,7 @@ export default function LeftSidebar({
                 </TabsContent>
               )}
               
-              <TabsContent value="settings" className="mt-0 h-full overflow-y-auto pb-24">
+              <TabsContent value="settings" className="mt-0 min-h-0 flex-1 overflow-y-auto pb-24">
                 <SettingsTab 
                   instance={currentInstance}
                   updateInstance={updateInstance}
@@ -455,7 +455,7 @@ export default function LeftSidebar({
                 />
               </TabsContent>
               
-              <TabsContent value="launch" className="mt-0 h-full overflow-y-auto pb-24">
+              <TabsContent value="launch" className="mt-0 min-h-0 flex-1 overflow-y-auto pb-24">
                 <LaunchTab 
                   instanceId={instanceId}
                   config={currentConfig}

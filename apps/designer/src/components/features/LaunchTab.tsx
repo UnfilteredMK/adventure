@@ -188,7 +188,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
       .padStart(2, "0");
     const backdropColor = `${modalBackdropColor}${backdropOpacityHex}`;
 
-    return `<!-- ${productName} AI Widget Modal -->
+    return `<!-- ${productName} AI widget popup (overlay + panel) -->
 <div id="ai-widget-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; background-color: ${backdropColor};">
   <div class="modal-container" style="
     position: absolute;
@@ -394,7 +394,7 @@ ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
         <CodeBlock code={embedCode} ensureCode={ensureIframeCode} copyLabel="Iframe embed code copied" />
       </Card>
 
-      <Card title="Popup" description="Modal + trigger button; paste as HTML/JS on your site.">
+      <Card title="Popup" description="HTML/JS embed. Expand settings to edit; preview uses Popup mode on Launch.">
         <div className="mb-3">
           <ModalSettings
             config={config}
