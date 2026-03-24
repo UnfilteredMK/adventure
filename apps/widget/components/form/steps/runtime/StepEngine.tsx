@@ -1792,6 +1792,21 @@ export function StepEngine({
         // This preserves explicit clears/skips (e.g. scene upload skipped => null) over stale cached values.
         const latestStepData = state?.stepData || {};
         const mergedStepData = { ...latestStepData, ...stepDataSoFar };
+        const serviceCatalogSnapshot = loadServiceCatalog(flowPlan.sessionId);
+        const inferredSingleServiceId = (() => {
+          const byServiceId = serviceCatalogSnapshot?.byServiceId;
+          if (!byServiceId || typeof byServiceId !== "object") return null;
+          const ids = Object.keys(byServiceId).filter(Boolean);
+          return ids.length === 1 ? ids[0] : null;
+        })();
+        if (!pickPrimaryServiceId(mergedStepData) && inferredSingleServiceId) {
+          mergedStepData[DETERMINISTIC_SERVICE_ID] = inferredSingleServiceId;
+          if (mergedStepData.service_primary === undefined) {
+            mergedStepData.service_primary = inferredSingleServiceId;
+          }
+          updateStepData(DETERMINISTIC_SERVICE_ID, inferredSingleServiceId);
+          updateStepData("service_primary", inferredSingleServiceId);
+        }
         const answeredQA = buildAnsweredQA({ steps: state?.steps || [], stepData: mergedStepData, max: 40 });
         
         console.log('[StepEngine] Fetching batch with stepData', {
@@ -1827,7 +1842,7 @@ export function StepEngine({
 	        );
 
 	          const selectedServiceId = pickPrimaryServiceId(mergedStepData);
-	          const serviceCatalog = loadServiceCatalog(flowPlan.sessionId);
+	          const serviceCatalog = serviceCatalogSnapshot;
 	          const serviceMeta = selectedServiceId ? (serviceCatalog?.byServiceId as any)?.[selectedServiceId] : null;
 	          const cachedServiceSummary =
 	            typeof (effectiveFormState as any)?.serviceSummary === "string" ? String((effectiveFormState as any).serviceSummary).trim() : null;
@@ -2448,7 +2463,7 @@ export function StepEngine({
       }
     };
 
-    if (uploadedSceneImageUrl) {
+    if (uploadedSceneImageUrl && previewHasImage) {
       setPendingPreviewSceneUploadUrl(uploadedSceneImageUrl);
       setPreviewRefreshNonce((prev) => prev + 1);
     }

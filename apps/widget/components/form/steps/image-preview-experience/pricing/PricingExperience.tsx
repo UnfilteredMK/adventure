@@ -60,6 +60,7 @@ type PricingExperiencePillProps = {
   transparentBackground?: boolean;
   containerClassName?: string;
   onRevealed?: () => void;
+  helperText?: string;
 };
 
 export type PricingExperienceProps = PricingExperiencePanelProps | PricingExperiencePillProps;
@@ -105,6 +106,7 @@ export interface PricingPillProps extends Omit<React.ButtonHTMLAttributes<HTMLBu
   /** When true, outer container is transparent and fills parent (for matching sibling pill styling) */
   transparentBackground?: boolean;
   containerClassName?: string;
+  helperText?: string;
 }
 
 // Keep locked state easy to scan: lock + "Show pricing" + masked value.
@@ -125,6 +127,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     disabled,
     transparentBackground,
     containerClassName,
+    helperText,
     ...props
   },
   ref
@@ -176,6 +179,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     revealedPriceClass,
     "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-visible"
   );
+  const helperLabel = helperText && helperText.trim() ? helperText.trim() : null;
   return (
       <div
         className={cn(
@@ -228,19 +232,56 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             className={labelFrameClass}
             style={{ fontFamily: pricingFont }}
           >
-            {revealed ? (
-              <span className={cn(labelTextClass, "block")}>{pillLabel}</span>
-            ) : pillLabel === 'SHOW PRICING' ? (
-              <span
-                className={cn(lockedLabelTextClass, "flex w-full min-w-0 items-center justify-center gap-[0.34em] overflow-visible")}
-                style={lockedLabelStyle}
-              >
-                <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
-                <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
-              </span>
-            ) : (
-              <span className={cn(lockedLabelTextClass, "block text-center")} style={lockedLabelStyle}>{pillLabel}</span>
-            )}
+            <span className="flex w-full min-w-0 items-center justify-between gap-2 overflow-visible">
+              {revealed ? (
+                <span className={cn(labelTextClass, "block min-w-0 truncate")}>{pillLabel}</span>
+              ) : pillLabel === 'SHOW PRICING' ? (
+                <span
+                  className={cn(lockedLabelTextClass, "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible")}
+                  style={lockedLabelStyle}
+                >
+                  <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
+                  <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
+                </span>
+              ) : (
+                <span className={cn(lockedLabelTextClass, "block min-w-0 truncate")} style={lockedLabelStyle}>{pillLabel}</span>
+              )}
+              {helperLabel ? (
+                <TooltipProvider delayDuration={70}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        aria-label="How this pricing guide works"
+                        className="inline-flex h-[0.98rem] w-[0.98rem] shrink-0 items-center justify-center self-center rounded-full border border-white/16 bg-white/[0.10] font-sans text-[0.56rem] font-semibold leading-none text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors duration-150 cursor-help select-none hover:bg-white/[0.16] hover:text-white/92"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                      >
+                        i
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      align="end"
+                      sideOffset={6}
+                      className="z-[260] max-w-[16.5rem] rounded-2xl border-[color:var(--sif-overlay-border,rgba(255,255,255,0.24))] bg-[var(--sif-overlay-bg,rgba(51,65,85,0.52))] px-2.5 py-2 text-xs text-white shadow-lg shadow-black/25 backdrop-blur-md"
+                    >
+                      <div className="space-y-0.5" style={{ fontFamily: pricingFont }}>
+                        <p className="text-[0.6rem] font-medium uppercase tracking-[0.08em] leading-none text-white/55">
+                          How This Pricing Guide Works
+                        </p>
+                        <p className="text-[0.68rem] leading-[1.35] text-white/90">{helperLabel}</p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </span>
           </div>
           <div
             data-pricing-reveal
@@ -291,6 +332,7 @@ function PricingExperiencePill(props: PricingExperiencePillProps) {
     containerClassName,
     onRevealed,
     requirePhone = true,
+    helperText,
   } = props;
 
   const [open, setOpen] = useState(false);
@@ -312,6 +354,7 @@ function PricingExperiencePill(props: PricingExperiencePillProps) {
       accentColor={accentColorProp ?? theme.primaryColor}
       transparentBackground={transparentBackground}
       containerClassName={containerClassName}
+      helperText={helperText}
     />
   );
 
@@ -441,7 +484,11 @@ function PricingExperiencePanel(props: PricingExperiencePanelProps) {
                       <Info className="w-4 h-4 text-gray-400 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p className="text-xs max-w-xs">Exact pricing will be calculated once you unlock your estimate.</p>
+                      <p className="text-xs max-w-xs">
+                        This pricing guide is generated from the selections you made, the design details shown here,
+                        and current pricing patterns for similar work. Final quotes can change once measurements,
+                        materials, site conditions, and add-ons are confirmed.
+                      </p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>

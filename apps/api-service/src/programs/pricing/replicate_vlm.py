@@ -130,6 +130,12 @@ def _build_pricing_context_json(payload: Dict[str, Any]) -> str:
     service = str(ctx.get("service") or "").strip()
     answered_qa = ctx.get("answered_qa") or []
     step_data = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
+    if not isinstance(step_data, dict):
+        state = payload.get("state")
+        if isinstance(state, dict) and isinstance(state.get("answers"), dict):
+            step_data = state.get("answers") or {}
+        else:
+            step_data = {}
 
     compact: Dict[str, Any] = {
         "service_summary": services_summary[:800] if services_summary else "",

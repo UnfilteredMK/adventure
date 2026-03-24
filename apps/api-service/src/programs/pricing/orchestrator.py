@@ -219,6 +219,16 @@ def _extract_quantity_hints(step_data: Dict[str, Any]) -> Dict[str, int]:
     return hints
 
 
+def _extract_step_data(payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw = payload.get("stepDataSoFar") or payload.get("step_data_so_far")
+    if isinstance(raw, dict):
+        return raw
+    state = payload.get("state")
+    if isinstance(state, dict) and isinstance(state.get("answers"), dict):
+        return state.get("answers") or {}
+    return {}
+
+
 def _detect_currency(payload: Dict[str, Any]) -> str:
     raw = payload.get("currency") or payload.get("Currency")
     if isinstance(raw, str) and raw.strip():
@@ -297,6 +307,40 @@ def _align_midpoint_to_budget(
     clamped_budget = _clamp_int(budget_value, service_range.low, service_range.high)
     blended = int(round((raw_midpoint * 0.35) + (clamped_budget * 0.65)))
     return _clamp_int(blended, service_range.low, service_range.high)
+
+
+def _align_range_to_budget_tier(
+    *,
+    current_range: PriceRange,
+    calibration: ServiceCalibration,
+    budget_value: Optional[int],
+) -> PriceRange:
+    if not isinstance(budget_value, int) or budget_value <= 0:
+        return current_range
+    tier_bounds = calibration.normalized_tier_ranges()[resolve_budget_tier(calibration, budget_value)]
+    target_low = tier_bounds.low
+    target_high = tier_bounds.high
+    target_span = max(1_000, target_high - target_low)
+    current_width = max(1_000, current_range.high - current_range.low)
+    width = min(current_width, target_span)
+    midpoint = _clamp_int(budget_value, target_low, target_high)
+    low = int(round(midpoint - width / 2.0))
+    high = int(round(midpoint + width / 2.0))
+    if low < target_low:
+        shift = target_low - low
+        low += shift
+        high += shift
+    if high > target_high:
+        shift = high - target_high
+        low -= shift
+        high -= shift
+    low = max(target_low, low)
+    high = min(target_high, high)
+    if high <= low:
+        high = min(target_high, low + max(1_000, width))
+        if high <= low:
+            low = max(target_low, high - 1_000)
+    return _normalize_range(low, high)
 
 
 def _starter_floor_midpoint(calibration: ServiceCalibration) -> int:
@@ -534,8 +578,7 @@ def estimate_pricing(payload: Dict[str, Any]) -> Dict[str, Any]:
     calibration_payload = calibration_response_payload(calibration)
     currency = _detect_currency(payload)
 
-    step_data_raw = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
-    step_data = step_data_raw if isinstance(step_data_raw, dict) else {}
+    step_data = _extract_step_data(payload)
     budget_lo, budget_hi = _extract_budget_hint(step_data)
     top_level_budget = _extract_int(payload.get("budgetRange") or payload.get("budget_range") or payload.get("budget"))
     budget_value = top_level_budget
@@ -561,6 +604,11 @@ def estimate_pricing(payload: Dict[str, Any]) -> Dict[str, Any]:
         basis_text=basis_text,
         quantity_hints=quantity_hints,
         apply_starter_floor=True,
+    )
+    current_range = _align_range_to_budget_tier(
+        current_range=current_range,
+        calibration=calibration,
+        budget_value=budget_value,
     )
 
     current_budget_tier = resolve_budget_tier(calibration, budget_value or _range_midpoint(current_range))

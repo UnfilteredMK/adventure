@@ -552,7 +552,11 @@ export function AdventureFormExperience({
         // NOTE: We intentionally do NOT show the old yes/no "pricing accuracy consent" gate.
         const steps: Array<StepDefinition | UIStep> = [];
 
-        if (serviceOptions.length > 0) {
+        const hasCatalogServiceOptions = serviceOptions.length > 0;
+        const hasSingleCatalogService = serviceOptions.length === 1;
+        const shouldShowServiceSelectionStep = serviceOptions.length > 1;
+
+        if (shouldShowServiceSelectionStep) {
           steps.push({
             id: "step-service-primary",
             type: "multiple_choice",
@@ -568,7 +572,7 @@ export function AdventureFormExperience({
             columns: 2,
             blueprint: { presentation: { auto_advance: true, continue_label: "Continue" } },
           } as any);
-        } else {
+        } else if (!hasCatalogServiceOptions) {
           // If the instance doesn't have a DB-backed service catalog, we still need a deterministic
           // step 1 so the user can tell us what they're looking for.
           steps.push({
@@ -590,11 +594,6 @@ export function AdventureFormExperience({
           null;
         const serviceParam = typeof serviceParamRaw === "string" ? serviceParamRaw.trim() : "";
         const serviceParamLower = serviceParam.toLowerCase();
-        const shouldAutostart =
-          params.get("autostart") === "1" ||
-          params.get("autostart") === "true" ||
-          params.get("start") === "1" ||
-          params.get("start") === "true";
         const selectedFromParam =
           serviceParam && serviceOptions.length > 0
             ? serviceOptions.find((o: any) => {
@@ -603,14 +602,14 @@ export function AdventureFormExperience({
                 return value === serviceParam || (label && label === serviceParamLower);
               })
             : null;
+        const singleCatalogServiceValue =
+          hasSingleCatalogService && serviceOptions[0]?.value
+            ? String(serviceOptions[0].value)
+            : null;
         const prefillService =
           selectedFromParam && selectedFromParam.value
             ? String(selectedFromParam.value)
-            : serviceParam
-              ? serviceParam
-              : shouldAutostart && serviceOptions.length === 1 && serviceOptions[0]?.value
-                ? String(serviceOptions[0].value)
-                : null;
+            : singleCatalogServiceValue || serviceParam || null;
         const prefillServiceOption =
           prefillService && serviceOptions.length > 0
             ? serviceOptions.find((o: any) => String(o?.value || "") === prefillService) || null
@@ -643,7 +642,10 @@ export function AdventureFormExperience({
                 currentStepIndex: 0,
                 steps,
                 completedSteps: new Set<string>(),
-                stepData: { "step-service-primary": prefillService },
+                stepData: {
+                  "step-service-primary": prefillService,
+                  service_primary: prefillService,
+                },
                 sessionId,
               };
               saveStepState(instanceId, seeded);

@@ -6,6 +6,7 @@ import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } 
 
 type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'scene-refinement' | 'drilldown';
 type GenerationIntent = "initial" | "regenerate" | "small_improvement" | "budget_tier_shift";
+type ReferenceMode = "guide_only" | "edit_target";
 
 function normalizeRequestedOutputs(raw: unknown): number {
 	const n = Number(raw);
@@ -94,6 +95,13 @@ interface ResolvedImages {
 	hasInputImage: boolean;
 }
 
+function normalizeReferenceMode(raw: unknown): ReferenceMode | undefined {
+	const v = String(raw || "").trim().toLowerCase();
+	if (v === "guide_only") return "guide_only";
+	if (v === "edit_target") return "edit_target";
+	return undefined;
+}
+
 function resolveImages(body: any, useCase: UseCase): ResolvedImages {
 	const incomingRefs = normalizeReferenceImages(body.referenceImages, { allowData: true, max: 8 });
 
@@ -106,6 +114,20 @@ function resolveImages(body: any, useCase: UseCase): ResolvedImages {
 	const sceneImage = normalizePrimary(body.sceneImage);
 	const productImage = normalizePrimary(body.productImage);
 	const selectedImage = normalizePrimary(body.selectedImage);
+	const referenceMode = normalizeReferenceMode(body.referenceMode);
+	const guideOnlyInitialScene =
+		useCase === 'scene' &&
+		referenceMode === 'guide_only' &&
+		String(body?.generationIntent || '').trim().toLowerCase() === 'initial';
+
+	if (guideOnlyInitialScene) {
+		const guideRefs = Array.from(new Set([userImage, sceneImage, productImage, ...incomingRefs].filter(Boolean) as string[]));
+		return {
+			targetImage: undefined,
+			referenceImages: guideRefs,
+			hasInputImage: false,
+		};
+	}
 
 	let ordered: string[];
   let referenceOnly: string[] = [];
@@ -297,12 +319,13 @@ export async function POST(request: NextRequest) {
 		}
 
 		const { targetImage, referenceImages, hasInputImage } = resolveImages(body, useCase);
+		const normalizedInputImages = hasInputImage ? [String(targetImage || ''), ...referenceImages] : referenceImages;
 		logger.info('[generate] normalized_reference_images', {
 			instanceId: body.instanceId,
 			useCase,
 			hasInputImage,
-			count: hasInputImage ? referenceImages.length + 1 : 0,
-			schemes: referenceImageSchemeCounts(hasInputImage ? [String(targetImage || ''), ...referenceImages] : []),
+			count: normalizedInputImages.length,
+			schemes: referenceImageSchemeCounts(normalizedInputImages),
 			source: 'body + body.referenceImages',
 		});
 		const totalInputImages = hasInputImage ? referenceImages.length + 1 : 0;

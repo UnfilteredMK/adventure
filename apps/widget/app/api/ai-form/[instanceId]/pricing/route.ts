@@ -538,6 +538,10 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     // Pricing endpoint expects these at the top-level (not only in state.context).
     ...(upstreamCompanySummary ? { companySummary: upstreamCompanySummary } : {}),
     ...(upstreamServiceSummary ? { serviceSummary: upstreamServiceSummary } : {}),
+    stepDataSoFar,
+    answeredQA,
+    askedStepIds,
+    instanceContext: mergedContext,
     ...(previewImageUrl ? { previewImageUrl } : {}),
     ...(pricingScenario ? { pricingScenario } : {}),
     ...(baselineImageUrl ? { baselineImageUrl } : {}),

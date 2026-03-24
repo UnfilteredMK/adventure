@@ -244,25 +244,6 @@ function normalizeNumericRange(
   return { low: Math.min(low, high), high: Math.max(low, high) };
 }
 
-function formatSignedCurrencyRange(params: {
-  range: { low: number; high: number };
-  currency: string;
-  locale?: string;
-  direction?: "up" | "down" | "flat";
-}): string | null {
-  const { range, currency, locale, direction } = params;
-  const low = Number(range.low);
-  const high = Number(range.high);
-  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
-  const sign = direction === "down" ? "-" : direction === "up" ? "+" : "";
-  const absLow = Math.min(Math.abs(low), Math.abs(high));
-  const absHigh = Math.max(Math.abs(low), Math.abs(high));
-  const formattedLow = formatCurrency(absLow, { locale, currency, compact: true });
-  const formattedHigh = formatCurrency(absHigh, { locale, currency, compact: true });
-  if (absLow === absHigh) return `${sign}${formattedLow}`;
-  return `${sign}${formattedLow}-${formattedHigh}`;
-}
-
 function resolveBudgetTierFromRanges(
   ranges: Record<string, { low: number; high: number }> | undefined,
   budgetValue: number | null
@@ -708,16 +689,21 @@ export function ImagePreviewExperience(props: {
       .trim()
       .toLowerCase()
       .replace(/_/g, "-");
+    if (
+      normalizedUseCase === "tryon" ||
+      normalizedUseCase === "scene-placement" ||
+      normalizedUseCase === "scene-refinement"
+    ) {
+      return 1;
+    }
+    if (normalizedUseCase === "scene" && (cache?.runs?.length || 0) === 0) {
+      return Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
+    }
     const hasDirectEditAnchor =
       Boolean(sceneUploadUrl || userUploadUrl) ||
       uploadedImages.length > 0 ||
       Boolean(cache?.runs?.length);
-    if (
-      normalizedUseCase === "tryon" ||
-      normalizedUseCase === "scene-placement" ||
-      normalizedUseCase === "scene-refinement" ||
-      hasDirectEditAnchor
-    ) {
+    if (hasDirectEditAnchor) {
       return 1;
     }
     return Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
@@ -1114,8 +1100,9 @@ export function ImagePreviewExperience(props: {
   }, [contextSignature, enabled, instanceId, sessionId]);
 
   const derivePricingContextForPreview = useCallback(
-    (params: { stepsForQA: any[]; previewImageUrl?: string | null }) => {
+    (params: { stepsForQA: any[]; previewImageUrl?: string | null; mode?: "current" | "next-run" }) => {
       const previewImageUrl = params.previewImageUrl || null;
+      const mode = params.mode === "next-run" ? "next-run" : "current";
       const currentSnapshot = buildPricingStepSnapshot(effectiveStepDataSoFar || {});
       const normalizedUseCase = String((config as any)?.useCase || "")
         .trim()
@@ -1152,20 +1139,36 @@ export function ImagePreviewExperience(props: {
         steps: params.stepsForQA,
       });
 
-      const baselineRange =
+      const currentVisibleRange =
         currentVisiblePricing && Number.isFinite(currentVisiblePricing.totalMin) && Number.isFinite(currentVisiblePricing.totalMax)
           ? {
               low: Math.min(currentVisiblePricing.totalMin, currentVisiblePricing.totalMax),
               high: Math.max(currentVisiblePricing.totalMin, currentVisiblePricing.totalMax),
             }
-          : previousRunPricing &&
-              Number.isFinite(previousRunPricing.totalMin) &&
-              Number.isFinite(previousRunPricing.totalMax)
-            ? {
-                low: Math.min(previousRunPricing.totalMin, previousRunPricing.totalMax),
-                high: Math.max(previousRunPricing.totalMin, previousRunPricing.totalMax),
-              }
-            : null;
+          : null;
+      const previousRunRange =
+        previousRunPricing &&
+        Number.isFinite(previousRunPricing.totalMin) &&
+        Number.isFinite(previousRunPricing.totalMax)
+          ? {
+              low: Math.min(previousRunPricing.totalMin, previousRunPricing.totalMax),
+              high: Math.max(previousRunPricing.totalMin, previousRunPricing.totalMax),
+            }
+          : null;
+      const preservedBaselineRange =
+        currentVisiblePricing?.baselinePriceRange &&
+        Number.isFinite(currentVisiblePricing.baselinePriceRange.low) &&
+        Number.isFinite(currentVisiblePricing.baselinePriceRange.high)
+          ? {
+              low: Math.min(currentVisiblePricing.baselinePriceRange.low, currentVisiblePricing.baselinePriceRange.high),
+              high: Math.max(currentVisiblePricing.baselinePriceRange.low, currentVisiblePricing.baselinePriceRange.high),
+            }
+          : null;
+
+      const baselineRange =
+        mode === "next-run"
+          ? currentVisibleRange ?? previousRunRange
+          : preservedBaselineRange ?? previousRunRange;
 
       if (baselineRange) {
         return {
@@ -1220,7 +1223,7 @@ export function ImagePreviewExperience(props: {
 
       const signatureAtStart = computeContextSignature(effectiveStepDataSoFar || {});
       const latestRun = runs.length ? runs.at(-1) ?? null : null;
-      const baseReferenceImage = latestRun?.images?.[0] ?? null;
+      const baseReferenceImage = hero || latestRun?.images?.[0] || null;
       const normalizeUploadToStrings = (raw: any): string[] => {
         if (!raw) return [];
         if (Array.isArray(raw)) return raw.filter((x) => typeof x === "string");
@@ -1285,8 +1288,8 @@ export function ImagePreviewExperience(props: {
         uploads: storedUploads,
         selectionRefs: selectedOptionReferenceImages,
       });
-      // Explicit scene uploads always become the active anchor from this point on.
-      const activeAnchorImage = (stepSceneUpload || baseReferenceImage || storedUploads?.[0] || null) as string | null;
+      // After concepts exist, use the currently selected/generated hero as the anchor.
+      const activeAnchorImage = (baseReferenceImage || stepSceneUpload || storedUploads?.[0] || null) as string | null;
       // For budget-driven regeneration, prefer the user's originally uploaded scene anchor
       // instead of the latest generated preview image.
       const originalUploadedAnchorImage = (stepSceneUpload || stepUserUpload || storedUploads?.[0] || null) as string | null;
@@ -1343,9 +1346,16 @@ export function ImagePreviewExperience(props: {
         : hasExistingPreview
           ? "small_improvement"
           : "initial";
+      const guideOnlyInitialSceneRun =
+        useCase === "scene" &&
+        generationIntent === "initial" &&
+        !hasExistingPreview &&
+        referenceImagesForRequest.length > 0;
       // For refinements: use latest image as base. scene-placement + hasExistingPreview = drilldown edit.
       const sceneImageForRequest =
-        (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
+        guideOnlyInitialSceneRun
+          ? undefined
+          : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
           ? runAnchorImage
           : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && stepSceneUpload
             ? stepSceneUpload
@@ -1421,7 +1431,7 @@ export function ImagePreviewExperience(props: {
 	        const askedStepIds = stepsForQA
 	          .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
 	          .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
-          const pricingContextForNextRun = derivePricingContextForPreview({ stepsForQA, previewImageUrl: hero });
+      const pricingContextForNextRun = derivePricingContextForPreview({ stepsForQA, previewImageUrl: hero, mode: "next-run" });
 	        const formCtx = loadFormStateContext(sessionId);
 	        const serviceIdRaw =
 	          (effectiveStepDataSoFar as any)?.["step-service-primary"] ??
@@ -1475,7 +1485,9 @@ export function ImagePreviewExperience(props: {
 	            const scenePlacementInpaintMode =
                 normalizedUseCase === "scene-refinement" || (normalizedUseCase === "scene-placement" && !productImage);
 	            const refsForGeneration =
-	              normalizedUseCase === "scene" || scenePlacementInpaintMode
+	              guideOnlyInitialSceneRun
+	                ? referenceImagesForRequest
+	                : normalizedUseCase === "scene" || scenePlacementInpaintMode
 	                ? [sceneImage || sceneImageForRequest].filter(isValidUrlLikeImage)
 	                : referenceImagesForRequest;
 		        const ensuredRefs = await Promise.all(refsForGeneration.map((u) => ensureUrlLikeImage(u)));
@@ -1487,7 +1499,13 @@ export function ImagePreviewExperience(props: {
 		        const refinementNotes =
 		          typeof refinementNotesRaw === "string" && refinementNotesRaw.trim() ? refinementNotesRaw.trim() : undefined;
 		        const hasDirectImageInput = Boolean(userImage || productImage || sceneImage);
-		        const numOutputs = generationIntent === "initial" && !hasDirectImageInput ? CONCEPT_GALLERY_COUNT : 1;
+		        const shouldGenerateConceptGallery =
+		          generationIntent === "initial" &&
+		          (
+		            !hasDirectImageInput ||
+		            ((normalizedUseCase === "scene" || normalizedUseCase === "scene-refinement") && Boolean(sceneImage))
+		          );
+		        const numOutputs = shouldGenerateConceptGallery ? Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT) : 1;
 		        const requestBody: any = {
 		          instanceId,
 		          sessionId,
@@ -1499,6 +1517,7 @@ export function ImagePreviewExperience(props: {
 		          askedStepIds,
 		          instanceContext: { ...instanceContext },
 		        };
+		        if (guideOnlyInitialSceneRun) requestBody.referenceMode = "guide_only";
 		        if (refinementNotes) requestBody.refinementNotes = refinementNotes;
 		        if (originalReferenceImage) requestBody.originalReferenceImage = originalReferenceImage;
 		        if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
@@ -1519,7 +1538,7 @@ export function ImagePreviewExperience(props: {
 			          if (normalizedUseCase === "scene-placement" && productImage) requestBody.productImage = productImage;
 			          requestBody.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
 			        } else {
-		          if (sceneImage) requestBody.sceneImage = sceneImage;
+		          if (!guideOnlyInitialSceneRun && sceneImage) requestBody.sceneImage = sceneImage;
 		          if (uniqueRefs.length > 0) requestBody.referenceImages = uniqueRefs.slice(0, 6);
 		        }
 
@@ -1682,6 +1701,8 @@ export function ImagePreviewExperience(props: {
       config,
       derivePricingContextForPreview,
       enabled,
+      galleryMaxImages,
+      hero,
       instanceId,
       refreshRegenAllowance,
       runs,
@@ -1995,8 +2016,9 @@ export function ImagePreviewExperience(props: {
     if (nonce <= previewRefreshNonceRef.current) return;
 
     previewRefreshNonceRef.current = nonce;
+    if ((runs.length || 0) === 0 && !hero) return;
     requestManualGenerate();
-  }, [effectiveStepDataSoFar, enabled, requestManualGenerate]);
+  }, [effectiveStepDataSoFar, enabled, hero, requestManualGenerate, runs.length]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -2063,7 +2085,7 @@ export function ImagePreviewExperience(props: {
       const askedStepIds = stepsForQA
         .map((s: any) => String(s?.id ?? s?.stepId ?? s?.key ?? ""))
         .filter((v: string) => Boolean(v && v.trim().length && !shouldExcludeStepFromAnsweredQA(v)));
-      const pricingContext = derivePricingContextForPreview({ stepsForQA, previewImageUrl: heroAtFetchStart });
+      const pricingContext = derivePricingContextForPreview({ stepsForQA, previewImageUrl: heroAtFetchStart, mode: "current" });
 
       const formCtx = loadFormStateContext(sessionId);
       const serviceIdRaw =
@@ -2495,22 +2517,12 @@ export function ImagePreviewExperience(props: {
   }, [accuratePricing, pricingCurrency, pricingLocale]);
 
   const pricingDetailSummary = useMemo(() => {
-    if (!accuratePricing) return { deltaText: null as string | null, driversText: null as string | null };
-    if (leadGateEnabled && !leadCaptured) return { deltaText: null as string | null, driversText: null as string | null };
-
-    const currency = (accuratePricing.currency || pricingCurrency || "USD").toUpperCase();
-    const deltaText =
-      accuratePricing.deltaPriceRange && accuratePricing.deltaDirection && accuratePricing.deltaDirection !== "flat"
-        ? (() => {
-            const formatted = formatSignedCurrencyRange({
-              range: accuratePricing.deltaPriceRange,
-              currency,
-              locale: pricingLocale,
-              direction: accuratePricing.deltaDirection,
-            });
-            return formatted ? `Vs. before ${formatted}` : null;
-          })()
-        : null;
+    if (!accuratePricing) {
+      return { driverLabels: [] as string[], driversTooltipText: null as string | null };
+    }
+    if (leadGateEnabled && !leadCaptured) {
+      return { driverLabels: [] as string[], driversTooltipText: null as string | null };
+    }
     const driverLabels = Array.from(
       new Set(
         (accuratePricing.priceDrivers ?? [])
@@ -2518,9 +2530,13 @@ export function ImagePreviewExperience(props: {
           .filter(Boolean)
       )
     ).slice(0, 3);
-    const driversText = driverLabels.length > 0 ? `Drivers: ${driverLabels.join(", ")}` : null;
-    return { deltaText, driversText };
-  }, [accuratePricing, leadCaptured, leadGateEnabled, pricingCurrency, pricingLocale]);
+    const driverSummary =
+      driverLabels.length > 0 ? ` Generated on: ${driverLabels.join(", ")}.` : "";
+    const driversTooltipText =
+      "Based on the current image and your selections." +
+      driverSummary;
+    return { driverLabels, driversTooltipText };
+  }, [accuratePricing, leadCaptured, leadGateEnabled]);
 
   const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
   // Price pill shows the image-specific price range from the API. Never show $200-$400 placeholder.
@@ -2591,6 +2607,7 @@ export function ImagePreviewExperience(props: {
         gateContext="design_and_estimate"
         submissionData={{ surface: "preview_pricing" }}
         requirePhone
+        helperText={pricingDetailSummary.driversTooltipText || undefined}
         onRevealed={() => {
           setLeadCaptured(true);
           // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
@@ -2598,23 +2615,6 @@ export function ImagePreviewExperience(props: {
         accentColor={pillBg}
         style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
       />
-      {pricingDetailSummary.deltaText || pricingDetailSummary.driversText ? (
-        <div
-          className="mt-2 flex min-w-0 flex-col gap-1 text-[0.68rem] leading-[1.2] text-white/80"
-          style={{ fontFamily: theme.fontFamily }}
-        >
-          {pricingDetailSummary.deltaText ? (
-            <div className="truncate" title={pricingDetailSummary.deltaText}>
-              {pricingDetailSummary.deltaText}
-            </div>
-          ) : null}
-          {pricingDetailSummary.driversText ? (
-            <div className="truncate" title={pricingDetailSummary.driversText}>
-              {pricingDetailSummary.driversText}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   ) : null;
   const uploadControlPositionClass =
@@ -3007,7 +3007,7 @@ export function ImagePreviewExperience(props: {
                 </div>
               ) : null}
 
-	            {/* Two distinct modes: gallery (4-tile picker) vs single (hero image). Only one renders. */}
+	            {/* Two distinct modes: gallery picker vs single hero image. Only one renders. */}
 	            <div className="h-full w-full" data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}>
 	              {showConceptPicker && activeRun?.images?.length ? (
 	                <div
@@ -3030,7 +3030,7 @@ export function ImagePreviewExperience(props: {
 	                      gap: (designConfig as any)?.gallery_spacing ?? 8,
 	                    }}
 	                  >
-	                    {activeRun.images.slice(0, CONCEPT_GALLERY_COUNT).map((src, idx) => (
+	                    {activeRun.images.slice(0, Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT)).map((src, idx) => (
 	                      <button
 	                        key={idx}
 	                        type="button"
