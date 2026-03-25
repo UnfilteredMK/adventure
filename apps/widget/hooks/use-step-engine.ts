@@ -11,6 +11,16 @@ import {
   type ContextState,
 } from '@/lib/ai-form/state/context-state';
 import { STEP_INTENT_METADATA } from '@/lib/ai-form/state/step-intent-metadata';
+import { DETERMINISTIC_SERVICE_ID } from "@/components/form/steps/runtime/step-engine/constants";
+
+/** Keys merged into a fresh session so implicit single-service seeds survive sessionId churn. */
+const SERVICE_BOOTSTRAP_STEP_DATA_KEYS = [
+  DETERMINISTIC_SERVICE_ID,
+  "service_primary",
+  "step-service",
+  "step_service_primary",
+  "step_service",
+] as const;
 
 function clamp01(n: number) {
   if (!Number.isFinite(n)) return 0;
@@ -62,6 +72,7 @@ interface UseStepEngineOptions {
   onFlowComplete?: (allData: Record<string, any>) => void;
   isReady?: boolean;
   extra?: { useCase?: string; subcategoryName?: string | null };
+  excludedStepIds?: string[];
 }
 
 export function useStepEngine({
@@ -72,7 +83,8 @@ export function useStepEngine({
   onStepComplete,
   onFlowComplete,
   isReady,
-  extra
+  extra,
+  excludedStepIds
 }: UseStepEngineOptions) {
   const effectiveSessionScopeKey = sessionScopeKey || instanceId;
   const [state, setState] = useState<StepState | null>(null);
@@ -107,13 +119,23 @@ export function useStepEngine({
         const isFresh =
           Boolean(v) && v !== "0" && v !== "false" && v !== "no" && v !== "off";
         if (isFresh && freshResetForSessionRef.current !== flowPlan.sessionId) {
-          clearStepState(instanceId);
+          const existing = loadStepState(instanceId);
+          // Adventure bootstrap may have just written deterministic service seed for the
+          // brand-new session. Preserve that fresh-session seed instead of wiping it.
+          if (!existing || existing.sessionId !== flowPlan.sessionId) {
+            clearStepState(instanceId);
+          }
           freshResetForSessionRef.current = flowPlan.sessionId;
         }
       }
     } catch {}
 
-    const flowStepsById = new Map(flowPlan.steps.map((step) => [step.id, step]));
+    const excludedIds = new Set((excludedStepIds || []).filter(Boolean));
+    const filterExcludedSteps = <T extends { id: string }>(steps: T[]) =>
+      steps.filter((step) => !excludedIds.has(String(step?.id || "")));
+
+    const filteredFlowPlanSteps = filterExcludedSteps(flowPlan.steps);
+    const flowStepsById = new Map(filteredFlowPlanSteps.map((step) => [step.id, step]));
     const hydrateStepTelemetry = (steps: (StepDefinition | UIStep)[]) =>
       steps.map((step) => {
         const incoming = flowStepsById.get(step.id);
@@ -133,8 +155,9 @@ export function useStepEngine({
     if (savedState && savedState.sessionId === flowPlan.sessionId) {
       // MERGE STATE: Restore state but merge in any new steps from flowPlan
       // This prevents reset loops when new steps arrive from next-batch
-      const existingStepIds = new Set(savedState.steps.map(s => s.id));
-      const newSteps = flowPlan.steps.filter(step => !existingStepIds.has(step.id));
+      const filteredSavedSteps = filterExcludedSteps(savedState.steps);
+      const existingStepIds = new Set(filteredSavedSteps.map(s => s.id));
+      const newSteps = filteredFlowPlanSteps.filter(step => !existingStepIds.has(step.id));
       
       if (newSteps.length > 0) {
         console.log('[useStepEngine] Merging new steps into existing state', {
@@ -145,8 +168,8 @@ export function useStepEngine({
         
         // Use addSteps logic: insert new steps before structural OR deterministic (budget/upload) steps
         const structuralTypes = ['upload', 'designer', 'lead_capture', 'pricing', 'confirmation'];
-        const mergedSteps = [...savedState.steps];
-        let mergedCurrentStepIndex = savedState.currentStepIndex;
+        const mergedSteps = [...filteredSavedSteps];
+        let mergedCurrentStepIndex = Math.max(0, Math.min(savedState.currentStepIndex, Math.max(0, filteredSavedSteps.length - 1)));
         
         // Find insertion point (before first structural or deterministic boundary step)
         let insertIndex = mergedSteps.length;
@@ -185,7 +208,8 @@ export function useStepEngine({
         // No new steps, just restore existing state
         const hydratedState: StepState = {
           ...savedState,
-          steps: hydrateStepTelemetry(savedState.steps),
+          steps: hydrateStepTelemetry(filteredSavedSteps),
+          currentStepIndex: Math.max(0, Math.min(savedState.currentStepIndex, Math.max(0, filteredSavedSteps.length - 1))),
         };
         setState(hydratedState);
         saveStepState(instanceId, hydratedState);
@@ -194,7 +218,7 @@ export function useStepEngine({
     } else {
       // Initialize new state - deduplicate steps by ID
       const seenIds = new Set<string>();
-      const deduplicatedSteps = flowPlan.steps.filter((step) => {
+      const deduplicatedSteps = filteredFlowPlanSteps.filter((step) => {
         if (seenIds.has(step.id)) {
           console.warn('[Flow] Duplicate step ID in flowPlan - filtering out', {
             stepId: step.id,
@@ -207,25 +231,35 @@ export function useStepEngine({
         return true;
       });
       
-      if (deduplicatedSteps.length !== flowPlan.steps.length) {
+      if (deduplicatedSteps.length !== filteredFlowPlanSteps.length) {
         console.warn('[Flow] Filtered duplicate steps during initialization', {
-          originalCount: flowPlan.steps.length,
+          originalCount: filteredFlowPlanSteps.length,
           deduplicatedCount: deduplicatedSteps.length,
         });
       }
       
+      const persistedBootstrap = loadStepState(instanceId);
+      const bootstrapStepData: Record<string, any> = {};
+      if (persistedBootstrap?.stepData && typeof persistedBootstrap.stepData === "object") {
+        for (const key of SERVICE_BOOTSTRAP_STEP_DATA_KEYS) {
+          if (persistedBootstrap.stepData[key] !== undefined) {
+            bootstrapStepData[key] = persistedBootstrap.stepData[key];
+          }
+        }
+      }
+
       const newState: StepState = {
         currentStepIndex: 0,
         steps: deduplicatedSteps,
         completedSteps: new Set(),
-        stepData: {},
+        stepData: bootstrapStepData,
         sessionId: flowPlan.sessionId
       };
       setState(newState);
       saveStepState(instanceId, newState);
       setIsLoading(false);
     }
-  }, [instanceId, flowPlan]);
+  }, [instanceId, flowPlan, excludedStepIds]);
 
   // Track step start time
   useEffect(() => {
@@ -757,6 +791,7 @@ export function useStepEngine({
       opts?: { insertAtIndex?: number | null; moveExisting?: boolean }
     ) => {
     if (!newSteps || newSteps.length === 0) return;
+    const excludedIds = new Set((excludedStepIds || []).filter(Boolean));
 
     setState((prev) => {
       if (!prev) return prev;
@@ -777,6 +812,7 @@ export function useStepEngine({
         if (!step || typeof step !== "object") continue;
         const stepId = (step as any).id;
         if (!stepId) continue;
+        if (excludedIds.has(String(stepId))) continue;
         const existingIndex = existingStepIdMap.get(stepId);
         if (existingIndex === undefined) {
           stepsToInsert.push(step);
@@ -953,9 +989,21 @@ export function useStepEngine({
 
       // Auto-advance logic: Only if explicitly requested (user was on last step waiting for generated steps)
       if (autoAdvance) {
+        const shouldJumpToInsertedNeighbor =
+          typeof requestedInsertAtIndex === "number" && requestedInsertAtIndex === prev.currentStepIndex + 1;
+        if (shouldJumpToInsertedNeighbor) {
+          newCurrentStepIndex = insertIndex;
+          console.log('[Flow] 🚀 Auto-advancing to inserted adjacent step', {
+            fromIndex: prev.currentStepIndex,
+            toIndex: newCurrentStepIndex,
+            insertIndex,
+            reason: 'Deterministic step inserted immediately after current step',
+          });
+        }
+
         // User was on last step waiting - advance to first newly generated step
         const wasOnLastStep = prev.currentStepIndex >= (prev.steps.length - 1);
-        if (wasOnLastStep && insertIndex > newCurrentStepIndex) {
+        if (!shouldJumpToInsertedNeighbor && wasOnLastStep && insertIndex > newCurrentStepIndex) {
           // New steps appended after last step - advance to the first one
           newCurrentStepIndex = insertIndex;
           console.log('[Flow] 🚀 Auto-advancing to first newly generated step', {
@@ -1001,7 +1049,7 @@ export function useStepEngine({
       saveStepState(instanceId, newState);
       return newState;
     });
-  }, [instanceId]
+  }, [excludedStepIds, instanceId]
   );
 
   const isStepCompleted = useCallback((stepId: string): boolean => {

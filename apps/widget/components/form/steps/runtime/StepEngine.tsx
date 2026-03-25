@@ -13,7 +13,7 @@ import { isDevModeEnabled } from '@/lib/ai-form/dev-mode';
 import { DevModeOverlay, type DevModeStats, type DevModeUIState } from '../../dev-helpers/DevModeOverlay';
 import { saveUIPlan } from '@/lib/ai-form/state/ui-plan-storage';
 import { saveFormPlan } from '@/lib/ai-form/state/form-plan-storage';
-import { loadServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
+import { loadServiceCatalog, saveServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
 import { cn } from "@/lib/utils";
 import { AdventureLoader } from "../../AdventureLoader";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import {
   DETERMINISTIC_SCENE_IMAGE_ID,
   DETERMINISTIC_SERVICE_ID,
   DETERMINISTIC_STYLE_ID,
+  PRE_CONCEPT_SCOPE_STEP_IDS,
   DETERMINISTIC_USER_IMAGE_ID,
   FORM_STATE_SCHEMA_VERSION,
   PRICING_ESTIMATE_KEY,
@@ -107,6 +108,8 @@ interface StepEngineProps {
     previewPricing?: { totalMin: number; totalMax: number; currency?: string; randomizePct?: number };
     leadCaptureRequired?: boolean;
   };
+  /** Disable deprecated pre-image budget/upload legacy steps (Adventure route). */
+  disableLegacyBudgetUploadSteps?: boolean;
   /** When true, render widget-style branding header above the step jogger. */
   showBrandingHeader?: boolean;
   onMeta?: (meta: { [key: string]: any }) => void;
@@ -128,9 +131,23 @@ export function StepEngine({
   flowLayout,
   formUI,
   config,
+  disableLegacyBudgetUploadSteps = false,
   showBrandingHeader = false,
   onMeta
 }: StepEngineProps) {
+  const legacyBudgetUploadEnabled = !disableLegacyBudgetUploadSteps;
+  const excludedAdventureStepIds = useMemo(
+    () =>
+      legacyBudgetUploadEnabled
+        ? []
+        : [
+            DETERMINISTIC_BUDGET_ID,
+            DETERMINISTIC_SCENE_IMAGE_ID,
+            DETERMINISTIC_USER_IMAGE_ID,
+            DETERMINISTIC_PRODUCT_IMAGE_ID,
+          ],
+    [legacyBudgetUploadEnabled]
+  );
   const REFINEMENT_UPLOAD_STEP_ID = "step-refinement-upload-scene-image";
   const { setFacts } = useExperienceState();
   const searchParams = useSearchParams();
@@ -448,7 +465,8 @@ export function StepEngine({
     sessionScopeKey: effectiveSessionScopeKey,
     flowPlan,
     onFlowComplete: handleFlowComplete,
-    extra: contextExtra
+    extra: contextExtra,
+    excludedStepIds: excludedAdventureStepIds,
   });
   const serviceCatalogSnapshot = useMemo(
     () => (sessionId ? loadServiceCatalog(sessionId) : null),
@@ -459,10 +477,18 @@ export function StepEngine({
     [state?.stepData]
   );
   const selectedServiceMeta = selectedServiceId ? (serviceCatalogSnapshot?.byServiceId as any)?.[selectedServiceId] : null;
-  const deterministicStyleStep = useMemo(
-    () => buildDeterministicStyleStep(selectedServiceMeta),
-    [selectedServiceMeta]
-  );
+  const deterministicStyleStep = useMemo(() => {
+    const fromSelected = buildDeterministicStyleStep(selectedServiceMeta);
+    if (fromSelected) return fromSelected;
+    const byServiceId = serviceCatalogSnapshot?.byServiceId;
+    if (byServiceId && typeof byServiceId === "object") {
+      for (const item of Object.values(byServiceId as Record<string, any>)) {
+        const candidate = buildDeterministicStyleStep(item);
+        if (candidate) return candidate;
+      }
+    }
+    return buildDeterministicStyleStep(null);
+  }, [selectedServiceMeta, serviceCatalogSnapshot]);
 
   const budgetValue = useMemo((): number | null => {
     const raw = (state?.stepData as any)?.[DETERMINISTIC_BUDGET_ID];
@@ -472,6 +498,7 @@ export function StepEngine({
   }, [state?.stepData]);
 
   useEffect(() => {
+    if (!legacyBudgetUploadEnabled) return;
     if (!sessionId || !instanceId) return;
     if (!hasReceivedQuestionsFromGenerateSteps) return;
     if (budgetApiLoadedSessionRef.current === sessionId) return;
@@ -511,7 +538,7 @@ export function StepEngine({
       .catch((e) => {
         console.warn("[StepEngine] budget pricing seed failed", e);
       });
-  }, [config?.useCase, hasReceivedQuestionsFromGenerateSteps, instanceId, sessionId, state?.stepData, state?.steps]);
+  }, [config?.useCase, hasReceivedQuestionsFromGenerateSteps, instanceId, legacyBudgetUploadEnabled, sessionId, state?.stepData, state?.steps]);
 
   const handleBudgetChange = useCallback(
     (value: number) => {
@@ -1294,6 +1321,7 @@ export function StepEngine({
   // Order: all API-generated steps first, then budget, then upload. No API questions after these.
   // Skip when previewHasImage — budget/upload are in the bottom bar.
   useEffect(() => {
+    if (!legacyBudgetUploadEnabled) return;
     if (!flowPlan?.sessionId) return;
     if (!state?.steps || state.steps.length === 0) return;
     if (!hasReceivedQuestionsFromGenerateSteps) return;
@@ -1416,10 +1444,33 @@ export function StepEngine({
     desiredDeterministicUploadSteps,
     flowPlan?.sessionId,
     hasReceivedQuestionsFromGenerateSteps,
+    legacyBudgetUploadEnabled,
     patchStep,
     previewHasImage,
     state,
   ]);
+
+  const strippedLegacyAdventureStepsRef = useRef<string>("");
+  useEffect(() => {
+    if (legacyBudgetUploadEnabled) return;
+    if (!state?.steps?.length) return;
+    const legacyIdsPresent = (state.steps || [])
+      .map((step: any) => String((step as any)?.id || ""))
+      .filter((stepId) =>
+        stepId === DETERMINISTIC_BUDGET_ID ||
+        stepId === DETERMINISTIC_SCENE_IMAGE_ID ||
+        stepId === DETERMINISTIC_USER_IMAGE_ID ||
+        stepId === DETERMINISTIC_PRODUCT_IMAGE_ID
+      );
+    if (legacyIdsPresent.length === 0) {
+      strippedLegacyAdventureStepsRef.current = "";
+      return;
+    }
+    const signature = legacyIdsPresent.join("|");
+    if (strippedLegacyAdventureStepsRef.current === signature) return;
+    strippedLegacyAdventureStepsRef.current = signature;
+    removeStepsByIds(new Set(legacyIdsPresent));
+  }, [legacyBudgetUploadEnabled, removeStepsByIds, state?.steps]);
 
   useEffect(() => {
     if (!state) return;
@@ -2029,6 +2080,7 @@ export function StepEngine({
             didCallDspy = true;
             for (const [stepId, copyPatch] of Object.entries(directDeterministicCopy)) {
               if (!stepId || !copyPatch || typeof copyPatch !== "object") continue;
+              if (!legacyBudgetUploadEnabled && stepId === DETERMINISTIC_BUDGET_ID) continue;
               const patch: Record<string, any> = {};
               if (typeof (copyPatch as any).question === "string") {
                 patch.question = (copyPatch as any).question;
@@ -2256,6 +2308,19 @@ export function StepEngine({
             newSteps.splice(i, 1);
           }
         }
+        if (!legacyBudgetUploadEnabled) {
+          for (let i = newSteps.length - 1; i >= 0; i -= 1) {
+            const stepId = String((newSteps[i] as any)?.id || "").trim();
+            if (
+              stepId === DETERMINISTIC_BUDGET_ID ||
+              stepId === DETERMINISTIC_SCENE_IMAGE_ID ||
+              stepId === DETERMINISTIC_USER_IMAGE_ID ||
+              stepId === DETERMINISTIC_PRODUCT_IMAGE_ID
+            ) {
+              newSteps.splice(i, 1);
+            }
+          }
+        }
         // If backend signals preview stage readiness, do not append any remaining planner
         // question steps from this batch (e.g. "project type"). Refinements take over here.
         if (batchReachedPreviewStage) {
@@ -2317,6 +2382,24 @@ export function StepEngine({
           
           // Auto-advance if user was on last step waiting, otherwise append silently
           addSteps(newSteps, shouldAutoAdvance);
+        } else if (
+          disableLegacyBudgetUploadSteps &&
+          batchReachedPreviewStage &&
+          !hasMeaningfulAnswer((mergedStepData as any)?.[DETERMINISTIC_STYLE_ID]) &&
+          deterministicStyleStep
+        ) {
+          setHasReceivedQuestionsFromGenerateSteps(true);
+          addSteps([deterministicStyleStep as any], true, {
+            insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
+            moveExisting: true,
+          });
+        } else if (
+          disableLegacyBudgetUploadSteps &&
+          batchReachedPreviewStage &&
+          hasMeaningfulAnswer((mergedStepData as any)?.[DETERMINISTIC_STYLE_ID])
+        ) {
+          setHasReceivedQuestionsFromGenerateSteps(true);
+          setPreviewEverEnabled(true);
         }
 
 	        if ((didCallDspy || typeof backendCallsUsed === "number" || typeof backendMaxCalls === "number") && flowPlan?.sessionId) {
@@ -2355,7 +2438,7 @@ export function StepEngine({
         }
       }
     },
-    [addSteps, patchStep, flowPlan, formState, initialQuestionCountSnapshot, instanceId, state?.steps, state?.stepData, updateStepData, config?.useCase, onMeta]
+    [addSteps, deterministicStyleStep, disableLegacyBudgetUploadSteps, patchStep, flowPlan, formState, initialQuestionCountSnapshot, instanceId, legacyBudgetUploadEnabled, onMeta, setPreviewEverEnabled, state?.currentStepIndex, state?.steps, state?.stepData, updateStepData, config?.useCase]
   );
 
   const requestNextBatch = useCallback(
@@ -2376,7 +2459,7 @@ export function StepEngine({
   );
 
   useEffect(() => {
-    if (!state || !selectedServiceId) return;
+    if (!state) return;
     const previousServiceId = previousSelectedServiceIdRef.current;
     const serviceChanged = Boolean(previousServiceId && previousServiceId !== selectedServiceId);
     previousSelectedServiceIdRef.current = selectedServiceId;
@@ -2389,38 +2472,62 @@ export function StepEngine({
       return;
     }
 
+    const steps = state.steps || [];
+    const stepData = (state.stepData || {}) as Record<string, any>;
+    const scopeSteps = steps.filter((step: any) => PRE_CONCEPT_SCOPE_STEP_IDS.has(String((step as any)?.id || "")));
+    const scopeSatisfied =
+      scopeSteps.length > 0
+        ? scopeSteps.every((step: any) => hasMeaningfulAnswer(stepData[String((step as any)?.id || "")]))
+        : hasReceivedQuestionsFromGenerateSteps;
+
+    if (!scopeSatisfied) {
+      return;
+    }
+
     if (!existingStyleStep) {
-      const serviceIndex = (state.steps || []).findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_SERVICE_ID);
+      let lastScopeIndex = -1;
+      for (let i = 0; i < steps.length; i += 1) {
+        const id = String((steps[i] as any)?.id || "");
+        if (PRE_CONCEPT_SCOPE_STEP_IDS.has(id)) lastScopeIndex = i;
+      }
+      const insertAtIndex = lastScopeIndex >= 0 ? lastScopeIndex + 1 : 1;
       addSteps([deterministicStyleStep as any], false, {
-        insertAtIndex: serviceIndex >= 0 ? serviceIndex + 1 : 1,
+        insertAtIndex,
         moveExisting: true,
       });
+      if (!disableLegacyBudgetUploadSteps) {
+        requestNextBatch(stepData, {
+          showLoading: false,
+          wasOnLastStep: false,
+          reason: "style-copy-after-scope",
+        });
+      }
       return;
     }
 
     const existingSignature = JSON.stringify({
       question: existingStyleStep?.question ?? null,
       options: Array.isArray(existingStyleStep?.options) ? existingStyleStep.options : [],
+      multi_select: Boolean(existingStyleStep?.multi_select),
     });
     const nextSignature = JSON.stringify({
       question: (deterministicStyleStep as any).question ?? null,
       options: Array.isArray((deterministicStyleStep as any)?.options) ? (deterministicStyleStep as any).options : [],
+      multi_select: Boolean((deterministicStyleStep as any)?.multi_select),
     });
     if (existingSignature !== nextSignature || existingStyleStep?.type !== "image_choice_grid") {
       patchStep(DETERMINISTIC_STYLE_ID, {
         type: "image_choice_grid",
         question: (deterministicStyleStep as any).question,
         options: (deterministicStyleStep as any).options,
-        multi_select: true,
-        min_selections: 3,
-        max_selections: 5,
+        multi_select: Boolean((deterministicStyleStep as any)?.multi_select),
       } as any);
     }
 
     if (serviceChanged) {
       removeContextEntry(DETERMINISTIC_STYLE_ID);
     }
-  }, [addSteps, deterministicStyleStep, patchStep, removeContextEntry, selectedServiceId, state]);
+  }, [addSteps, deterministicStyleStep, disableLegacyBudgetUploadSteps, hasReceivedQuestionsFromGenerateSteps, patchStep, removeContextEntry, requestNextBatch, selectedServiceId, state]);
 
   // If the user refreshes after completing deterministic steps, there may be no AI steps yet.
   // In that case, automatically fetch the first batch once we have the deterministic answers.
@@ -2631,7 +2738,80 @@ export function StepEngine({
         ? (serviceCatalogSnapshot.byServiceId as any)[nextSelectedServiceId]
         : null;
     const nextDeterministicStyleStep = buildDeterministicStyleStep(nextSelectedServiceMeta);
+    let effectiveDeterministicStyleStep = nextDeterministicStyleStep || deterministicStyleStep;
+    if (!effectiveDeterministicStyleStep && sessionId) {
+      const persistedCatalog = loadServiceCatalog(sessionId);
+      const byServiceId = persistedCatalog?.byServiceId;
+      if (byServiceId && typeof byServiceId === "object") {
+        for (const item of Object.values(byServiceId as Record<string, any>)) {
+          const candidate = buildDeterministicStyleStep(item);
+          if (candidate) {
+            effectiveDeterministicStyleStep = candidate;
+            break;
+          }
+        }
+      }
+    }
+    if (!effectiveDeterministicStyleStep && disableLegacyBudgetUploadSteps) {
+      try {
+        const widgetRes = await fetch(`/api/widget/${instanceId}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        const widgetJson = widgetRes.ok ? await widgetRes.json().catch(() => null) : null;
+        const widgetServiceOptions = Array.isArray(widgetJson?.serviceOptions) ? widgetJson.serviceOptions : [];
+        if (widgetServiceOptions.length > 0 && sessionId) {
+          saveServiceCatalog(
+            sessionId,
+            widgetServiceOptions
+              .map((o: any) => ({
+                serviceId: String(o?.value || ""),
+                serviceName:
+                  typeof o?.serviceName === "string"
+                    ? o.serviceName
+                    : typeof o?.label === "string"
+                      ? o.label
+                      : null,
+                industryId: typeof o?.industryId === "string" ? o.industryId : null,
+                industryName: typeof o?.industryName === "string" ? o.industryName : null,
+                serviceSummary:
+                  typeof o?.serviceSummary === "string"
+                    ? o.serviceSummary
+                    : typeof o?.service_summary === "string"
+                      ? o.service_summary
+                      : null,
+                styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
+                styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
+              }))
+              .filter((item: any) => item.serviceId),
+          );
+        }
+        const fallbackServiceOption =
+          (nextSelectedServiceId
+            ? widgetServiceOptions.find((o: any) => String(o?.value || "") === nextSelectedServiceId)
+            : null) || widgetServiceOptions[0];
+        const fallbackStyleStep = buildDeterministicStyleStep(fallbackServiceOption);
+        if (fallbackStyleStep) {
+          effectiveDeterministicStyleStep = fallbackStyleStep;
+        }
+      } catch {
+        // Leave style-step fallback best-effort only.
+      }
+    }
+    const scopeStepIdsInFlow = (state?.steps || [])
+      .map((step: any) => String((step as any)?.id || ""))
+      .filter((stepId) => PRE_CONCEPT_SCOPE_STEP_IDS.has(stepId));
+    const completesAdventureScopeGate =
+      disableLegacyBudgetUploadSteps &&
+      PRE_CONCEPT_SCOPE_STEP_IDS.has(currentStep.id) &&
+      scopeStepIdsInFlow.length > 0 &&
+      scopeStepIdsInFlow.every((stepId) => hasMeaningfulAnswer(updatedStepDataSoFar[stepId]));
+    const shouldRouteToAdventureStyleStep =
+      completesAdventureScopeGate &&
+      Boolean(effectiveDeterministicStyleStep) &&
+      !hasMeaningfulAnswer(updatedStepDataSoFar[DETERMINISTIC_STYLE_ID]);
     const shouldRouteToDeterministicStyleStep =
+      !disableLegacyBudgetUploadSteps &&
       currentStep.id === DETERMINISTIC_SERVICE_ID &&
       Boolean(nextDeterministicStyleStep) &&
       !hasMeaningfulAnswer(updatedStepDataSoFar[DETERMINISTIC_STYLE_ID]);
@@ -2713,7 +2893,7 @@ export function StepEngine({
       return;
     }
 
-    if (shouldRouteToDeterministicStyleStep) {
+    if (shouldRouteToAdventureStyleStep || shouldRouteToDeterministicStyleStep) {
       const existingStyleIndex = (state?.steps || []).findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_STYLE_ID);
       persistStepAnswer();
       markStepComplete(currentStep.id);
@@ -2721,17 +2901,19 @@ export function StepEngine({
         goToStep(existingStyleIndex);
         return;
       }
-      if (nextDeterministicStyleStep) {
-        addSteps([nextDeterministicStyleStep as any], true, {
+      if (effectiveDeterministicStyleStep) {
+        addSteps([effectiveDeterministicStyleStep as any], true, {
           insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
           moveExisting: true,
         });
-        // Fetch AI-generated style copy; when response arrives, patchStep will apply it
-        requestNextBatch(updatedStepDataSoFar, {
-          showLoading: false,
-          wasOnLastStep: false,
-          reason: "style-copy",
-        });
+        if (!shouldRouteToAdventureStyleStep) {
+          // Fetch AI-generated style copy; when response arrives, patchStep will apply it
+          requestNextBatch(updatedStepDataSoFar, {
+            showLoading: false,
+            wasOnLastStep: false,
+            reason: "style-copy",
+          });
+        }
         return;
       }
     }
@@ -3211,8 +3393,8 @@ export function StepEngine({
     completedQuestionCount,
     config,
     currentStepId: currentStep?.id,
-    desiredDeterministicUploadSteps,
-    desiredDeterministicStepsForInsert: [deterministicBudgetStep, ...desiredDeterministicUploadSteps],
+    desiredDeterministicUploadSteps: disableLegacyBudgetUploadSteps ? [] : desiredDeterministicUploadSteps,
+    desiredDeterministicStepsForInsert: disableLegacyBudgetUploadSteps ? [] : [deterministicBudgetStep, ...desiredDeterministicUploadSteps],
     flowPlanSessionId: flowPlan?.sessionId,
     formStateMetricProgress: formState?.metricProgress ?? null,
     hasReceivedQuestionsFromGenerateSteps,
@@ -3221,7 +3403,8 @@ export function StepEngine({
     previewEverEnabled,
     progressPercentage: progress?.percentage ?? null,
     setPreviewEverEnabled,
-    suppressDeterministicStepInsert: Boolean(effectiveLeadCompleteForPreviewFlow && previewHasImage),
+    mustAnswerBeforePreviewStepId: disableLegacyBudgetUploadSteps ? DETERMINISTIC_STYLE_ID : null,
+    suppressDeterministicStepInsert: Boolean(disableLegacyBudgetUploadSteps || (effectiveLeadCompleteForPreviewFlow && previewHasImage)),
     state,
     updateStepData,
   });

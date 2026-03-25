@@ -26,6 +26,8 @@ interface AIFormPageRendererProps {
   demoSlug?: string;
   initialInstanceData?: any;
   initialDesignConfig?: DesignSettings;
+  /** Adventure-only toggle: hide deprecated pre-image budget/upload steps. */
+  disableLegacyBudgetUploadSteps?: boolean;
   /**
    * Which design source to use for base theming.
    * - widget: instance.config (used by /adventure)
@@ -61,6 +63,7 @@ export function AdventureFormExperience({
   initialInstanceData,
   initialDesignConfig,
   designSource = "widget",
+  disableLegacyBudgetUploadSteps = false,
 }: AIFormPageRendererProps) {
   // `flow` is kept only for back-compat; it is treated as `widget`.
   const useWidgetDefaults = designSource === "widget" || designSource === "flow";
@@ -375,7 +378,7 @@ export function AdventureFormExperience({
         const instanceUrl =
           isDemoRoute && demoType && demoSlug
             ? `/api/instance/${instanceId}/demo/${demoType}/${encodeURIComponent(demoSlug)}`
-            : `/api/instance/${instanceId}`;
+            : `/api/widget/${instanceId}`;
 
         // Pass through `serviceId` hint so the instance bootstrap route can return a deterministic label/value
         // (prevents the form from falling back to a raw UUID text input in demo/autostart flows).
@@ -626,7 +629,7 @@ export function AdventureFormExperience({
             ? serviceOptions.find((o: any) => String(o?.value || "") === prefillService) || null
             : null;
         const prefillStyleStep = prefillServiceOption ? buildDeterministicStyleStep(prefillServiceOption) : null;
-        if (prefillStyleStep) {
+        if (prefillStyleStep && !disableLegacyBudgetUploadSteps) {
           steps.push(prefillStyleStep);
         }
 
@@ -1104,6 +1107,7 @@ export function AdventureFormExperience({
               instanceId={instanceId}
               sessionScopeKey={sessionScopeKey}
               flowPlan={flowPlan}
+              disableLegacyBudgetUploadSteps={disableLegacyBudgetUploadSteps}
               onMeta={recordMeta}
               showBrandingHeader={showBrandingHeader}
               formUI={{

@@ -20,6 +20,7 @@ interface UsePreviewEligibilityParams {
   progressPercentage?: number | null;
   previewEverEnabled: boolean;
   setPreviewEverEnabled: Dispatch<SetStateAction<boolean>>;
+  mustAnswerBeforePreviewStepId?: string | null;
   suppressDeterministicStepInsert?: boolean;
   state: any;
   updateStepData: (stepId: string, data: any) => void;
@@ -40,6 +41,7 @@ export function usePreviewEligibility({
   progressPercentage,
   previewEverEnabled,
   setPreviewEverEnabled,
+  mustAnswerBeforePreviewStepId = null,
   suppressDeterministicStepInsert = false,
   state,
   updateStepData,
@@ -129,6 +131,12 @@ export function usePreviewEligibility({
 
   const frontendPreviewEligibleWithoutDeterministicUploads = useMemo(() => {
     if (!backendAllowsPreview) return false;
+    if (
+      mustAnswerBeforePreviewStepId &&
+      !hasMeaningfulAnswer((state?.stepData as any)?.[mustAnswerBeforePreviewStepId])
+    ) {
+      return false;
+    }
     if (isBootstrapStepId(currentStepId)) return false;
     if (backendReadyForImageGen) return true;
     if (typeof imagePreviewAfterAnsweredQuestionsOverride === "number") {
@@ -146,6 +154,8 @@ export function usePreviewEligibility({
     imagePreviewAfterAnsweredQuestionsOverride,
     imagePreviewAtFraction,
     isBootstrapStepId,
+    mustAnswerBeforePreviewStepId,
+    state?.stepData,
   ]);
 
   const frontendPreviewEligible = useMemo(() => {

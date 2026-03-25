@@ -290,6 +290,33 @@ function pickServiceIds(stepDataSoFar: Record<string, any>): string[] {
   return [];
 }
 
+/** Single explicit service id from embed/designer context when unambiguous. */
+function pickServiceIdFromInstanceContext(instanceContext: unknown): string | null {
+  if (!instanceContext || typeof instanceContext !== "object" || Array.isArray(instanceContext)) return null;
+  const ctx = instanceContext as Record<string, any>;
+  const fromService = normalizeOptionalString(ctx?.service?.id);
+  if (fromService) return fromService;
+  const subs = Array.isArray(ctx?.subcategories) ? ctx.subcategories : [];
+  const subIds = subs
+    .map((s: any) => normalizeOptionalString(s?.id))
+    .filter((id): id is string => Boolean(id));
+  if (subIds.length === 1) return subIds[0];
+  return null;
+}
+
+function dedupeLinkedSubcategoryIds(rows: unknown): string[] {
+  const list = Array.isArray(rows) ? rows : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const row of list) {
+    const id = normalizeOptionalString((row as any)?.category_subcategory_id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 function getDefaultMaxBatches(): number {
   const raw = Number(process.env.AI_FORM_MAX_BATCH_CALLS || 2);
   if (!Number.isFinite(raw)) return 2;
@@ -344,6 +371,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     // Debug snapshots: surfaced in JSON response when enabled.
     let debugEnabledSnapshot: boolean = false;
     let upstreamDebugSnapshot: any = null;
+  let routeTerminalError: { code?: string; message: string; details?: string } | null = null;
 
 	  const encoder = new TextEncoder();
 	  const stream = new ReadableStream({
@@ -415,7 +443,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         const supabase = admin.supabase;
         const [instanceResult, subcatResult] = await Promise.all([
           supabase.from("instances").select("*").eq("id", instanceId).single(),
-          supabase.from("instance_subcategories").select("category_subcategory_id").eq("instance_id", instanceId).limit(1).then(
+          supabase.from("instance_subcategories").select("category_subcategory_id").eq("instance_id", instanceId).then(
             (r) => r,
             () => ({ data: null, error: null })
           ),
@@ -441,20 +469,36 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 	        // This endpoint always generates AI question batches (batch-1, batch-2, ...).
 	        const batchId = `batch-${batchIndex + 1}`;
 
-	        // Resolve selected service ids (selected during deterministic bootstrap)
-	        const serviceIds = pickServiceIds(stepDataSoFar);
+	        // Resolve selected service ids (deterministic bootstrap + optional embed context).
+	        // Must match client: single linked subcategory ⇒ implicit service (no MC step).
+	        let serviceIds = pickServiceIds(stepDataSoFar);
+	        if (serviceIds.length === 0) {
+	          const fromCtx = pickServiceIdFromInstanceContext((body as any)?.instanceContext);
+	          if (fromCtx) serviceIds = [fromCtx];
+	        }
 
 	        const serviceSelectionId = "step-service-primary";
 
-	        let serviceRequired = false;
+	        let linkedSubcategoryIds: string[] = [];
 	        try {
 	          const { data: instanceSubcats, error: instanceSubcatsError } = subcatResult;
-	          if (!instanceSubcatsError) {
-	            serviceRequired = Array.isArray(instanceSubcats) && instanceSubcats.length > 0;
+	          if (!instanceSubcatsError && instanceSubcats) {
+	            linkedSubcategoryIds = dedupeLinkedSubcategoryIds(instanceSubcats);
 	          }
 	        } catch {}
 
-	        if (serviceRequired && serviceIds.length === 0) {
+	        if (serviceIds.length === 0 && linkedSubcategoryIds.length === 1) {
+	          serviceIds = [linkedSubcategoryIds[0]];
+	        }
+
+	        const mustPickServiceExplicitly = linkedSubcategoryIds.length > 1 && serviceIds.length === 0;
+
+	        if (mustPickServiceExplicitly) {
+	          routeTerminalError = {
+	            code: "MISSING_SERVICE_SELECTION",
+	            message: "Missing required deterministic answer",
+	            details: `Answer '${serviceSelectionId}' before calling generate-steps.`,
+	          };
 	          const completeFrame = {
 	            type: "complete",
 	            sessionId: body.sessionId,
@@ -470,13 +514,25 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 	          completeFrameSnapshot = completeFrame;
 	          enqueue({
 	            type: "error",
-	            error: "Missing required deterministic answer",
-	            details: `Answer '${serviceSelectionId}' before calling generate-steps.`,
+	            error: routeTerminalError.message,
+	            details: routeTerminalError.details,
 	          });
 		          enqueue(completeFrame);
 	          controller.close();
 	          return;
 	        }
+
+	        const hadExplicitServiceInStepData =
+	          pickServiceIds(body.stepDataSoFar && typeof body.stepDataSoFar === "object" ? body.stepDataSoFar : {}).length >
+	          0;
+	        const effectiveStepDataSoFar: Record<string, any> =
+	          serviceIds.length > 0 && !hadExplicitServiceInStepData
+	            ? {
+	                ...stepDataSoFar,
+	                "step-service-primary": serviceIds[0],
+	                service_primary: serviceIds[0],
+	              }
+	            : stepDataSoFar;
 
         // Determine category/subcategory labels for grounding
         // Support both single values (back-compat) and arrays (new)
@@ -654,7 +710,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 		          subcategoryId: effectiveServiceId,
 		          industry: inferredIndustry,
 		          trafficSource: "Direct",
-		          stepDataSoFar,
+		          stepDataSoFar: effectiveStepDataSoFar,
 		        });
 
 	        // Call cap enforcement (per session) - batchIndex already calculated above
@@ -713,7 +769,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
           "step-upload-product-image",
         ]);
         
-        const answeredQuestionStepIds = Object.keys(stepDataSoFar || {})
+        const answeredQuestionStepIds = Object.keys(effectiveStepDataSoFar || {})
           .filter((k) => typeof k === "string" && isStepIdLike(k) && !k.startsWith("__") && !nonSatietyStepIds.has(k));
 
 	        const alreadyAskedKeysBase = [
@@ -822,7 +878,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
           
           // 3. STATE (Required)
 		          state: {
-		            answers: stepDataSoFar,
+		            answers: effectiveStepDataSoFar,
 		            askedStepIds,
 		            grounding,
 		            context: {
@@ -859,7 +915,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         const seen = new Set<string>([
           ...existingStepIds,
           ...incomingQuestionStepIds,
-          ...Object.keys(stepDataSoFar || {}).filter((k) => typeof k === "string" && isStepIdLike(k) && !k.startsWith("__")),
+          ...Object.keys(effectiveStepDataSoFar || {}).filter((k) => typeof k === "string" && isStepIdLike(k) && !k.startsWith("__")),
         ]);
 
 	        const emitMiniStep = async (mini: any) => {
@@ -1162,7 +1218,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         // Filter out structural steps from existingStepIds
 	        const finalQuestionStepIds = (Array.isArray(body.questionStepIds) ? body.questionStepIds : existingStepIds)
 	          .filter((id: string) => !nonSatietyStepIds.has(id));
-	        const finalAnsweredSteps = Object.keys(stepDataSoFar || {})
+	        const finalAnsweredSteps = Object.keys(effectiveStepDataSoFar || {})
 	          .filter((k: string) => !k.startsWith("__") && !nonSatietyStepIds.has(k)).length;
         // Total question steps = existing question steps + newly generated question steps
         const finalTotalSteps = finalQuestionStepIds.length + streamMiniStepCount;
@@ -1275,6 +1331,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
 		    const responsePayload = {
 		        requestId,
 		        schemaVersion,
+		        ...(routeTerminalError ? { error: routeTerminalError } : {}),
 		        miniSteps: sanitizedMiniSteps,
 		        deterministicCopy: deterministicCopy ?? undefined,
 		        lmUsage,

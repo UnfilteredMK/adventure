@@ -1,6 +1,13 @@
 export const DETERMINISTIC_CONSENT_ID = "step-pricing-accuracy-consent";
 export const DETERMINISTIC_SERVICE_ID = "step-service-primary";
 export const DETERMINISTIC_STYLE_ID = "step-style-direction";
+/** Planner scope keys rendered as `step-<key>` before style in adventure flow. */
+export const PRE_CONCEPT_SCOPE_STEP_IDS: ReadonlySet<string> = new Set([
+  "step-project-type",
+  "step-project-parts",
+  "step-update-areas",
+  "step-remodel-intensity",
+]);
 export const DETERMINISTIC_FULL_NAME_ID = "step-user-full-name";
 export const DETERMINISTIC_SCENE_IMAGE_ID = "step-upload-scene-image";
 export const DETERMINISTIC_USER_IMAGE_ID = "step-upload-user-image";

@@ -6,7 +6,7 @@ which parts are AI-generated vs deterministic (copy, options, range/component).
 
 Edit this file to change the canonical funnel and which slots the planner fills.
 
-Flow: choose service → choose styles → scope → budget → upload image → generate
+Flow: choose service → scope → choose styles → budget → upload image → generate
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from typing import Literal
 # ---------------------------------------------------------------------------
 DETERMINISTIC_STEP_IDS: tuple[str, ...] = (
     "step-service-primary",      # 1. Choose service
-    "step-style-direction",       # 2. Choose styles (planner: copy + component hints only)
-    "step-budget-range",          # 3. Budget (planner: copy only; range from pricing API)
-    "step-upload-scene-image",    # 4. Upload image – fully deterministic
+    "step-style-direction",       # 3. Choose styles (planner: copy + component hints only)
+    "step-budget-range",          # 4. Budget (planner: copy only; range from pricing API)
+    "step-upload-scene-image",    # 5. Upload image – fully deterministic
     "step-upload-user-image",
     "step-upload-product-image",
     "step-promptInput",           # User prompt; not a planned question
@@ -45,8 +45,8 @@ SlotPartSource = Literal["ai", "deterministic", "db", "api"]
 # Skeleton order: keys in sequence. Used to determine "next slot" from asked_step_ids.
 SKELETON_SLOT_KEYS: tuple[str, ...] = (
     "step-service-primary",   # 1. Fully deterministic
-    "step-style-direction",   # 2. Copy + component: AI. Options: DB.
-    "scope",                  # 3. Scope questions: full AI (copy + options)
+    "scope",                  # 2. Scope questions: full AI (copy + options)
+    "step-style-direction",   # 3. Copy + component: AI. Options: DB.
     "step-budget-range",     # 4. Copy: AI. Range: API.
     "step-upload-scene-image",  # 5. Fully deterministic (scene/user/product variants)
 )
@@ -93,8 +93,8 @@ BANNED_PRE_CONCEPT_KEYS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 SKELETON_ORDER: tuple[str, ...] = (
     "1. Choose the service",
-    "2. Choose some styles you like",
-    "3. What's the scope? (project_type / project_parts / update_areas / remodel_intensity)",
+    "2. What's the scope? (project_type / project_parts / update_areas / remodel_intensity)",
+    "3. Choose some styles you like",
     "4. Budget",
     "5. Upload an image if you have one",
     "6. Generate the image",
@@ -104,8 +104,8 @@ SKELETON_DESCRIPTION = (
     "The form follows a fixed skeleton. The planner FILLS GAPS by outputting the appropriate "
     "content for each slot. Per-slot contract:\n"
     "- Service: deterministic (planner does nothing)\n"
-    "- Style: COPY + component hints only (question, min_selections, max_selections). Options come from DB.\n"
     "- Scope: FULL (question + option_hints). Use keys: project_type (always first), project_parts, update_areas, remodel_intensity.\n"
+    "- Style: COPY + component hints only (question, min_selections, max_selections). Options come from DB.\n"
     "- Budget: COPY only (question/headline, subtext). Range comes from pricing API.\n"
     "- Upload: deterministic (planner does nothing)\n"
     "Output only the next slot that is not yet done. If it's done, output empty."
@@ -137,10 +137,10 @@ def get_next_slot_from_asked(asked_step_ids: list[str]) -> str | None:
     asked = set(str(x or "").strip() for x in asked_step_ids if str(x or "").strip())
     if "step-service-primary" not in asked:
         return "step-service-primary"  # Planner does nothing; frontend owns this
-    if "step-style-direction" not in asked:
-        return "step-style-direction"
     if not (asked & _SCOPE_STEP_IDS):
         return "scope"
+    if "step-style-direction" not in asked:
+        return "step-style-direction"
     if "step-budget-range" not in asked:
         return "step-budget-range"
     return None
