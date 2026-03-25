@@ -12,6 +12,10 @@ import {
 } from '@/lib/ai-form/state/context-state';
 import { STEP_INTENT_METADATA } from '@/lib/ai-form/state/step-intent-metadata';
 import { DETERMINISTIC_SERVICE_ID } from "@/components/form/steps/runtime/step-engine/constants";
+import { DETERMINISTIC_PRICED_IMAGE_GRID_ID } from "@/components/form/steps/static/deterministic-priced-image-grid-step";
+import { LOCAL_SKELETON_FLOW_MODE } from "@/components/form/steps/runtime/step-engine/utils/build-local-skeleton";
+import { isFunctionCallStep } from "@/components/form/steps/runtime/step-engine/utils/function-calls";
+import { isStructuralStep } from "@/components/form/steps/runtime/step-engine/utils/step-classification";
 
 /** Keys merged into a fresh session so implicit single-service seeds survive sessionId churn. */
 const SERVICE_BOOTSTRAP_STEP_DATA_KEYS = [
@@ -44,6 +48,56 @@ function getMetricGain(step: any): number {
   const n = Number(raw);
   // Gains are intended to be 0..1 contributions.
   return clamp01(Number.isFinite(n) ? n : 0.12);
+}
+
+function keepMergedStepForLocalSkeleton(step: StepDefinition | UIStep, flowPlanStepIds: Set<string>): boolean {
+  const id = String((step as any)?.id || "").trim();
+  if (!id) return false;
+  if (flowPlanStepIds.has(id)) return true;
+  if (isStructuralStep(step)) return true;
+  if (isFunctionCallStep(step)) return true;
+  const t = String((step as any)?.type || "").toLowerCase();
+  if (t === "composite") return true;
+  if (id === DETERMINISTIC_PRICED_IMAGE_GRID_ID) return true;
+  return false;
+}
+
+/** Drop legacy planner/JIT steps from persisted state; reorder as flowPlan + tail (structural, priced grid, …). */
+function sanitizeAndOrderLocalSkeletonSteps(
+  savedSteps: (StepDefinition | UIStep)[],
+  planSteps: (StepDefinition | UIStep)[],
+  previousIndex: number
+): { steps: (StepDefinition | UIStep)[]; currentStepIndex: number } {
+  const planIds = new Set(planSteps.map((s) => s.id));
+  const kept = savedSteps.filter((s) => keepMergedStepForLocalSkeleton(s, planIds));
+  const byId = new Map(kept.map((s) => [s.id, s]));
+  const out: (StepDefinition | UIStep)[] = [];
+  const used = new Set<string>();
+  for (const p of planSteps) {
+    const existing = byId.get(p.id);
+    if (existing) {
+      out.push(existing);
+      used.add(p.id);
+    }
+  }
+  for (const s of savedSteps) {
+    const id = s.id;
+    if (used.has(id)) continue;
+    const copy = byId.get(id);
+    if (!copy) continue;
+    out.push(copy);
+    used.add(id);
+  }
+  const prevId =
+    previousIndex >= 0 && previousIndex < savedSteps.length ? savedSteps[previousIndex]?.id : null;
+  let idx = prevId ? out.findIndex((s) => s.id === prevId) : -1;
+  if (idx < 0) {
+    idx = Math.max(0, Math.min(previousIndex, out.length - 1));
+  }
+  return {
+    steps: out,
+    currentStepIndex: Math.max(0, Math.min(idx, Math.max(0, out.length - 1))),
+  };
 }
 
 /** Deterministic step IDs (budget, upload) – new API questions must insert before these. Keep in sync with step-engine constants. */
@@ -151,11 +205,25 @@ export function useStepEngine({
 
     // Try to load existing state
     const savedState = loadStepState(instanceId);
+    const matchesSkeletonVersion =
+      !flowPlan.skeletonVersion || (savedState as any)?.skeletonVersion === flowPlan.skeletonVersion;
     
-    if (savedState && savedState.sessionId === flowPlan.sessionId) {
+    if (savedState && savedState.sessionId === flowPlan.sessionId && matchesSkeletonVersion) {
       // MERGE STATE: Restore state but merge in any new steps from flowPlan
       // This prevents reset loops when new steps arrive from next-batch
-      const filteredSavedSteps = filterExcludedSteps(savedState.steps);
+      let filteredSavedSteps = filterExcludedSteps(savedState.steps);
+      let mergeSavedIndex = savedState.currentStepIndex;
+
+      if (flowPlan.mode === LOCAL_SKELETON_FLOW_MODE) {
+        const cleaned = sanitizeAndOrderLocalSkeletonSteps(
+          filteredSavedSteps,
+          filteredFlowPlanSteps,
+          mergeSavedIndex
+        );
+        filteredSavedSteps = cleaned.steps;
+        mergeSavedIndex = cleaned.currentStepIndex;
+      }
+
       const existingStepIds = new Set(filteredSavedSteps.map(s => s.id));
       const newSteps = filteredFlowPlanSteps.filter(step => !existingStepIds.has(step.id));
       
@@ -169,7 +237,7 @@ export function useStepEngine({
         // Use addSteps logic: insert new steps before structural OR deterministic (budget/upload) steps
         const structuralTypes = ['upload', 'designer', 'lead_capture', 'pricing', 'confirmation'];
         const mergedSteps = [...filteredSavedSteps];
-        let mergedCurrentStepIndex = Math.max(0, Math.min(savedState.currentStepIndex, Math.max(0, filteredSavedSteps.length - 1)));
+        let mergedCurrentStepIndex = Math.max(0, Math.min(mergeSavedIndex, Math.max(0, filteredSavedSteps.length - 1)));
         
         // Find insertion point (before first structural or deterministic boundary step)
         let insertIndex = mergedSteps.length;
@@ -201,6 +269,7 @@ export function useStepEngine({
           ...savedState,
           steps: hydrateStepTelemetry(mergedSteps),
           currentStepIndex: mergedCurrentStepIndex,
+          skeletonVersion: flowPlan.skeletonVersion ?? null,
         };
         setState(mergedState);
         saveStepState(instanceId, mergedState);
@@ -209,7 +278,8 @@ export function useStepEngine({
         const hydratedState: StepState = {
           ...savedState,
           steps: hydrateStepTelemetry(filteredSavedSteps),
-          currentStepIndex: Math.max(0, Math.min(savedState.currentStepIndex, Math.max(0, filteredSavedSteps.length - 1))),
+          currentStepIndex: Math.max(0, Math.min(mergeSavedIndex, Math.max(0, filteredSavedSteps.length - 1))),
+          skeletonVersion: flowPlan.skeletonVersion ?? null,
         };
         setState(hydratedState);
         saveStepState(instanceId, hydratedState);
@@ -253,7 +323,8 @@ export function useStepEngine({
         steps: deduplicatedSteps,
         completedSteps: new Set(),
         stepData: bootstrapStepData,
-        sessionId: flowPlan.sessionId
+        sessionId: flowPlan.sessionId,
+        skeletonVersion: flowPlan.skeletonVersion ?? null,
       };
       setState(newState);
       saveStepState(instanceId, newState);
@@ -514,7 +585,8 @@ export function useStepEngine({
       // If we've exhausted precomputed steps, mark as complete
       // BUT: If readyForImageGen is true, wait for structural steps instead
       if (flowPlan && precomputedIndex >= precomputedSteps.length && !hasMoreSteps) {
-        if (isReady) {
+        const shouldCompleteLocalSkeletonFlow = isReady && flowPlan.mode === LOCAL_SKELETON_FLOW_MODE;
+        if (isReady && !shouldCompleteLocalSkeletonFlow) {
           console.log('[Flow] Ready for image gen but exhausted all steps - waiting for structural steps', {
             stepsLength: state.steps.length,
             precomputedSteps: precomputedSteps.length,
@@ -528,6 +600,13 @@ export function useStepEngine({
           setState(newState);
           saveStepState(instanceId, newState);
           return;
+        }
+        if (shouldCompleteLocalSkeletonFlow) {
+          console.log('[Flow] Local skeleton exhausted all steps - calling onFlowComplete', {
+            stepsLength: state.steps.length,
+            precomputedSteps: precomputedSteps.length,
+            updatedStepData,
+          });
         }
         console.log('[Flow] Exhausted all steps - calling onFlowComplete', { 
           stepsLength: state.steps.length, 
@@ -686,7 +765,7 @@ export function useStepEngine({
 
     setState(newState);
     saveStepState(instanceId, newState);
-  }, [effectiveSessionScopeKey, fetchNextStep, flowPlan, instanceId, onFlowComplete, onStepComplete, state]);
+  }, [effectiveSessionScopeKey, fetchNextStep, flowPlan, instanceId, isReady, onFlowComplete, onStepComplete, state]);
 
   const goToPreviousStep = useCallback(() => {
     setState((prev) => {

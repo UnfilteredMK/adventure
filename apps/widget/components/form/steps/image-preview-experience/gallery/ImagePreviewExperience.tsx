@@ -21,13 +21,14 @@ import {
 } from "@/lib/ai-form/state/form-state-storage";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { ArrowLeft, Download, ImageIcon, LayoutGrid, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
 import { useFormSubmission } from "@/hooks/use-form-submission";
 import { safeStableJsonForPricingContext } from "../../runtime/step-engine/utils/pricing-context";
+import { PREVIEW_CACHE_UPDATED_EVENT, notifyPreviewCacheUpdated } from "./preview-cache-bridge";
 
 function hexToRgba(hex: string, alpha: number): string | null {
   const h = String(hex || "").replace("#", "").trim();
@@ -128,15 +129,17 @@ type PreviewRun = {
   contextSignature: string;
   answeredQuestionCount?: number | null;
   images: string[];
+  expectedImageCount?: number | null;
   message?: string | null;
   stepDataSnapshot?: Record<string, any>;
   /** Per-image pricing: imagePricing[i] corresponds to images[i]. Fetched once, fixed to the image. */
   imagePricing?: (CachedPricing | undefined)[];
 };
 
-const CONCEPT_GALLERY_COUNT = 4;
+const CONCEPT_GALLERY_COUNT = 8;
+const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 8;
 
-/** "gallery" = show 4-image grid; "single" = show chosen hero with option to go back */
+/** "gallery" = show concept grid; "single" = show chosen hero with option to go back */
 type PreviewViewMode = "gallery" | "single";
 
 type PreviewCacheV3 = {
@@ -209,6 +212,12 @@ function computeContextSignature(stepDataSoFar: Record<string, any>) {
   const snapshot: Record<string, any> = {};
   for (const k of keys) snapshot[k] = stepDataSoFar[k];
   return safeJsonStringify(snapshot);
+}
+
+function mergeUniqueImageUrls(existing: string[], incoming: string[]) {
+  return Array.from(
+    new Set([...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])].filter(Boolean))
+  );
 }
 
 function buildPricingStepSnapshot(stepDataSoFar: Record<string, any>): Record<string, any> {
@@ -459,6 +468,10 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
                 ? (r as any).answeredQuestionCount
                 : null,
             images: imgs,
+            expectedImageCount:
+              typeof (r as any).expectedImageCount === "number" && Number.isFinite((r as any).expectedImageCount)
+                ? Math.max(1, Math.floor((r as any).expectedImageCount))
+                : null,
             message: typeof (r as any).message === "string" ? (r as any).message : null,
             stepDataSnapshot:
               typeof (r as any).stepDataSnapshot === "object" && (r as any).stepDataSnapshot !== null
@@ -571,6 +584,7 @@ function saveCache(instanceId: string, sessionId: string, cache: PreviewCacheV3)
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(storageKeyV3(instanceId, sessionId), JSON.stringify(cache));
+    notifyPreviewCacheUpdated(instanceId, sessionId, cache as any);
   } catch {}
 }
 
@@ -627,6 +641,10 @@ export function ImagePreviewExperience(props: {
   suppressUploadOverlay?: boolean;
   /** When true, hides the budget slider overlay (e.g. when preview is in dominant/large mode). */
   hideBudgetInOverlay?: boolean;
+  /** When false, suppress preview tool controls for priced-grid mode. */
+  toolingEnabled?: boolean;
+  /** When true, disable concept gallery picker and keep hero in single-image mode. */
+  disableConceptPicker?: boolean;
 }) {
   const { theme, config: designConfig } = useFormTheme();
   const {
@@ -650,6 +668,8 @@ export function ImagePreviewExperience(props: {
     previewChromePx,
     suppressUploadOverlay = false,
     hideBudgetInOverlay = false,
+    toolingEnabled = true,
+    disableConceptPicker = false,
   } = props;
 
   const initialCache = useMemo(() => loadCache(instanceId, sessionId), [instanceId, sessionId]);
@@ -667,6 +687,12 @@ export function ImagePreviewExperience(props: {
         ? Math.max(1, Math.min(12, Math.floor(Number((designConfig as any).gallery_max_images))))
         : CONCEPT_GALLERY_COUNT,
     [designConfig]
+  );
+  const conceptGalleryTargetCount = useMemo(
+    // Initial scene gallery should always target eight concepts, even if an older
+    // theme config still carries the previous 4-image default.
+    () => Math.max(CONCEPT_GALLERY_COUNT, Math.min(12, Math.max(galleryMaxImages || CONCEPT_GALLERY_COUNT, CONCEPT_GALLERY_COUNT))),
+    [galleryMaxImages]
   );
 
   const sceneUploadUrl = useMemo(() => {
@@ -697,7 +723,7 @@ export function ImagePreviewExperience(props: {
       return 1;
     }
     if (normalizedUseCase === "scene" && (cache?.runs?.length || 0) === 0) {
-      return Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
+      return conceptGalleryTargetCount;
     }
     const hasDirectEditAnchor =
       Boolean(sceneUploadUrl || userUploadUrl) ||
@@ -706,8 +732,8 @@ export function ImagePreviewExperience(props: {
     if (hasDirectEditAnchor) {
       return 1;
     }
-    return Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT);
-  }, [cache?.runs?.length, config, galleryMaxImages, sceneUploadUrl, uploadedImages.length, userUploadUrl]);
+    return conceptGalleryTargetCount;
+  }, [cache?.runs?.length, conceptGalleryTargetCount, config, sceneUploadUrl, uploadedImages.length, userUploadUrl]);
   const refreshRegenAllowance = useCallback(async () => {
     if (!instanceId) return;
     try {
@@ -770,6 +796,17 @@ export function ImagePreviewExperience(props: {
   const [accuratePricingStatus, setAccuratePricingStatus] = useState<"idle" | "running" | "complete" | "error">("idle");
   const [liveBudget, setLiveBudget] = useState<number | null>(() => extractBudgetValue(stepDataSoFar || {}));
   const [liveBudgetDirty, setLiveBudgetDirty] = useState(false);
+
+  useEffect(() => {
+    const handleCacheUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ instanceId?: string; sessionId?: string; cache?: PreviewCacheV3 | null }>).detail;
+      if (!detail) return;
+      if (detail.instanceId !== instanceId || detail.sessionId !== sessionId) return;
+      setCache(detail.cache ?? loadCache(instanceId, sessionId));
+    };
+    window.addEventListener(PREVIEW_CACHE_UPDATED_EVENT, handleCacheUpdate as EventListener);
+    return () => window.removeEventListener(PREVIEW_CACHE_UPDATED_EVENT, handleCacheUpdate as EventListener);
+  }, [instanceId, sessionId]);
 
   useEffect(() => {
     setUploadedImages(loadUploadedImages(instanceId, sessionId));
@@ -1047,10 +1084,15 @@ export function ImagePreviewExperience(props: {
 
   const selectedConceptIndex = cache?.selectedConceptIndex ?? null;
   const viewMode = (cache?.viewMode === "gallery" || cache?.viewMode === "single" ? cache.viewMode : null) as PreviewViewMode | null;
+  const activeRunExpectedImageCount =
+    typeof activeRun?.expectedImageCount === "number" && Number.isFinite(activeRun.expectedImageCount)
+      ? Math.max(activeRun.expectedImageCount, activeRun?.images?.length ?? 0)
+      : activeRun?.images?.length ?? 0;
   const showGalleryGrid =
+    !disableConceptPicker &&
     (viewMode === "gallery" || (viewMode === null && selectedConceptIndex === null)) &&
-    Boolean(activeRun?.images && activeRun.images.length > 1) &&
-    cache?.status !== "running";
+    Boolean(activeRun) &&
+    activeRunExpectedImageCount > 1;
   const showConceptPicker = showGalleryGrid;
 
   const canRegenerateInGallery =
@@ -1381,50 +1423,6 @@ export function ImagePreviewExperience(props: {
       }
 
       const runId = newRunId();
-      setActiveGenerationReason(reason);
-      setCache((prev) => {
-        const base: PreviewCacheV3 =
-          prev ??
-          ({
-            schemaVersion: 3,
-            status: "idle",
-            runs: [],
-            activeRunId: null,
-            selectedConceptIndex: null,
-            viewMode: null,
-            message: null,
-            error: null,
-            errorDetails: null,
-            refinementNote: null,
-            runStartedAt: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            lastContextSignature: signatureAtStart,
-            generatedForContextSignature: null,
-            lastGeneratedAnsweredCount: null,
-          } satisfies PreviewCacheV3);
-        const next: PreviewCacheV3 = {
-          ...base,
-          status: "running",
-          error: null,
-          errorDetails: null,
-          generatedForContextSignature: null,
-          lastContextSignature: signatureAtStart,
-          message:
-            reason === "auto"
-              ? runs.length
-                ? "Fine-tuning your design + pricing…"
-                : "Generating your design + pricing for you…"
-              : isBudgetTierShift
-                ? "Reworking your design + pricing for the new budget tier…"
-                : "Refreshing your design + pricing…",
-          runStartedAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        saveCache(instanceId, sessionId, next);
-        return next;
-      });
-
 	      try {
 	        const stepsForQA = typeof window !== "undefined" ? loadStepState(instanceId)?.steps ?? [] : [];
 	        const answeredQA = buildAnsweredQAFromSteps(stepsForQA, effectiveStepDataSoFar || {}, 60);
@@ -1505,11 +1503,18 @@ export function ImagePreviewExperience(props: {
 		            !hasDirectImageInput ||
 		            ((normalizedUseCase === "scene" || normalizedUseCase === "scene-refinement") && Boolean(sceneImage))
 		          );
-		        const numOutputs = shouldGenerateConceptGallery ? Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT) : 1;
-		        const requestBody: any = {
+		        const numOutputs = shouldGenerateConceptGallery ? conceptGalleryTargetCount : 1;
+            const initialBatchSize = shouldGenerateConceptGallery ? Math.min(2, numOutputs) : numOutputs;
+            const remainingBatchSize = Math.max(0, numOutputs - initialBatchSize);
+            const generationMessage =
+              !hasExistingPreview || shouldGenerateConceptGallery
+                ? "Finding similar projects…"
+                : isBudgetTierShift
+                  ? "Reworking your design for the new budget tier…"
+                  : "Refreshing your design…";
+		        const requestBodyBase: any = {
 		          instanceId,
 		          sessionId,
-		          numOutputs,
 		          useCase: normalizedUseCase,
 		          generationIntent,
 		          stepDataSoFar: effectiveStepDataSoFar ?? {},
@@ -1517,75 +1522,225 @@ export function ImagePreviewExperience(props: {
 		          askedStepIds,
 		          instanceContext: { ...instanceContext },
 		        };
-		        if (guideOnlyInitialSceneRun) requestBody.referenceMode = "guide_only";
-		        if (refinementNotes) requestBody.refinementNotes = refinementNotes;
-		        if (originalReferenceImage) requestBody.originalReferenceImage = originalReferenceImage;
-		        if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
-		        if (budgetForRequest !== null) requestBody.budgetRange = budgetForRequest;
+		        if (guideOnlyInitialSceneRun) requestBodyBase.referenceMode = "guide_only";
+		        if (refinementNotes) requestBodyBase.refinementNotes = refinementNotes;
+		        if (originalReferenceImage) requestBodyBase.originalReferenceImage = originalReferenceImage;
+		        if (budgetForRequest !== null) requestBodyBase.budgetRange = budgetForRequest;
 
 			        if (normalizedUseCase === "tryon") {
 			          if (!userImage || !productImage) {
 			            throw new Error("Please upload both a person photo and a product photo to generate a try-on preview.");
 			          }
-			          requestBody.userImage = userImage;
-			          requestBody.productImage = productImage;
-			          requestBody.referenceImages = Array.from(new Set([userImage, productImage, ...uniqueRefs])).slice(0, 6);
+			          requestBodyBase.userImage = userImage;
+			          requestBodyBase.productImage = productImage;
+			          requestBodyBase.referenceImages = Array.from(new Set([userImage, productImage, ...uniqueRefs])).slice(0, 6);
 			        } else if (normalizedUseCase === "scene-placement" || normalizedUseCase === "scene-refinement") {
 			          if (!sceneImage) {
 			            throw new Error("Please upload a scene photo to generate a refinement preview.");
 			          }
-			          requestBody.sceneImage = sceneImage;
-			          if (normalizedUseCase === "scene-placement" && productImage) requestBody.productImage = productImage;
-			          requestBody.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
+			          requestBodyBase.sceneImage = sceneImage;
+			          if (normalizedUseCase === "scene-placement" && productImage) requestBodyBase.productImage = productImage;
+			          requestBodyBase.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
 			        } else {
-		          if (!guideOnlyInitialSceneRun && sceneImage) requestBody.sceneImage = sceneImage;
-		          if (uniqueRefs.length > 0) requestBody.referenceImages = uniqueRefs.slice(0, 6);
+		          if (!guideOnlyInitialSceneRun && sceneImage) requestBodyBase.sceneImage = sceneImage;
+		          if (uniqueRefs.length > 0) requestBodyBase.referenceImages = uniqueRefs.slice(0, 6);
 		        }
 
-		        const res = await fetch(endpoint, {
-		          method: "POST",
-		          headers: { "Content-Type": "application/json", Accept: "application/json" },
-		          cache: "no-store",
-		          body: JSON.stringify(requestBody),
-		        });
-		        const json = await res.json().catch(() => ({}));
-		        if (!res.ok) {
-		          const errorMessage =
-	            res.status === 413
-	              ? "That photo is too large to process. Try a smaller image (or retake the photo)."
-	              : typeof (json as any)?.error === "string"
-	                ? (json as any).error
-	                : `Failed (${res.status})`;
-	          const detailsRaw = (json as any)?.details;
-	          const normalizedDetails =
-	            typeof detailsRaw === "string"
-	              ? detailsRaw
-	              : detailsRaw && typeof detailsRaw === "object"
-	                ? safeJsonStringify(detailsRaw)
-	                : null;
-          responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
-          const err = new Error(errorMessage) as Error & { details?: string | null };
-          err.details = responseErrorDetails;
-          throw err;
-        }
+            const buildBaseCache = (base?: PreviewCacheV3 | null): PreviewCacheV3 =>
+              base ??
+              ({
+                schemaVersion: 3,
+                status: "idle",
+                runs: [],
+                activeRunId: null,
+                selectedConceptIndex: null,
+                viewMode: null,
+                message: null,
+                error: null,
+                errorDetails: null,
+                refinementNote: null,
+                runStartedAt: null,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                lastContextSignature: signatureAtStart,
+                generatedForContextSignature: null,
+                lastGeneratedAnsweredCount: null,
+              } satisfies PreviewCacheV3);
 
-        const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
-        if (process.env.NODE_ENV !== "production") {
-          console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
-        }
-        const msg = typeof (json as any)?.message === "string" ? String((json as any).message) : null;
-        if (imgs.length === 0) {
-          throw new Error("Preview generated, but no images were returned.");
-        }
+            const writeRunState = (params: {
+              status: PreviewCacheV3["status"];
+              images?: string[];
+              appendImages?: boolean;
+              message?: string | null;
+              imagePricing?: (CachedPricing | undefined)[];
+              generated?: boolean;
+            }) => {
+              setCache((prev) => {
+                const base = buildBaseCache(prev ?? loadCache(instanceId, sessionId));
+                const nextRuns = Array.isArray(base.runs) ? [...base.runs] : [];
+                const existingIndex = nextRuns.findIndex((r) => r.id === runId);
+                const existingRun =
+                  existingIndex >= 0
+                    ? nextRuns[existingIndex]
+                    : ({
+                        id: runId,
+                        createdAt: Date.now(),
+                        contextSignature: generationSignatureAtStart,
+                        answeredQuestionCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : null,
+                        images: [],
+                        expectedImageCount: numOutputs,
+                        message: generationMessage,
+                        stepDataSnapshot: pricingContextForNextRun.stepDataSnapshot,
+                      } satisfies PreviewRun);
+                const mergedImages =
+                  params.images && params.images.length > 0
+                    ? params.appendImages
+                      ? mergeUniqueImageUrls(existingRun.images, params.images)
+                      : params.images
+                    : existingRun.images;
+                const mergedPricing = Array.isArray(existingRun.imagePricing) ? [...existingRun.imagePricing] : [];
+                if (Array.isArray(params.imagePricing)) {
+                  params.imagePricing.forEach((value, index) => {
+                    if (value) mergedPricing[index] = value;
+                  });
+                }
+                const nextRun: PreviewRun = {
+                  ...existingRun,
+                  images: mergedImages,
+                  expectedImageCount: numOutputs,
+                  message: params.message ?? existingRun.message ?? generationMessage,
+                  stepDataSnapshot: existingRun.stepDataSnapshot ?? pricingContextForNextRun.stepDataSnapshot,
+                  ...(mergedPricing.some(Boolean) ? { imagePricing: mergedPricing } : {}),
+                };
+                if (existingIndex >= 0) nextRuns[existingIndex] = nextRun;
+                else nextRuns.push(nextRun);
 
-        const normalizedImages = imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src));
-        if (normalizedImages.length === 0) {
-          throw new Error("Preview generated, but only a placeholder image was returned.");
-        }
+                const preserveViewMode = base.viewMode === "single" || base.viewMode === "gallery";
+                const next: PreviewCacheV3 = {
+                  ...base,
+                  status: params.status,
+                  runs: nextRuns,
+                  activeRunId: runId,
+                  selectedConceptIndex: preserveViewMode && base.viewMode === "single" && numOutputs === 1 ? 0 : null,
+                  viewMode: numOutputs > 1 ? "gallery" : preserveViewMode ? base.viewMode : "single",
+                  message: params.message ?? nextRun.message ?? generationMessage,
+                  error: null,
+                  errorDetails: null,
+                  runStartedAt: params.status === "running" ? base.runStartedAt ?? Date.now() : null,
+                  updatedAt: Date.now(),
+                  lastContextSignature: signatureAtStart,
+                  generatedForContextSignature: params.generated ? generationSignatureAtStart : null,
+                  lastGeneratedAnsweredCount:
+                    params.generated && Number.isFinite(answeredQuestionCount)
+                      ? answeredQuestionCount
+                      : base.lastGeneratedAnsweredCount ?? null,
+                };
+                saveCache(instanceId, sessionId, next);
+                return next;
+              });
+            };
+
+            const fetchImageBatch = async (requestedOutputs: number, generationOffset: number) => {
+              if (requestedOutputs <= 0) return { images: [] as string[], message: generationMessage };
+              const requestBody: any = {
+                ...requestBodyBase,
+                numOutputs: requestedOutputs,
+              };
+              if (generationIndex !== undefined) requestBody.generationIndex = generationIndex + generationOffset;
+              const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                cache: "no-store",
+                body: JSON.stringify(requestBody),
+              });
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                const errorMessage =
+                  res.status === 413
+                    ? "That photo is too large to process. Try a smaller image (or retake the photo)."
+                    : typeof (json as any)?.error === "string"
+                      ? (json as any).error
+                      : `Failed (${res.status})`;
+                const detailsRaw = (json as any)?.details;
+                const normalizedDetails =
+                  typeof detailsRaw === "string"
+                    ? detailsRaw
+                    : detailsRaw && typeof detailsRaw === "object"
+                      ? safeJsonStringify(detailsRaw)
+                      : null;
+                responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
+                const err = new Error(errorMessage) as Error & { details?: string | null };
+                err.details = responseErrorDetails;
+                throw err;
+              }
+
+              const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
+              if (process.env.NODE_ENV !== "production") {
+                console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
+              }
+              if (imgs.length === 0) {
+                throw new Error("Preview generated, but no images were returned.");
+              }
+              const normalizedImages = imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src));
+              if (normalizedImages.length === 0) {
+                throw new Error("Preview generated, but only a placeholder image was returned.");
+              }
+              return {
+                images: normalizedImages,
+                message:
+                  shouldGenerateConceptGallery || !hasExistingPreview
+                    ? generationMessage
+                    : typeof (json as any)?.message === "string"
+                      ? String((json as any).message)
+                      : generationMessage,
+              };
+            };
+
+            const fetchImageBatchUntilFilled = async (requestedOutputs: number, generationOffset: number) => {
+              if (requestedOutputs <= 0) return { images: [] as string[], message: generationMessage };
+              let collected: string[] = [];
+              let message = generationMessage;
+              let offset = generationOffset;
+              let attempts = 0;
+
+              while (collected.length < requestedOutputs && attempts < 4) {
+                const remaining = requestedOutputs - collected.length;
+                const batch = await fetchImageBatch(remaining, offset);
+                message = batch.message;
+                const merged = mergeUniqueImageUrls(collected, batch.images);
+                const gained = merged.length - collected.length;
+                collected = merged;
+                attempts += 1;
+                offset += 1;
+
+                if (gained <= 0) break;
+              }
+
+              if (collected.length < requestedOutputs) {
+                console.warn("[preview] batch returned fewer images than requested", {
+                  requestedOutputs,
+                  actualImages: collected.length,
+                });
+              }
+
+              return { images: collected, message };
+            };
+
+            setActiveGenerationReason(reason);
+            writeRunState({ status: "running", message: generationMessage });
+
+            const firstBatch = await fetchImageBatchUntilFilled(initialBatchSize, 0);
+            writeRunState({
+              status: remainingBatchSize > 0 ? "running" : "complete",
+              images: firstBatch.images,
+              appendImages: false,
+              message: firstBatch.message,
+              generated: remainingBatchSize === 0,
+            });
 
         let initialImagePricing: (CachedPricing | undefined)[] | undefined;
         try {
-          const pricedHero = normalizedImages[0] ?? null;
+          const pricedHero = firstBatch.images[0] ?? null;
           if (pricedHero) {
             const priced = await requestAccuratePricing({
               answeredQA,
@@ -1598,7 +1753,7 @@ export function ImagePreviewExperience(props: {
               changedRefinementKeys: pricingContextForNextRun.changedRefinementKeys,
               budgetRange: budgetForRequest,
             });
-            initialImagePricing = normalizedImages.map((_: string, index: number) => (index === 0 ? priced : undefined));
+            initialImagePricing = firstBatch.images.map((_: string, index: number) => (index === 0 ? priced : undefined));
             if (currentHeroRef.current === null || currentHeroRef.current === hero) {
               heroForPricingRef.current = pricedHero;
               setAccuratePricing(priced);
@@ -1609,43 +1764,35 @@ export function ImagePreviewExperience(props: {
           if (currentHeroRef.current === hero) setAccuratePricingStatus("error");
         }
 
-        setCache((prev) => {
-          const base = prev ?? loadCache(instanceId, sessionId);
-          const nextRuns = Array.isArray(base?.runs) ? [...base!.runs] : [];
-          const run: PreviewRun = {
-            id: runId,
-            createdAt: Date.now(),
-            contextSignature: generationSignatureAtStart,
-            answeredQuestionCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : null,
-            images: normalizedImages,
-            message: msg,
-            stepDataSnapshot: pricingContextForNextRun.stepDataSnapshot,
-            ...(initialImagePricing ? { imagePricing: initialImagePricing } : {}),
-          };
-          nextRuns.push(run);
+        if (initialImagePricing) {
+          writeRunState({
+            status: remainingBatchSize > 0 ? "running" : "complete",
+            message: firstBatch.message,
+            imagePricing: initialImagePricing,
+            generated: remainingBatchSize === 0,
+          });
+        }
 
-          const preserveViewMode = base?.viewMode === "single" || base?.viewMode === "gallery";
-          const next: PreviewCacheV3 = {
-            schemaVersion: 3,
-            status: "complete",
-            runs: nextRuns,
-            activeRunId: runId,
-            selectedConceptIndex: preserveViewMode && base?.viewMode === "single" ? 0 : null,
-            viewMode: preserveViewMode ? base!.viewMode : "gallery",
-            message: msg,
-            error: null,
-            errorDetails: null,
-            refinementNote: base?.refinementNote ?? null,
-            runStartedAt: null,
-            createdAt: base?.createdAt ?? Date.now(),
-            updatedAt: Date.now(),
-            lastContextSignature: signatureAtStart,
-            generatedForContextSignature: generationSignatureAtStart,
-            lastGeneratedAnsweredCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : base?.lastGeneratedAnsweredCount ?? null,
-          };
-          saveCache(instanceId, sessionId, next);
-          return next;
-        });
+        if (remainingBatchSize > 0) {
+          try {
+            const deferredBatch = await fetchImageBatchUntilFilled(remainingBatchSize, 1);
+            writeRunState({
+              status: "complete",
+              images: deferredBatch.images,
+              appendImages: true,
+              message: deferredBatch.message,
+              generated: true,
+            });
+          } catch (deferredError) {
+            console.error("[preview] deferred gallery batch failed", deferredError);
+            writeRunState({
+              status: "complete",
+              message: firstBatch.message,
+              generated: true,
+            });
+          }
+        }
+
         void refreshRegenAllowance();
       } catch (e) {
         pendingBudgetRefineRef.current = false;
@@ -1675,9 +1822,14 @@ export function ImagePreviewExperience(props: {
               generatedForContextSignature: null,
               lastGeneratedAnsweredCount: null,
             } satisfies PreviewCacheV3);
+          const nextRuns = (Array.isArray(base.runs) ? base.runs : []).filter((run) => run.id !== runId || run.images.length > 0);
+          const nextActiveRunId =
+            base.activeRunId === runId ? nextRuns.at(-1)?.id ?? null : base.activeRunId ?? nextRuns.at(-1)?.id ?? null;
           const next: PreviewCacheV3 = {
             ...base,
             status: "error",
+            runs: nextRuns,
+            activeRunId: nextActiveRunId,
             error: message,
             errorDetails: details || null,
             runStartedAt: null,
@@ -1701,7 +1853,7 @@ export function ImagePreviewExperience(props: {
       config,
       derivePricingContextForPreview,
       enabled,
-      galleryMaxImages,
+      conceptGalleryTargetCount,
       hero,
       instanceId,
       refreshRegenAllowance,
@@ -1877,7 +2029,12 @@ export function ImagePreviewExperience(props: {
   const busy = cache?.status === "running";
   const isPreviewVisible = Boolean(enabled && (hero || busy || (cache?.status === "error" && cache?.error)));
   const showLoader = !hero && (busy || !cache || cache.status === "idle");
-  const showRefreshMask = Boolean(hero && busy);
+  const showProgressiveGalleryLoader = Boolean(showConceptPicker && busy && activeRunExpectedImageCount > 1);
+  const progressiveGalleryCellCount = showProgressiveGalleryLoader
+    ? Math.max(INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS, activeRunExpectedImageCount, activeRun?.images?.length ?? 0)
+    : Math.max(activeRun?.images?.length ?? 0, activeRunExpectedImageCount);
+  const showRefreshMask = Boolean(hero && busy && !showConceptPicker);
+  const showOverlayLoader = Boolean((showLoader || busy) && !showProgressiveGalleryLoader);
   const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
   const leadGateActive = leadGateEnabled && Boolean(hero) && !leadCaptured;
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
@@ -2323,6 +2480,8 @@ export function ImagePreviewExperience(props: {
 
   const canPrev = activeIndex > 0;
   const canNext = activeIndex < runs.length - 1;
+  const hasMultiImageRun = runs.some((r) => r.images && r.images.length > 1);
+  const activeRunHasMultiple = Boolean(activeRun?.images && activeRun.images.length > 1);
   const activeNavigationTransition =
     navigationTransition && navigationTransition.toRunId === activeRun?.id && navigationTransition.toImage === hero
       ? navigationTransition
@@ -2426,6 +2585,10 @@ export function ImagePreviewExperience(props: {
   const overlayBg = pillBg;
   const overlayHoverBg = "rgba(51, 65, 85, 0.64)";
   const overlayBorder = "rgba(255,255,255,0.24)";
+  const galleryPlaceholderPillBg = "rgba(0, 0, 0, 0.60)";
+  const galleryPlaceholderPillHoverBg = "rgba(0, 0, 0, 0.72)";
+  const singleModePricingPillBg = galleryPlaceholderPillBg;
+  const singleModePricingPillHoverBg = galleryPlaceholderPillHoverBg;
   // Keep lead popover on the exact same glass color token as overlay pills.
   const leadGenOverlayBg = overlayBg;
   const leadGenFg = "rgba(255,255,255,0.95)";
@@ -2452,14 +2615,19 @@ export function ImagePreviewExperience(props: {
     ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
     ["--sif-lead-gen-ring" as any]: leadGenRing,
   } as React.CSSProperties;
+  const singleModeOverlayVars = {
+    ...overlayVars,
+    ["--sif-overlay-bg" as any]: galleryPlaceholderPillBg,
+    ["--sif-overlay-hover-bg" as any]: galleryPlaceholderPillHoverBg,
+  } as React.CSSProperties;
   const overlayButtonClass =
     "h-8 sm:h-7 inline-flex items-center gap-1.5 rounded-xl px-3 text-[0.6875rem] font-medium leading-none text-white/95 shadow-sm backdrop-blur-md bg-[var(--sif-overlay-bg)] hover:bg-[var(--sif-overlay-hover-bg)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed";
   const overlayIconButtonClass =
-    "h-8 w-8 sm:h-7 sm:w-7 inline-flex items-center justify-center rounded-full text-white/85 bg-white/0 hover:bg-white/15 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors";
+    "h-8 w-8 sm:h-7 sm:w-7 inline-flex items-center justify-center rounded-full text-white/90 shadow-sm backdrop-blur-md bg-[var(--sif-overlay-bg)] hover:bg-[var(--sif-overlay-hover-bg)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors";
 
   const pricingPillVars = {
-    ["--sif-overlay-bg" as any]: pillBg,
-    ["--sif-overlay-hover-bg" as any]: overlayHoverBg,
+    ["--sif-overlay-bg" as any]: singleModePricingPillBg,
+    ["--sif-overlay-hover-bg" as any]: singleModePricingPillHoverBg,
     ["--sif-pill-fg" as any]: "#ffffff",
     ["--sif-lead-gen-overlay-bg" as any]: leadGenOverlayBg,
     ["--sif-lead-gen-fg" as any]: leadGenFg,
@@ -2553,9 +2721,10 @@ export function ImagePreviewExperience(props: {
     shouldShowPricingPill && formattedPricingRange
   );
   const shouldShowCenteredPricingFormOverlay = Boolean(
-    leadGateEnabled && !leadCaptured && showCenteredPricingForm
+    toolingEnabled && leadGateEnabled && !leadCaptured && showCenteredPricingForm
   );
   const shouldShowBottomControlsRow = Boolean(
+    toolingEnabled &&
     !shouldShowCenteredPricingFormOverlay &&
       (hasBudgetOverlayControl || shouldShowBottomPricingPill)
   );
@@ -2574,7 +2743,7 @@ export function ImagePreviewExperience(props: {
         paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
         paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
         paddingRight: 'clamp(0.56rem, 2.1vw, 0.78rem)',
-        backgroundColor: pillBg,
+        backgroundColor: singleModePricingPillBg,
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
       }}
@@ -2612,8 +2781,8 @@ export function ImagePreviewExperience(props: {
           setLeadCaptured(true);
           // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
         }}
-        accentColor={pillBg}
-        style={{ fontFamily: theme.fontFamily, backgroundColor: pillBg, ...pricingPillVars }}
+        accentColor={singleModePricingPillBg}
+        style={{ fontFamily: theme.fontFamily, backgroundColor: singleModePricingPillBg, ...pricingPillVars }}
       />
     </div>
   ) : null;
@@ -2791,9 +2960,37 @@ export function ImagePreviewExperience(props: {
               ) : null}
 
               {/* Top controls: compact layout so actions stay available but less visually busy */}
-              {(hero || showConceptPicker) ? (
+              {toolingEnabled && !showConceptPicker && hero ? (
                 <div className="absolute inset-x-2 top-2 z-10 flex items-start justify-between pointer-events-none">
-                  <div className="pointer-events-auto">
+                  <div className="pointer-events-auto flex items-center gap-1.5">
+                    {hasMultiImageRun ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCache((prev) => {
+                            const base = prev ?? loadCache(instanceId, sessionId);
+                            if (!base) return prev;
+                            const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
+                            const next: PreviewCacheV3 = {
+                              ...base,
+                              viewMode: "gallery",
+                              activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
+                              selectedConceptIndex: null,
+                              updatedAt: Date.now(),
+                            };
+                            saveCache(instanceId, sessionId, next);
+                            return next;
+                          });
+                        }}
+                        aria-label="Back to gallery"
+                        title="Back to gallery"
+                        className={overlayButtonClass}
+                        style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        <span className="font-medium">Back to gallery</span>
+                      </button>
+                    ) : null}
                     {(hero || showConceptPicker) && !busy ? (
                       leadGateEnabled ? (
                         <LeadGenPopover
@@ -2810,7 +3007,7 @@ export function ImagePreviewExperience(props: {
                           sessionId={sessionId}
                           gateContext={gateContextRef.current || "regenerate_manual"}
                           surface="overlay"
-                          contentStyle={overlayVars}
+                          contentStyle={singleModeOverlayVars}
                           title="Where should we send the pricing to?"
                           description="Before regenerating this preview, we'll email you pricing."
                           finePrint="Instant unlock after sending."
@@ -2838,7 +3035,7 @@ export function ImagePreviewExperience(props: {
                             onClick={handleRefreshClick}
                             className={overlayButtonClass}
                             aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
-                            style={{ fontFamily: theme.fontFamily, ...overlayVars }}
+                            style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
                           >
                             {showConceptPicker ? (
                               <span className="font-medium">Regenerate</span>
@@ -2857,7 +3054,7 @@ export function ImagePreviewExperience(props: {
                           onClick={handleRefreshClick}
                           className={overlayButtonClass}
                           aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
-                          style={{ fontFamily: theme.fontFamily, ...overlayVars }}
+                          style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
                         >
                           {showConceptPicker ? (
                             <span className="font-medium">Regenerate</span>
@@ -2873,8 +3070,8 @@ export function ImagePreviewExperience(props: {
                   </div>
 
                   <div
-                    className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-[var(--sif-overlay-bg)] p-1 text-white shadow-sm backdrop-blur-md"
-                    style={{ fontFamily: theme.fontFamily, ...overlayVars }}
+                    className="pointer-events-auto flex items-center gap-1.5 text-white"
+                    style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
                   >
                     {/* Download and expand only in single view — not meaningful in gallery picker mode */}
                     {!showConceptPicker ? (
@@ -2892,7 +3089,7 @@ export function ImagePreviewExperience(props: {
                         sessionId={sessionId}
                         gateContext="download"
                         surface="overlay"
-                        contentStyle={overlayVars}
+                        contentStyle={singleModeOverlayVars}
                         title="Where should we send the pricing to?"
                         description="Before downloading this preview, we’ll email you pricing and a copy of the file."
                         finePrint="Instant download after sending."
@@ -2949,67 +3146,13 @@ export function ImagePreviewExperience(props: {
                       </>
                     ) : null}
 
-                    {(() => {
-                      const hasMultiImageRun = runs.some((r) => r.images && r.images.length > 1);
-                      const activeRunHasMultiple = Boolean(activeRun?.images && activeRun.images.length > 1);
-                      if (!hasMultiImageRun) return null;
-                      return showConceptPicker ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCache((prev) => {
-                              const base = prev ?? loadCache(instanceId, sessionId);
-                              if (!base) return prev;
-                              const next: PreviewCacheV3 = {
-                                ...base,
-                                selectedConceptIndex: 0,
-                                viewMode: "single",
-                                updatedAt: Date.now(),
-                              };
-                              saveCache(instanceId, sessionId, next);
-                              return next;
-                            });
-                          }}
-                          aria-label="View single"
-                          title="View single"
-                          className={overlayIconButtonClass}
-                        >
-                          <ImageIcon className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCache((prev) => {
-                              const base = prev ?? loadCache(instanceId, sessionId);
-                              if (!base) return prev;
-                              const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
-                              const next: PreviewCacheV3 = {
-                                ...base,
-                                viewMode: "gallery",
-                                activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
-                                selectedConceptIndex: null,
-                                updatedAt: Date.now(),
-                              };
-                              saveCache(instanceId, sessionId, next);
-                              return next;
-                            });
-                          }}
-                          aria-label="Back to gallery"
-                          title="Back to gallery"
-                          className={overlayIconButtonClass}
-                        >
-                          <LayoutGrid className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                        </button>
-                      );
-                    })()}
                   </div>
                 </div>
               ) : null}
 
 	            {/* Two distinct modes: gallery picker vs single hero image. Only one renders. */}
 	            <div className="h-full w-full" data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}>
-	              {showConceptPicker && activeRun?.images?.length ? (
+	              {showConceptPicker ? (
 	                <div
 	                  className="h-full w-full flex flex-col min-h-0 isolate"
 	                  style={{
@@ -3017,20 +3160,76 @@ export function ImagePreviewExperience(props: {
 	                    padding: (designConfig as any)?.gallery_spacing ?? 8,
 	                  }}
 	                >
-	                  <p
-	                    className="text-center text-xs sm:text-sm font-medium"
-	                    style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
-	                  >
-	                    Choose a starter image that&apos;s roughly close enough to start with
-	                  </p>
-	                  <div
-	                    className="flex-1 grid grid-cols-2 min-h-[220px]"
-	                    style={{
-	                      gridTemplateRows: "1fr 1fr",
-	                      gap: (designConfig as any)?.gallery_spacing ?? 8,
-	                    }}
-	                  >
-	                    {activeRun.images.slice(0, Math.max(1, galleryMaxImages || CONCEPT_GALLERY_COUNT)).map((src, idx) => (
+                  <div
+                    className={cn(
+                      "text-center",
+                      showProgressiveGalleryLoader ? "flex items-center justify-center pb-1 pt-0.5" : "space-y-0.5"
+                    )}
+                  >
+                    {showProgressiveGalleryLoader ? (
+                      <div
+                        className="inline-flex max-w-full items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[13px] font-semibold text-white shadow-sm backdrop-blur-md"
+                        style={{ fontFamily: theme.fontFamily }}
+                      >
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-white/80" />
+                        <span className="truncate">Finding similar projects…</span>
+                      </div>
+                    ) : (
+                      <>
+                        <p
+                          className="text-[13px] sm:text-sm font-semibold leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                          style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+                        >
+                          Here are similar projects and their price ranges. Tap one to see your exact pricing.
+                        </p>
+                        <p
+                          className="text-[10px] sm:text-[11px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                          style={{ color: theme.textColor, fontFamily: theme.fontFamily, opacity: 0.75 }}
+                        >
+                          Based on real projects similar to yours
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div
+                    className="flex-1 min-h-0 overflow-y-auto"
+                  >
+                    <div
+                      className="grid min-h-[360px] content-start"
+                      style={{
+                        gap: (designConfig as any)?.gallery_spacing ?? 6,
+                        gridTemplateColumns: "repeat(auto-fit, minmax(min(8.75rem, 100%), 1fr))",
+                      }}
+                    >
+	                    {Array.from({
+                        length: Math.max(
+                          1,
+                          showProgressiveGalleryLoader
+                            ? progressiveGalleryCellCount
+                            : Math.min(activeRunExpectedImageCount, conceptGalleryTargetCount)
+                        ),
+                      }).map((_, idx) => {
+                        const src = activeRun?.images?.[idx] ?? null;
+                        if (!src) {
+                          return (
+                            <div
+                              key={idx}
+                              className="relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border border-white/12 bg-black/20"
+                              style={{
+                                borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
+                              }}
+                              aria-hidden="true"
+                            >
+                              <div className="absolute inset-0 bg-black/30" />
+                              <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_18%,rgba(255,255,255,0.24),transparent_36%),radial-gradient(circle_at_78%_22%,rgba(255,255,255,0.12),transparent_28%),linear-gradient(145deg,rgba(255,255,255,0.14),rgba(255,255,255,0.04),rgba(255,255,255,0.12))]" />
+                              <div className="absolute inset-x-[8%] top-[9%] bottom-[18%] rounded-[20px] border border-white/10 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" />
+                              <div className="absolute inset-x-[16%] top-[20%] h-[34%] rounded-[18px] bg-white/12 blur-2xl" />
+                              <div className="absolute inset-x-[8%] bottom-[11%] h-3.5 rounded-full bg-white/14" />
+                              <div className="absolute left-[8%] bottom-[6.5%] h-3 w-[42%] rounded-full bg-white/10" />
+                            </div>
+                          );
+                        }
+                        return (
 	                      <button
 	                        key={idx}
 	                        type="button"
@@ -3048,20 +3247,37 @@ export function ImagePreviewExperience(props: {
 	                            return next;
 	                          });
 	                        }}
-	                        className="relative w-full h-full min-h-0 overflow-hidden rounded-lg border-2 border-transparent hover:border-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-colors"
+	                        className={cn(
+                            "group relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
+                            selectedConceptIndex === idx ? "border-white/80 ring-2 ring-white/50" : "border-white/20 md:hover:border-white/50"
+                          )}
 	                        style={{
 	                          borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
 	                        }}
 	                        aria-label={`Select option ${idx + 1}`}
+                          aria-pressed={selectedConceptIndex === idx}
 	                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={src}
                           alt={`Concept ${idx + 1}`}
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-cover transition-transform duration-200 md:group-hover:scale-[1.02]"
                         />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2.5">
+                          <div
+                            className="flex h-9 w-28 items-center gap-1.5 rounded-full bg-black/60 px-3"
+                            aria-hidden="true"
+                          >
+                            <span className="select-none text-[13px] font-semibold text-white">$</span>
+                            <span className="select-none text-[13px] font-semibold tracking-[0.18em] text-white/70 blur-[4px]">
+                              XXXX
+                            </span>
+                          </div>
+                        </div>
 	                      </button>
-	                    ))}
+                        );
+                      })}
+	                    </div>
 	                  </div>
 	                </div>
 	              ) : hero ? (
@@ -3092,6 +3308,7 @@ export function ImagePreviewExperience(props: {
 
             {/* Top-left: form-step upload thumbnail OR "upload your own image" button.
                 Hidden when: (a) dedicated upload CTA step is showing below, or (b) image is generating and no thumbnail yet. */}
+            {toolingEnabled ? (
             <div
               className={cn(
                 "absolute left-3 z-20 flex items-center gap-2",
@@ -3230,11 +3447,12 @@ export function ImagePreviewExperience(props: {
               )}
 
             </div>
+            ) : null}
 
 
             {/* Uploaded images count is shown inline on the upload button */}
 
-            {showLoader || busy ? (
+            {showOverlayLoader ? (
               <div
                 className={cn(
                   "absolute inset-0 flex items-center justify-center",
@@ -3253,17 +3471,17 @@ export function ImagePreviewExperience(props: {
                   size="sm"
                   tone="overlay"
                   active={busy}
-                  messageOverride={cache?.message || (hero ? "Refreshing your design + pricing…" : "Generating your design + pricing for you…")}
+                  messageOverride={cache?.message || (hero ? "Refreshing your design…" : "Finding similar projects…")}
                   className="bg-slate-900/75"
                   style={{ ...overlayVars }}
-                  countdown={
+                  countdown={hero ? (
                     <div
                       className="rounded-full bg-white/15 px-2 py-0.5 text-[0.625rem] font-medium tracking-wide text-white/80 shrink-0 ring-1 ring-white/15"
                       style={{ fontFamily: theme.fontFamily }}
                     >
                       {formattedLoaderCountdown} left
                     </div>
-                  }
+                  ) : undefined}
                 />
               </div>
             ) : null}

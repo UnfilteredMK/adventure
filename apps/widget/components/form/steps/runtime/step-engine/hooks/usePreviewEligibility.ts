@@ -138,7 +138,13 @@ export function usePreviewEligibility({
       return false;
     }
     if (isBootstrapStepId(currentStepId)) return false;
-    if (backendReadyForImageGen) return true;
+    // Backend can occasionally signal readiness before the user has answered the
+    // first planner question in this batch. Keep question flow active until at
+    // least one preview-gate question is completed.
+    if (backendReadyForImageGen) {
+      if (completedQuestionCount <= 0) return false;
+      return true;
+    }
     if (typeof imagePreviewAfterAnsweredQuestionsOverride === "number") {
       if (completedQuestionCount < imagePreviewAfterAnsweredQuestionsOverride) return false;
       return true;

@@ -2,31 +2,39 @@
 
 // Step Engine - Main component that orchestrates the form flow
 import React, { useEffect, useCallback, useRef, useState, useMemo } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { useSearchParams } from "next/navigation";
 import { useStepEngine } from '@/hooks/use-step-engine';
 import { useFormMetrics } from '@/hooks/use-form-metrics';
-import { FlowPlan, FormState, StepDefinition, UIStep } from '@/types/ai-form';
+import { FlowPlan, FormState, UIStep } from '@/types/ai-form';
 import { useFormTheme } from '../../demo/FormThemeProvider';
 import { emitFeedback, emitTelemetry } from '@/lib/ai-form/telemetry';
 import { isDevModeEnabled } from '@/lib/ai-form/dev-mode';
 import { DevModeOverlay, type DevModeStats, type DevModeUIState } from '../../dev-helpers/DevModeOverlay';
-import { saveUIPlan } from '@/lib/ai-form/state/ui-plan-storage';
-import { saveFormPlan } from '@/lib/ai-form/state/form-plan-storage';
-import { loadServiceCatalog, saveServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
-import { cn } from "@/lib/utils";
+import { loadServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
 import { AdventureLoader } from "../../AdventureLoader";
 import { Button } from "@/components/ui/button";
 import { collectReferenceImagesFromStepData } from "@/lib/ai-form/utils/reference-images";
 import { useExperienceState } from "@/components/form/state/ExperienceState";
 import { usePreviewEligibility } from "./step-engine/hooks/usePreviewEligibility";
 import { usePreviewLayout } from "./step-engine/hooks/usePreviewLayout";
-import { PreviewSection } from "./step-engine/sections/PreviewSection";
-import { FormQuestionSection } from "./step-engine/sections/FormQuestionPaneSection";
+import { usePreviewCacheBridge } from "./step-engine/hooks/usePreviewCacheBridge";
+import { useForceLightDocumentTheme } from "./step-engine/hooks/useForceLightDocumentTheme";
+import { useStepEngineUiConfig } from "./step-engine/hooks/useStepEngineUiConfig";
+import { useStepEngineBudget } from "./step-engine/hooks/useStepEngineBudget";
+import { useRefinementOrchestration } from "./step-engine/hooks/useRefinementOrchestration";
+import { useStepNavigation } from "./step-engine/hooks/useStepNavigation";
+import { useStepEngineDropoffTelemetry } from "./step-engine/hooks/useStepEngineTelemetry";
+import { useStepCompletion } from "./step-engine/hooks/useStepCompletion";
+import { useStepEngineFunctionCalls } from "./step-engine/hooks/useStepEngineFunctionCalls";
+import { StepEngineHeaderSection } from "./step-engine/sections/StepEngineHeaderSection";
+import { StepEngineBodySection } from "./step-engine/sections/StepEngineBodySection";
 import { buildDeterministicStyleStep } from "../static/deterministic-style-step";
 import {
+  buildDeterministicPricedImageGridStep,
+  DETERMINISTIC_PRICED_IMAGE_GRID_ID,
+} from "../static/deterministic-priced-image-grid-step";
+import {
   DETERMINISTIC_BUDGET_ID,
-  DETERMINISTIC_CONSENT_ID,
   DETERMINISTIC_FULL_NAME_ID,
   DETERMINISTIC_PRODUCT_IMAGE_ID,
   DETERMINISTIC_SCENE_IMAGE_ID,
@@ -37,23 +45,26 @@ import {
   FORM_STATE_SCHEMA_VERSION,
   PRICING_ESTIMATE_KEY,
 } from "./step-engine/constants";
-import { deriveBudgetSliderRange, roundBudgetStep } from "./step-engine/utils/budget";
-import { hexToRgba } from "@/types/design";
 import { clamp01, fnv1a32, joinSummaries, mergeUniqueStrings, normalizeOptionalString } from "./step-engine/utils/core";
 import {
-  extractCompositeBlockCalls,
-  getFunctionCallOutputs,
-  getMinTriggerCount,
-  getTriggerProgress,
-  isFunctionCallStep,
-  type FunctionCallHint,
+  getActivePreviewRunSnapshot,
+  updatePreviewCacheSnapshot,
+} from "../image-preview-experience/gallery/preview-cache-bridge";
+import { buildLeadCaptureStep } from "@/lib/ai-form/components/structural-steps";
+import {
   type FunctionCallOutput,
 } from "./step-engine/utils/function-calls";
 import { loadFormState, normalizeFormState, saveFormState } from "./step-engine/utils/form-state";
 import { extractFirstName, personalizeStepCopy } from "./step-engine/utils/personalization";
 import { buildAnsweredQA, getMetricGain, safeStableJsonForPricingContext } from "./step-engine/utils/pricing-context";
+import { buildStepJoggerSteps } from "./step-engine/utils/step-jogger";
+import {
+  fetchAndAppendGenerateStepsBatch,
+} from "./step-engine/utils/generate-steps-batch";
+import { LOCAL_SKELETON_FLOW_MODE } from "./step-engine/utils/build-local-skeleton";
 import {
   countPreviewGateQuestions,
+  isBootstrapStepIdValue,
   isPreviewGateQuestionStep,
   isQuestionStepForAskedIds,
   isStructuralStep,
@@ -115,11 +126,6 @@ interface StepEngineProps {
   onMeta?: (meta: { [key: string]: any }) => void;
 }
 
-function isBootstrapStepIdValue(stepId: string | null | undefined): boolean {
-  const id = String(stepId || "");
-  return id.startsWith(DETERMINISTIC_SERVICE_ID) || id === DETERMINISTIC_CONSENT_ID || id === DETERMINISTIC_STYLE_ID;
-}
-
 export function StepEngine({
   instanceId,
   sessionScopeKey,
@@ -135,47 +141,23 @@ export function StepEngine({
   showBrandingHeader = false,
   onMeta
 }: StepEngineProps) {
-  const legacyBudgetUploadEnabled = !disableLegacyBudgetUploadSteps;
-  const excludedAdventureStepIds = useMemo(
-    () =>
-      legacyBudgetUploadEnabled
-        ? []
-        : [
-            DETERMINISTIC_BUDGET_ID,
-            DETERMINISTIC_SCENE_IMAGE_ID,
-            DETERMINISTIC_USER_IMAGE_ID,
-            DETERMINISTIC_PRODUCT_IMAGE_ID,
-          ],
-    [legacyBudgetUploadEnabled]
-  );
+  const {
+    excludedAdventureStepIds,
+    legacyBudgetUploadEnabled,
+    showProgressBar,
+    showStepDescriptions,
+    effectiveSessionScopeKey,
+  } = useStepEngineUiConfig({
+    instanceId,
+    sessionScopeKey,
+    disableLegacyBudgetUploadSteps,
+    flowLayout,
+    formUI,
+  });
   const REFINEMENT_UPLOAD_STEP_ID = "step-refinement-upload-scene-image";
   const { setFacts } = useExperienceState();
   const searchParams = useSearchParams();
   const { theme, config: designConfig } = useFormTheme();
-  const effectiveSessionScopeKey = sessionScopeKey || instanceId;
-  const normalizeBool = (value: any): boolean | null => {
-    if (value === true) return true;
-    if (value === false) return false;
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-      return null;
-    }
-    if (typeof value === "string") {
-      const v = value.trim().toLowerCase();
-      if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
-      if (v === "false" || v === "0" || v === "no" || v === "off") return false;
-      return null;
-    }
-    return null;
-  };
-  // Prefer consolidated `instances.config.form_*` keys when present; fall back to legacy flow_layout flags.
-  const uiShowProgressBar = normalizeBool(formUI?.showProgressBar);
-  const uiShowStepDescriptions = normalizeBool(formUI?.showStepDescriptions);
-  const showProgressBar =
-    uiShowProgressBar !== null ? uiShowProgressBar : flowLayout?.showProgressBar !== false;
-  const showStepDescriptions =
-    uiShowStepDescriptions !== null ? uiShowStepDescriptions : flowLayout?.showStepNumbers !== false;
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const batchingRef = useRef(false);
   const initialAutofetchRef = useRef(false);
@@ -227,14 +209,13 @@ export function StepEngine({
   const [initialQuestionCountSnapshot, setInitialQuestionCountSnapshot] = useState<number | null>(null);
   // Never show image preview until we have received at least one generate-steps response that returned steps.
   const [hasReceivedQuestionsFromGenerateSteps, setHasReceivedQuestionsFromGenerateSteps] = useState(false);
-  const [budgetApiRange, setBudgetApiRange] = useState<{ min: number; max: number; currency: string } | null>(null);
-  const budgetApiLoadedSessionRef = useRef<string | null>(null);
   const devModeEnabled = useMemo(() => isDevModeEnabled(), []);
   const layoutDebugEnabled = useMemo(() => {
     const v = (searchParams.get("layout_debug") || "").trim().toLowerCase();
     return v === "1" || v === "true" || v === "yes" || v === "on";
   }, [searchParams]);
   const previousSelectedServiceIdRef = useRef<string | null>(null);
+  const pricedGridPresentedRunIdRef = useRef<string | null>(null);
   
   const { trackStepStart, trackStepComplete } = useFormMetrics({
     instanceId,
@@ -244,176 +225,34 @@ export function StepEngine({
   });
 	  const contextExtra = useMemo(() => ({ useCase: config?.useCase }), [config?.useCase]);
 	  const sessionId = flowPlan?.sessionId || "";
-
-	  // Dark mode is disabled for now; the form design config owns colors.
-	  // Keep this effect above any early returns to avoid hook-order issues.
-	  useEffect(() => {
-	    if (typeof document === "undefined") return;
-	    document.documentElement.classList.remove("dark");
-	    try {
-	      window.localStorage.setItem("sif_theme", "light");
-	    } catch {}
-	  }, []);
-
-  const optionalSceneImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_SCENE_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: {
-        required: false,
-        maxFiles: 1,
-        accept: "image/*",
-        uploadRole: "sceneImage",
-        camera: true,
-      },
-      copy: {
-        headline: "Have a photo handy?",
-        subtext: "Optional — upload one for tailored results, or skip and we'll generate concept ideas.",
-      },
-    }),
-    []
-  );
-
-  const requiredSceneImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_SCENE_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: {
-        required: true,
-        maxFiles: 1,
-        accept: "image/*",
-        uploadRole: "sceneImage",
-        camera: true,
-      },
-      copy: {
-        headline: "Upload a photo of the space",
-        subtext: "Upload (or take) a photo of the room/area so we can generate the preview.",
-      },
-    }),
-    []
-  );
-
-  const requiredUserImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_USER_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: {
-        required: true,
-        maxFiles: 1,
-        accept: "image/*",
-        uploadRole: "userImage",
-        camera: true,
-      },
-      copy: {
-        headline: "Upload a photo of the person",
-        subtext: "Upload (or take) a photo so we can generate the try-on preview.",
-      },
-    }),
-    []
-  );
-
-  const requiredProductImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_PRODUCT_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: {
-        required: true,
-        maxFiles: 1,
-        accept: "image/*",
-        uploadRole: "productImage",
-        camera: false,
-      },
-      copy: {
-        headline: "Upload a photo of the product",
-        subtext: "Upload a clear product photo so we can place it accurately in the preview.",
-      },
-    }),
-    []
-  );
-
-  const normalizedUseCase = useMemo((): "tryon" | "scene-placement" | "scene" => {
-    const raw = String(config?.useCase || "")
-      .trim()
-      .toLowerCase()
-      .replace(/_/g, "-")
-      .replace(/\s+/g, "-");
-    if (raw === "tryon" || raw === "try-on") return "tryon";
-    if (raw === "scene-placement") return "scene-placement";
-    if (raw === "scene") return "scene";
-    return "scene";
-  }, [config?.useCase]);
-
-  const desiredDeterministicUploadSteps = useMemo(() => {
-    // Upload step(s) are a deterministic checkpoint before preview generation.
-    // This ensures users see/provide the anchor image before the first generate run.
-    if (normalizedUseCase === "tryon") return [requiredUserImageStep, requiredProductImageStep];
-    if (normalizedUseCase === "scene-placement") return [requiredSceneImageStep, requiredProductImageStep];
-    return [optionalSceneImageStep];
-  }, [
-    normalizedUseCase,
-    optionalSceneImageStep,
-    requiredProductImageStep,
-    requiredSceneImageStep,
-    requiredUserImageStep,
-  ]);
-
-  const deterministicBudgetStep: StepDefinition = useMemo(() => {
-    const cfg = (config as any)?.previewPricing;
-    const apiMin = Number(budgetApiRange?.min);
-    const apiMax = Number(budgetApiRange?.max);
-    const hasApiBounds = Number.isFinite(apiMin) && Number.isFinite(apiMax) && apiMin > 0 && apiMax > 0;
-    const cfgMin = Number(cfg?.totalMin);
-    const cfgMax = Number(cfg?.totalMax);
-    const currency =
-      typeof budgetApiRange?.currency === "string" && budgetApiRange.currency.trim()
-        ? budgetApiRange.currency.trim().toUpperCase()
-        : "USD";
-    const defaultMin = normalizedUseCase === "tryon" ? 500 : 2000;
-    const defaultMax = normalizedUseCase === "tryon" ? 10000 : 50000;
-    const derived = deriveBudgetSliderRange(cfgMin, cfgMax, defaultMin, defaultMax);
-    const min = hasApiBounds ? Math.min(apiMin, apiMax) : derived.min;
-    const max = hasApiBounds ? Math.max(apiMin, apiMax) : derived.max;
-    const step = hasApiBounds ? Math.max(100, roundBudgetStep(max - min)) : derived.step;
-    return {
-      id: DETERMINISTIC_BUDGET_ID,
-      componentType: "slider",
-      intent: "collect_context",
-      data: {
-        required: true,
-        min,
-        max,
-        step: Math.max(100, step),
-        currency,
-        unit: "$",
-        unitType: "currency",
-        format: "currency",
-      },
-      copy: {
-        headline: "What budget range should we design around?",
-        subtext: "Move the slider to set your target spend so pricing and image quality stay aligned.",
-      },
-    };
-  }, [budgetApiRange, config, normalizedUseCase]);
-
-  const budgetSliderConfig = useMemo(() => {
-    const data = (deterministicBudgetStep as any)?.data || {};
-    return {
-      min: Number(data.min ?? 2000),
-      max: Number(data.max ?? 50000),
-      step: Number(data.step ?? 500),
-      currency: typeof data.currency === "string" && data.currency.trim() ? String(data.currency).trim().toUpperCase() : "USD",
-    };
-  }, [deterministicBudgetStep]);
+  const localSkeletonMode = flowPlan?.mode === LOCAL_SKELETON_FLOW_MODE;
+  const { previewCacheSnapshot } = usePreviewCacheBridge({ instanceId, sessionId });
+  useForceLightDocumentTheme();
 
   const handleFlowComplete = useCallback(
     (allData: Record<string, any>) => {
       if (flowCompletedRef.current) return;
       flowCompletedRef.current = true;
       setFlowCompleted(true);
+      if (localSkeletonMode) {
+        if (instanceId && sessionId) {
+          updatePreviewCacheSnapshot(instanceId, sessionId, (cache) => {
+            return {
+              ...(cache ?? {}),
+              runs: [],
+              activeRunId: null,
+              selectedConceptIndex: null,
+              viewMode: "gallery",
+              status: "idle",
+              message: null,
+              error: null,
+              updatedAt: Date.now(),
+            };
+          });
+        }
+        setPreviewEverEnabled(true);
+        setPreviewVisible(true);
+      }
 
       if (sessionId) {
         emitTelemetry({
@@ -440,7 +279,7 @@ export function StepEngine({
         onFlowComplete(allData);
       }
     },
-    [instanceId, onFlowComplete, sessionId]
+    [instanceId, localSkeletonMode, onFlowComplete, sessionId]
   );
 
   const {
@@ -467,6 +306,25 @@ export function StepEngine({
     onFlowComplete: handleFlowComplete,
     extra: contextExtra,
     excludedStepIds: excludedAdventureStepIds,
+    // Local skeleton: never wait for JIT generate-steps batching; only image-gen / structural append paths apply.
+    isReady: localSkeletonMode,
+  });
+  const {
+    budgetSliderConfig,
+    budgetValue,
+    deterministicBudgetStep,
+    desiredDeterministicUploadSteps,
+    handleBudgetChange,
+    normalizedUseCase,
+  } = useStepEngineBudget({
+    config,
+    stateStepData: state?.stepData,
+    stateSteps: state?.steps || [],
+    instanceId,
+    sessionId,
+    hasReceivedQuestionsFromGenerateSteps,
+    legacyBudgetUploadEnabled,
+    updateStepData,
   });
   const serviceCatalogSnapshot = useMemo(
     () => (sessionId ? loadServiceCatalog(sessionId) : null),
@@ -477,6 +335,18 @@ export function StepEngine({
     [state?.stepData]
   );
   const selectedServiceMeta = selectedServiceId ? (serviceCatalogSnapshot?.byServiceId as any)?.[selectedServiceId] : null;
+  const activePreviewRun = useMemo(
+    () => getActivePreviewRunSnapshot(previewCacheSnapshot),
+    [previewCacheSnapshot]
+  );
+  const pricedImageGridStep = useMemo(
+    () =>
+      buildDeterministicPricedImageGridStep({
+        cache: previewCacheSnapshot,
+        run: activePreviewRun,
+      }),
+    [activePreviewRun, previewCacheSnapshot]
+  );
   const deterministicStyleStep = useMemo(() => {
     const fromSelected = buildDeterministicStyleStep(selectedServiceMeta);
     if (fromSelected) return fromSelected;
@@ -490,241 +360,26 @@ export function StepEngine({
     return buildDeterministicStyleStep(null);
   }, [selectedServiceMeta, serviceCatalogSnapshot]);
 
-  const budgetValue = useMemo((): number | null => {
-    const raw = (state?.stepData as any)?.[DETERMINISTIC_BUDGET_ID];
-    const v = Array.isArray(raw) ? raw[0] : raw;
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
-  }, [state?.stepData]);
-
-  useEffect(() => {
-    if (!legacyBudgetUploadEnabled) return;
-    if (!sessionId || !instanceId) return;
-    if (!hasReceivedQuestionsFromGenerateSteps) return;
-    if (budgetApiLoadedSessionRef.current === sessionId) return;
-    budgetApiLoadedSessionRef.current = sessionId;
-
-    const stepData = (state?.stepData as any) || {};
-    const questionStepIds = (state?.steps || [])
-      .filter((step) => isQuestionStepForAskedIds(step))
-      .map((step) => String((step as any)?.id || ""))
-      .filter(Boolean);
-
-    fetch(`/api/ai-form/${instanceId}/pricing`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        sessionId,
-        stepDataSoFar: stepData,
-        askedStepIds: questionStepIds,
-        noCache: false,
-        useCase: config?.useCase,
-      }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Budget pricing ${r.status}`))))
-      .then((json: any) => {
-        const estimate = json?.estimate && typeof json.estimate === "object" ? json.estimate : json;
-        const range = estimate?.servicePriceRange && typeof estimate.servicePriceRange === "object"
-          ? estimate.servicePriceRange
-          : null;
-        const low = Number(range?.low ?? estimate?.totalMin);
-        const high = Number(range?.high ?? estimate?.totalMax);
-        if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0) return;
-        const currency =
-          typeof estimate?.currency === "string" && estimate.currency.trim() ? String(estimate.currency).trim().toUpperCase() : "USD";
-        setBudgetApiRange({ min: Math.min(low, high), max: Math.max(low, high), currency });
-      })
-      .catch((e) => {
-        console.warn("[StepEngine] budget pricing seed failed", e);
-      });
-  }, [config?.useCase, hasReceivedQuestionsFromGenerateSteps, instanceId, legacyBudgetUploadEnabled, sessionId, state?.stepData, state?.steps]);
-
-  const handleBudgetChange = useCallback(
-    (value: number) => {
-      updateStepData(DETERMINISTIC_BUDGET_ID, value);
-    },
-    [updateStepData]
-  );
-
-  // Async refinements: only fetch after the first concept is shown and lead capture
-  // has been explicitly completed for this session. Then prepend a deterministic
-  // upload step and inject refinement questions immediately after the user's
-  // current post-preview position so they do not land behind the current step.
-  const refinementsFetchedRef = useRef(false);
-  const refinementAdvanceFromStepIdRef = useRef<string | null>(null);
-  const pendingRefinementFocusStepIdRef = useRef<string | null>(null);
-  const [awaitingRefinementAdvance, setAwaitingRefinementAdvance] = useState(false);
-  useEffect(() => {
-    if (!previewHasImage || !flowPlan?.sessionId || !instanceId) return;
-    if (!effectiveLeadCompleteForPreviewFlow) return;
-    if (refinementsFetchedRef.current) return;
-    refinementsFetchedRef.current = true;
-
-    const steps = state?.steps || [];
-    const stepData = state?.stepData || {};
-    const questionStepIds = steps
-      .filter((s: any) => isQuestionStepForAskedIds(s))
-      .map((s: any) => String((s as any)?.id || ""))
-      .filter(Boolean);
-
-    fetch(`/api/ai-form/${instanceId}/refinements`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        sessionId: flowPlan.sessionId,
-        stepDataSoFar: stepData,
-        askedStepIds: questionStepIds,
-      }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Refinements ${r.status}`))))
-      .then((json: any) => {
-        const miniSteps = Array.isArray(json?.miniSteps) ? json.miniSteps : [];
-        // Skip refinement upload when user already went through step-upload-scene-image
-        const alreadyHasSceneUpload = steps.some(
-          (s: any) => String((s as any)?.id || "") === DETERMINISTIC_SCENE_IMAGE_ID
-        );
-        const deterministicUploadStep = {
-          id: REFINEMENT_UPLOAD_STEP_ID,
-          type: "file_upload",
-          question: "",
-          humanism: "Start from your real space for better refinements.",
-          required: false,
-          allow_skip: true,
-          upload_role: "scene",
-          blueprint: { presentation: { continue_label: "Continue", allow_skip: true } },
-        } as any;
-        const incoming = alreadyHasSceneUpload ? miniSteps : [deterministicUploadStep, ...miniSteps];
-        const existingIds = new Set(
-          steps.map((s: any) => String((s as any)?.id || "")).filter(Boolean)
-        );
-        incoming.forEach((step: any) => {
-          const stepId = String((step as any)?.id || "");
-          if (!stepId || !existingIds.has(stepId)) return;
-          patchStep(stepId, {
-            __refinementStep: stepId !== REFINEMENT_UPLOAD_STEP_ID,
-            __refinementUploadStep: stepId === REFINEMENT_UPLOAD_STEP_ID,
-          });
-        });
-        const deduped = incoming.filter((s: any) => {
-          const id = String((s as any)?.id || "");
-          return id && !existingIds.has(id);
-        });
-        if (deduped.length === 0) return;
-
-        const markedDeduped = deduped.map((step: any) => {
-          const stepId = String((step as any)?.id || "");
-          if (!stepId) return step;
-          return {
-            ...step,
-            __refinementStep: stepId !== REFINEMENT_UPLOAD_STEP_ID,
-            __refinementUploadStep: stepId === REFINEMENT_UPLOAD_STEP_ID,
-          };
-        });
-
-        const firstRefinementQuestionId =
-          markedDeduped.find((s: any) => String((s as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID)?.id || null;
-
-        const currentIdx = state?.currentStepIndex ?? 0;
-        const designerIdx = steps.findIndex((s: any) => String((s as any)?.id || "") === "step-designer");
-        const minPreviewInsertIndex = designerIdx >= 0 ? designerIdx + 1 : 0;
-        const insertAtIndex = Math.min(
-          steps.length,
-          Math.max(minPreviewInsertIndex, currentIdx + 1)
-        );
-        // Auto-advance if user is already at/past the insertion point (finished all planner questions).
-        const userIsWaiting = currentIdx >= steps.length - 1;
-        if (userIsWaiting && currentStep?.id) {
-          refinementAdvanceFromStepIdRef.current = String(currentStep.id);
-          setAwaitingRefinementAdvance(true);
-        }
-        if (!userIsWaiting && currentStep && isStructuralStep(currentStep) && firstRefinementQuestionId) {
-          pendingRefinementFocusStepIdRef.current = String(firstRefinementQuestionId);
-        }
-        addSteps(markedDeduped, userIsWaiting, { insertAtIndex });
-        if (!userIsWaiting) {
-          refinementAdvanceFromStepIdRef.current = null;
-          setAwaitingRefinementAdvance(false);
-        }
-      })
-      .catch((e) => {
-        refinementsFetchedRef.current = false; // Allow retry on error
-        refinementAdvanceFromStepIdRef.current = null;
-        setAwaitingRefinementAdvance(false);
-        if (typeof console !== "undefined" && console.warn) {
-          console.warn("[StepEngine] Refinements fetch failed", e);
-        }
-      });
-  }, [
+  const { awaitingRefinementAdvance } = useRefinementOrchestration({
+    enabled: !localSkeletonMode,
     previewHasImage,
-    flowPlan?.sessionId,
+    flowPlanSessionId: flowPlan?.sessionId,
     instanceId,
     effectiveLeadCompleteForPreviewFlow,
     addSteps,
-    currentStep?.id,
+    currentStep,
     patchStep,
-    state?.currentStepIndex,
-    state?.stepData,
-    state?.steps,
-  ]);
-
-  useEffect(() => {
-    if (!awaitingRefinementAdvance) return;
-    const fromStepId = refinementAdvanceFromStepIdRef.current;
-    const currentId = String(currentStep?.id || "");
-    if (!fromStepId || !currentId) return;
-    if (currentId !== fromStepId) {
-      refinementAdvanceFromStepIdRef.current = null;
-      setAwaitingRefinementAdvance(false);
-    }
-  }, [awaitingRefinementAdvance, currentStep?.id]);
-
-  useEffect(() => {
-    const targetStepId = pendingRefinementFocusStepIdRef.current;
-    if (!targetStepId) return;
-    const steps = state?.steps || [];
-    const targetIndex = steps.findIndex((step: any) => String((step as any)?.id || "") === targetStepId);
-    if (targetIndex < 0) return;
-    if (String(currentStep?.id || "") === targetStepId) {
-      pendingRefinementFocusStepIdRef.current = null;
-      return;
-    }
-    pendingRefinementFocusStepIdRef.current = null;
-    goToStep(targetIndex);
-  }, [currentStep?.id, goToStep, state?.steps]);
-
-  useEffect(() => {
-    if (previewHasImage) return;
-    refinementAdvanceFromStepIdRef.current = null;
-    pendingRefinementFocusStepIdRef.current = null;
-    pendingRefinementPreviewAdvanceRef.current = null;
-    pendingRefinementPreviewAdvanceStageRef.current = "idle";
-    setAwaitingRefinementAdvance(false);
-  }, [previewHasImage]);
-
-  useEffect(() => {
-    const stage = pendingRefinementPreviewAdvanceStageRef.current;
-    const pending = pendingRefinementPreviewAdvanceRef.current;
-    if (!pending) {
-      pendingRefinementPreviewAdvanceStageRef.current = "idle";
-      return;
-    }
-    if (stage === "waiting_for_start") {
-      if (!previewAutoGenerationBusy) return;
-      pendingRefinementPreviewAdvanceStageRef.current = "waiting_for_finish";
-      return;
-    }
-    if (stage !== "waiting_for_finish" || previewAutoGenerationBusy) return;
-    if (!currentStep || currentStep.id !== pending.stepId) {
-      pendingRefinementPreviewAdvanceRef.current = null;
-      pendingRefinementPreviewAdvanceStageRef.current = "idle";
-      return;
-    }
-    pendingRefinementPreviewAdvanceRef.current = null;
-    pendingRefinementPreviewAdvanceStageRef.current = "idle";
-    void goToNextStep(pending.data);
-  }, [currentStep, goToNextStep, previewAutoGenerationBusy]);
+    stateCurrentStepIndex: state?.currentStepIndex ?? 0,
+    stateStepData: state?.stepData,
+    stateSteps: state?.steps || [],
+    isStructuralStep,
+    goToStep,
+    goToNextStep,
+    refinementUploadStepId: REFINEMENT_UPLOAD_STEP_ID,
+    pendingRefinementPreviewAdvanceRef,
+    pendingRefinementPreviewAdvanceStageRef,
+    previewAutoGenerationBusy,
+  });
 
   const effectiveCurrentStep = useMemo(
     () => (currentStep ? personalizeStepCopy(currentStep, state?.stepData || {}, formState) : currentStep),
@@ -902,6 +557,64 @@ export function StepEngine({
     requestOptionImagesForStep,
     sessionId,
     shouldProgressivelyGenerateOptionImages,
+    state?.steps,
+  ]);
+
+  useEffect(() => {
+    if (!sessionId || !instanceId || !state?.steps?.length) return;
+    if (!pricedImageGridStep) return;
+
+    const existingIndex = state.steps.findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
+    if (existingIndex >= 0) {
+      patchStep(DETERMINISTIC_PRICED_IMAGE_GRID_ID, pricedImageGridStep as any);
+      return;
+    }
+
+    const stepsToInsert: UIStep[] = [pricedImageGridStep as UIStep];
+    if (!effectiveLeadCompleteForPreviewFlow && !state.steps.some((step: any) => String((step as any)?.id || "") === "step-lead-capture")) {
+      stepsToInsert.push(buildLeadCaptureStep({ mode: "email", requiredInputs: ["email"], compact: true, gateContext: "estimate" }) as UIStep);
+    }
+    addSteps(stepsToInsert, false, {
+      insertAtIndex: Math.min(state.steps.length, (state.currentStepIndex ?? 0) + 1),
+    });
+  }, [
+    addSteps,
+    effectiveLeadCompleteForPreviewFlow,
+    instanceId,
+    patchStep,
+    pricedImageGridStep,
+    sessionId,
+    state?.currentStepIndex,
+    state?.steps,
+  ]);
+
+  useEffect(() => {
+    if (!activePreviewRun?.id) return;
+    if (!state?.steps?.length) return;
+    const pricedAnswer = (state.stepData as any)?.[DETERMINISTIC_PRICED_IMAGE_GRID_ID];
+    const answeredRunId =
+      pricedAnswer && typeof pricedAnswer === "object" && typeof (pricedAnswer as any).previewRunId === "string"
+        ? String((pricedAnswer as any).previewRunId)
+        : null;
+    if (hasMeaningfulAnswer(pricedAnswer) && answeredRunId === activePreviewRun.id) return;
+    if (hasMeaningfulAnswer(pricedAnswer) && answeredRunId && answeredRunId !== activePreviewRun.id) {
+      // New preview run generated: force a fresh priced-image selection for this run.
+      updateStepData(DETERMINISTIC_PRICED_IMAGE_GRID_ID, null);
+      updateStepData("__selectedPreviewImage", null);
+    }
+    const pricedIndex = state.steps.findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
+    if (pricedIndex < 0) return;
+    if (currentStep?.id === DETERMINISTIC_PRICED_IMAGE_GRID_ID || currentStep?.id === "step-lead-capture") return;
+    if (pricedGridPresentedRunIdRef.current === activePreviewRun.id && (state.currentStepIndex ?? 0) === pricedIndex) return;
+    pricedGridPresentedRunIdRef.current = activePreviewRun.id;
+    goToStep(pricedIndex);
+  }, [
+    activePreviewRun?.id,
+    currentStep?.id,
+    goToStep,
+    updateStepData,
+    state?.currentStepIndex,
+    state?.stepData,
     state?.steps,
   ]);
   // Auto-skip deterministic upload steps that have already been answered (image already uploaded).
@@ -1324,7 +1037,7 @@ export function StepEngine({
     if (!legacyBudgetUploadEnabled) return;
     if (!flowPlan?.sessionId) return;
     if (!state?.steps || state.steps.length === 0) return;
-    if (!hasReceivedQuestionsFromGenerateSteps) return;
+    if (!localSkeletonMode && !hasReceivedQuestionsFromGenerateSteps) return;
     if (previewHasImage) return;
 
     const desiredDeterministicSteps = [deterministicBudgetStep, ...desiredDeterministicUploadSteps];
@@ -1445,6 +1158,7 @@ export function StepEngine({
     flowPlan?.sessionId,
     hasReceivedQuestionsFromGenerateSteps,
     legacyBudgetUploadEnabled,
+    localSkeletonMode,
     patchStep,
     previewHasImage,
     state,
@@ -1495,19 +1209,6 @@ export function StepEngine({
     }
   }, [state?.steps]);
 
-  // Log state changes
-  useEffect(() => {
-    if (state) {
-      console.log('[StepEngine] State updated', {
-        currentStepIndex: state.currentStepIndex,
-        totalSteps: state.steps.length,
-        currentStepId: state.steps[state.currentStepIndex]?.id,
-        completedStepsCount: state.completedSteps?.size || 0,
-        stepDataKeys: Object.keys(state.stepData || {}),
-        stepDataCount: Object.keys(state.stepData || {}).length,
-      });
-    }
-  }, [state?.currentStepIndex, state?.steps.length, state?.stepData]);
 
   // Track rendered steps to prevent duplicates (persist across re-renders)
   const renderedStepsRef = useRef<Set<string>>(new Set());
@@ -1609,836 +1310,72 @@ export function StepEngine({
     saveFormState(flowPlan.sessionId, nextState);
   }, [flowPlan?.sessionId, formState, isStepAnsweredForCounts, state?.stepData, state?.steps]);
 
-  // Log context state changes
-  useEffect(() => {
-    if (contextState) {
-      console.log('[StepEngine] Context state updated', {
-        entriesCount: contextState.entries?.length || 0,
-        entries: contextState.entries?.map(e => ({
-          question: e.question?.slice(0, 50),
-          answer: typeof e.answer === 'string' ? e.answer.slice(0, 50) : e.answer,
-        })) || [],
-      });
-    }
-  }, [contextState]);
-
-  useEffect(() => {
-    functionCallOutputsRef.current = getFunctionCallOutputs(state?.stepData || {});
-  }, [state?.stepData]);
-
-  // Execute backend-directed function calls once prerequisites are met.
-  // Results are persisted in `state.stepData.__functionCallOutputs` (step-state localStorage is keyed by instanceId).
-  useEffect(() => {
-    if (!state || !instanceId) return;
-
-    // IMPORTANT:
-    // Function-call steps are a backend-driven mechanism, but they must never spam network calls.
-    // Until we have a strict allowlist + UX surfaces for these calls, keep auto-execution OFF by default.
-    // Enable locally via: NEXT_PUBLIC_ENABLE_AI_FORM_FUNCTION_CALLS=true
-    if (process.env.NEXT_PUBLIC_ENABLE_AI_FORM_FUNCTION_CALLS !== "true") return;
-
-    const stepData = state.stepData || {};
-    const outputs = getFunctionCallOutputs(stepData);
-    const steps = state.steps || [];
-
-    const candidates: Array<{ callKey: string; functionCall: FunctionCallHint }> = [];
-    for (const s of steps) {
-      const stepId = (s as any)?.id;
-      const blockCalls = extractCompositeBlockCalls(s);
-      // If a composite step has block-level calls, prefer those and ignore a step-level functionCall (dedupe).
-      if (blockCalls.length > 0) {
-        candidates.push(...blockCalls);
-      } else if (stepId && isFunctionCallStep(s)) {
-        candidates.push({ callKey: String(stepId), functionCall: (s as any).functionCall as FunctionCallHint });
-      }
-    }
-    if (candidates.length === 0) return;
-
-    const commitOutput = (stepId: string, next: FunctionCallOutput) => {
-      const merged = { ...functionCallOutputsRef.current, [stepId]: next };
-      functionCallOutputsRef.current = merged;
-      updateStepData("__functionCallOutputs", merged);
-    };
-
-    const run = async (callKey: string, functionCall: FunctionCallHint) => {
-      const startedAt = Date.now();
-      const triggerKeys = Array.isArray(functionCall?.triggerAfterStepKeys) ? functionCall.triggerAfterStepKeys : [];
-      const { satisfied, total } = getTriggerProgress(state.stepData || {}, triggerKeys);
-      const minCount = getMinTriggerCount(functionCall, triggerKeys);
-
-      try {
-        // Progressive trigger semantics:
-        // - If there are triggers, run as soon as we've satisfied `minCount` of them.
-        // - If there are no triggers, run immediately.
-        const readyToRun = total === 0 ? true : satisfied >= minCount;
-        if (!readyToRun) {
-          // Not ready yet: persist progress without starting the call.
-          const existing = functionCallOutputsRef.current?.[callKey] ?? null;
-          commitOutput(callKey, {
-            status: existing?.status === "complete" ? "complete" : "idle",
-            functionCall,
-            triggerSatisfiedCount: satisfied,
-            triggerTotalCount: total,
-            triggerMinCount: minCount,
-            startedAt: existing?.startedAt ?? null,
-            completedAt: existing?.completedAt ?? null,
-            error: existing?.error ?? null,
-            result: existing?.result ?? null,
-          });
-          return;
-        }
-
-        functionCallInFlightRef.current.add(callKey);
-        commitOutput(callKey, {
-          status: "running",
-          functionCall,
-          triggerSatisfiedCount: satisfied,
-          triggerTotalCount: total,
-          triggerMinCount: minCount,
-          startedAt,
-          completedAt: null,
-          error: null,
-          result: null,
-        });
-
-        const resp = await fetch(`/api/ai-form/${encodeURIComponent(instanceId)}/execute-function`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            sessionId: flowPlan?.sessionId,
-            stepId: callKey,
-            functionCall,
-            stepDataSoFar: state.stepData || {},
-            existingStepIds: steps.map((s: any) => s?.id).filter(Boolean),
-            useCase: config?.useCase,
-            config,
-          }),
-        });
-
-        const json = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          const message =
-            typeof (json as any)?.error === "string" ? (json as any).error : `Function execution failed (${resp.status})`;
-          throw new Error(message);
-        }
-
-        commitOutput(callKey, {
-          status: "complete",
-          functionCall,
-          triggerSatisfiedCount: satisfied,
-          triggerTotalCount: total,
-          triggerMinCount: minCount,
-          startedAt: functionCallOutputsRef.current?.[callKey]?.startedAt ?? startedAt,
-          completedAt: Date.now(),
-          error: null,
-          result: json,
-        });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : "Unknown error";
-        commitOutput(callKey, {
-          status: "error",
-          functionCall,
-          triggerSatisfiedCount: satisfied,
-          triggerTotalCount: total,
-          triggerMinCount: minCount,
-          startedAt: functionCallOutputsRef.current?.[callKey]?.startedAt ?? startedAt,
-          completedAt: Date.now(),
-          error: message,
-          result: null,
-        });
-      } finally {
-        functionCallInFlightRef.current.delete(callKey);
-      }
-    };
-
-    for (const c of candidates) {
-      const callKey = c.callKey;
-      const functionCall = c.functionCall;
-      if (!callKey || typeof callKey !== "string" || !functionCall) continue;
-
-      // IMPORTANT: Steps (question flow) and experiences (preview rail) are separate systems.
-      // We do NOT auto-run step-embedded image preview generation. The preview rail is enabled by frontend gating logic.
-      const callName = typeof functionCall?.name === "string" ? functionCall.name : null;
-      if (callName === "generateInitialImage") {
-        // Still record progress in the UI (idle) but never execute.
-        const triggerKeys = Array.isArray(functionCall?.triggerAfterStepKeys) ? functionCall.triggerAfterStepKeys : [];
-        const { satisfied, total } = getTriggerProgress(stepData, triggerKeys);
-        const minCount = getMinTriggerCount(functionCall, triggerKeys);
-        const existing = outputs?.[callKey];
-        const status = existing?.status;
-        if (status !== "complete" && status !== "running") {
-          commitOutput(callKey, {
-            status: "idle",
-            functionCall,
-            triggerSatisfiedCount: satisfied,
-            triggerTotalCount: total,
-            triggerMinCount: minCount,
-            startedAt: existing?.startedAt ?? null,
-            completedAt: existing?.completedAt ?? null,
-            error: null,
-            result: existing?.result ?? null,
-          });
-        }
-        continue;
-      }
-
-      const existing = outputs?.[callKey];
-      const status = existing?.status;
-      if (status === "running") continue;
-      if (functionCallInFlightRef.current.has(callKey)) continue;
-
-      const triggerKeys = Array.isArray(functionCall?.triggerAfterStepKeys) ? functionCall.triggerAfterStepKeys : [];
-      const { satisfied, total } = getTriggerProgress(stepData, triggerKeys);
-      const minCount = getMinTriggerCount(functionCall, triggerKeys);
-
-      const readyToRun = total === 0 ? true : satisfied >= minCount;
-      const shouldStartFirstRun =
-        (status === undefined || status === "idle" || status === "error") && readyToRun;
-      if (!shouldStartFirstRun) continue;
-
-      void run(callKey, functionCall);
-    }
-  }, [config, flowPlan?.sessionId, instanceId, state?.steps, state?.stepData, updateStepData]);
-
-	  useEffect(() => {
-	    if (!state || !sessionId) return;
-    const prevIndex = prevIndexRef.current;
-    const nextIndex = state.currentStepIndex;
-    if (prevIndex !== null && nextIndex > prevIndex + 1) {
-      for (let i = prevIndex + 1; i < nextIndex; i += 1) {
-        const skipped = state.steps[i];
-        if (!skipped) continue;
-        const stepId = (skipped as any).id;
-        if (!stepId) continue;
-        const meta = stepMetaRef.current.get(stepId);
-        const isDeterministic =
-          isStructuralStep(skipped) ||
-          isBootstrapStepIdValue(stepId);
-        const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
-        const totalSteps = state?.steps?.length || 0;
-        
-        emitTelemetry({
-          sessionId,
-          instanceId,
-          eventType: "step_skipped",
-          stepId,
-          batchId: normalizeBatchId(meta?.batchId) ?? batchIdFromIndex(formState?.batchIndex) ?? undefined,
-          modelRequestId: meta?.modelRequestId ?? undefined,
-          timestamp: Date.now(),
-          payload: {
-            step_number: i + 1,
-            total_steps: totalSteps,
-            step_type: getStepType(skipped),
-            is_deterministic: isDeterministic,
-            source: stepSource,
-            step_json: skipped, // Full step object
-            from_order: prevIndex + 1,
-            to_order: nextIndex + 1,
-          },
-        });
-      }
-    }
-    prevIndexRef.current = nextIndex;
-  }, [formState?.batchIndex, instanceId, sessionId, state?.currentStepIndex, state?.steps]);
+  useStepEngineFunctionCalls({
+    state,
+    instanceId,
+    flowPlanSessionId: flowPlan?.sessionId,
+    config,
+    updateStepData,
+    functionCallOutputsRef,
+    functionCallInFlightRef,
+    sessionId,
+    prevIndexRef,
+    stepMetaRef,
+    formBatchIndex: formState?.batchIndex,
+  });
 
   const isInitialLoading = Boolean(engineLoading || !flowPlan);
 
   const fetchAndAppendBatch = useCallback(
     async (stepDataSoFar: Record<string, any>, showLoading: boolean = false, wasOnLastStep: boolean = false) => {
       if (!flowPlan?.sessionId) return;
-      if (leadGateLocksQuestionAreaRef.current) {
-        console.log("[StepEngine] Lead gate active; skipping batch fetch");
-        return;
-      }
-      if (batchingRef.current) {
-        console.log('[StepEngine] Batch fetch already in progress, skipping');
-        return;
-      }
-      setBatchError(null);
-      batchingRef.current = true;
-      pendingBatchTraceRef.current = null;
-      let requestedBatchIndex: number | null = null;
-      // Only show loading if explicitly requested (user is on last step)
-      // Otherwise, load silently in background
-      if (showLoading) {
-        setIsBatchLoading(true);
-      }
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const isFresh = params.get("fresh") === "1" || params.get("fresh") === "true";
-        const questionStepIds = (state?.steps || [])
-          .filter((step) => isQuestionStepForAskedIds(step))
-          .map((step) => step.id);
-        
-        // Merge latest state with the triggering payload, but let the triggering payload win.
-        // This preserves explicit clears/skips (e.g. scene upload skipped => null) over stale cached values.
-        const latestStepData = state?.stepData || {};
-        const mergedStepData = { ...latestStepData, ...stepDataSoFar };
-        const serviceCatalogSnapshot = loadServiceCatalog(flowPlan.sessionId);
-        const inferredSingleServiceId = (() => {
-          const byServiceId = serviceCatalogSnapshot?.byServiceId;
-          if (!byServiceId || typeof byServiceId !== "object") return null;
-          const ids = Object.keys(byServiceId).filter(Boolean);
-          return ids.length === 1 ? ids[0] : null;
-        })();
-        if (!pickPrimaryServiceId(mergedStepData) && inferredSingleServiceId) {
-          mergedStepData[DETERMINISTIC_SERVICE_ID] = inferredSingleServiceId;
-          if (mergedStepData.service_primary === undefined) {
-            mergedStepData.service_primary = inferredSingleServiceId;
-          }
-          updateStepData(DETERMINISTIC_SERVICE_ID, inferredSingleServiceId);
-          updateStepData("service_primary", inferredSingleServiceId);
-        }
-        const answeredQA = buildAnsweredQA({ steps: state?.steps || [], stepData: mergedStepData, max: 40 });
-        
-        console.log('[StepEngine] Fetching batch with stepData', {
-          stepDataSoFarKeys: Object.keys(stepDataSoFar),
-          latestStepDataKeys: Object.keys(latestStepData),
-          mergedStepDataKeys: Object.keys(mergedStepData),
-          hasChanges: Object.keys(mergedStepData).length !== Object.keys(stepDataSoFar).length,
-        });
-        
-	        const effectiveFormState = formState
-	          ? { ...formState }
-	          : normalizeFormState({ formId: flowPlan.sessionId }, flowPlan.sessionId);
-	        requestedBatchIndex = effectiveFormState.batchIndex;
-	        if (requestedBatchIndex !== null && completedBatchIndexesRef.current.has(requestedBatchIndex)) {
-	          console.log("[StepEngine] Batch already completed; skipping generate-steps request", { batchIndex: requestedBatchIndex });
-	          return;
-	        }
-        if (requestedBatchIndex !== null && inFlightBatchIndexesRef.current.has(requestedBatchIndex)) {
-          console.log("[StepEngine] Batch already in-flight; skipping generate-steps request", { batchIndex: requestedBatchIndex });
-          return;
-        }
-        if (requestedBatchIndex !== null) inFlightBatchIndexesRef.current.add(requestedBatchIndex);
-        // Ensure we don't keep requesting `batchIndex=0` forever on first load.
-        // `formState` can be null during the first request; still persist the normalized state.
-        if (!formState) {
-          setFormState(effectiveFormState);
-          saveFormState(flowPlan.sessionId, effectiveFormState);
-        }
-
-	        const combinedAskedStepIds = mergeUniqueStrings(
-	          ((formState ?? effectiveFormState)?.askedStepIds ?? []).map((v: any) => String(v || "")).filter(Boolean),
-	          questionStepIds.map((v: any) => String(v || "")).filter(Boolean),
-	        );
-
-	          const selectedServiceId = pickPrimaryServiceId(mergedStepData);
-	          const serviceCatalog = serviceCatalogSnapshot;
-	          const serviceMeta = selectedServiceId ? (serviceCatalog?.byServiceId as any)?.[selectedServiceId] : null;
-	          const cachedServiceSummary =
-	            typeof (effectiveFormState as any)?.serviceSummary === "string" ? String((effectiveFormState as any).serviceSummary).trim() : null;
-	          const perServiceSummary = typeof serviceMeta?.serviceSummary === "string" ? String(serviceMeta.serviceSummary).trim() : null;
-	          const serviceSummary = joinSummaries(cachedServiceSummary, perServiceSummary);
-	          const businessContext =
-	            typeof (config as any)?.businessContext === "string"
-	              ? String((config as any).businessContext).trim()
-	              : typeof (effectiveFormState as any)?.businessContext === "string"
-	                ? String((effectiveFormState as any).businessContext).trim()
-	                : null;
-	          const instanceContext = {
-	            businessContext,
-	            serviceSummary,
-	            industry: {
-	              id: typeof serviceMeta?.industryId === "string" ? serviceMeta.industryId : null,
-	              name:
-	                typeof serviceMeta?.industryName === "string"
-	                  ? serviceMeta.industryName
-	                  : typeof (config as any)?.industry === "string"
-	                    ? String((config as any).industry)
-	                    : null,
-	            },
-	            service: {
-	              id: selectedServiceId,
-	              name: typeof serviceMeta?.serviceName === "string" ? serviceMeta.serviceName : null,
-	            },
-	          };
-
-	        const resp = await fetch(`/api/ai-form/${instanceId}/generate-steps`, {
-		          method: "POST",
-		          headers: { "Content-Type": "application/json", Accept: "application/json" },
-		          cache: "no-store",
-		          body: JSON.stringify({
-		            sessionId: flowPlan.sessionId,
-		            stepDataSoFar: mergedStepData,
-		            askedStepIds: combinedAskedStepIds,
-                debug:
-                  typeof window !== "undefined" &&
-                  (() => {
-                    try {
-                      const sp = new URLSearchParams(window.location.search);
-                      const v = (sp.get("debug") || sp.get("ai_form_debug") || sp.get("form_debug") || "").trim().toLowerCase();
-                      return v === "1" || v === "true" || v === "yes" || v === "on";
-                    } catch {
-                      return false;
-                    }
-                  })(),
-		            // IMPORTANT: Do not send `maxBatches` from the frontend.
-		            // The backend owns call caps; the client only reports current progress + askedStepIds.
-		            formState: {
-		              formId: effectiveFormState.formId,
-		              batchIndex: effectiveFormState.batchIndex,
-		              tokenBudgetTotal: effectiveFormState.tokenBudgetTotal,
-		              tokensUsedSoFar: effectiveFormState.tokensUsedSoFar,
-		              askedStepIds: combinedAskedStepIds,
-		              metricProgress: effectiveFormState.metricProgress,
-		              metricProgressCountedStepIds: effectiveFormState.metricProgressCountedStepIds,
-		              alreadyAskedKeys: combinedAskedStepIds,
-		              totalQuestionSteps: effectiveFormState.totalQuestionSteps,
-		              answeredQuestionCount: effectiveFormState.answeredQuestionCount,
-		              schemaVersion: effectiveFormState.schemaVersion,
-		            },
-	              instanceContext,
-		            answeredQA, // Plain-English "memory" for the model (question + answer pairs)
-		            noCache: isFresh,
-		            useCase: config?.useCase,
-		          }),
-		        });
-        if (!resp.ok) {
-          if (resp.status === 413) {
-            throw new Error("Request too large (413). If you uploaded a photo, try a smaller image.");
-          }
-          throw new Error(`Failed to load next batch: ${resp.status}`);
-        }
-        if (resp.headers.get("X-Streaming-Disabled") === "1") {
-          console.warn("[StepEngine] Streaming disabled for generate-steps response (X-Streaming-Disabled: 1)");
-        }
-
-	        const json = await resp.json().catch(() => ({}));
-          try {
-            const sp = new URLSearchParams(window.location.search);
-            const v = (sp.get("debug") || sp.get("ai_form_debug") || sp.get("form_debug") || "").trim().toLowerCase();
-            const debugEnabled = v === "1" || v === "true" || v === "yes" || v === "on";
-            if (debugEnabled) {
-              console.log("[StepEngine] generate-steps response summary", {
-                status: resp.status,
-                keys: json && typeof json === "object" ? Object.keys(json as any).slice(0, 40) : [],
-                readyForImageGen: (json as any)?.readyForImageGen,
-                callsUsed: (json as any)?.callsUsed,
-                maxCalls: (json as any)?.maxCalls,
-                miniStepsCount: Array.isArray((json as any)?.miniSteps) ? (json as any).miniSteps.length : 0,
-                framesCount: Array.isArray((json as any)?.frames) ? (json as any).frames.length : 0,
-                structuralStepsCount: Array.isArray((json as any)?.structuralSteps)
-                  ? (json as any).structuralSteps.length
-                  : Array.isArray((json as any)?.structural_steps)
-                    ? (json as any).structural_steps.length
-                    : 0,
-              });
-            }
-          } catch {}
-	        const frames: any[] = Array.isArray((json as any)?.frames) ? (json as any).frames : [];
-	        const directMiniSteps: any[] = Array.isArray((json as any)?.miniSteps) ? (json as any).miniSteps : [];
-          const directReadyForImageGen: any = (json as any)?.readyForImageGen;
-        const directCapabilities: any = (json as any)?.capabilities;
-          const directSatiety: any = (json as any)?.satiety;
-          const directCallsUsed: any = (json as any)?.callsUsed;
-          const directMaxCalls: any = (json as any)?.maxCalls;
-          const directDidCall: any = (json as any)?.didCall;
-          const responseRequestId = typeof (json as any)?.requestId === "string" ? String((json as any).requestId) : null;
-          const responseFormPlan = (json as any)?.formPlan ?? null;
-
-	        const newSteps: any[] = [];
-          const directStructuralSteps: any[] = Array.isArray((json as any)?.structuralSteps)
-            ? (json as any).structuralSteps
-            : Array.isArray((json as any)?.structural_steps)
-              ? (json as any).structural_steps
-              : [];
-
-	        let didCallDspy = false;
-	        let sawComplete = false;
-	        let sseError: string | null = null;
-	        let backendCallsUsed: number | null = null;
-	        let backendMaxCalls: number | null = null;
-          let batchReachedPreviewStage = directReadyForImageGen === true;
-          if (responseRequestId) {
-            const batchId = batchIdFromIndex(effectiveFormState.batchIndex);
-            lastBatchMetaRef.current = { batchId, modelRequestId: responseRequestId };
-            lastModelRequestIdRef.current = responseRequestId;
-          }
-          if (responseFormPlan && typeof responseFormPlan === "object" && flowPlan?.sessionId) {
-            saveFormPlan(flowPlan.sessionId, responseFormPlan);
-            const maxBatches =
-              (responseFormPlan as any)?.constraints?.maxBatches ??
-              (responseFormPlan as any)?.form?.constraints?.maxBatches ??
-              null;
-            const n = Number(maxBatches);
-            if (Number.isFinite(n)) backendMaxCalls = Math.max(1, Math.floor(n));
-          }
-	        const directDeterministicCopy =
-	          (json && typeof json === "object" && (json as any).deterministicCopy && typeof (json as any).deterministicCopy === "object" && !Array.isArray((json as any).deterministicCopy))
-	            ? (json as any).deterministicCopy
-	            : null;
-	        if (directMiniSteps.length > 0) {
-	          newSteps.push(...directMiniSteps);
-            didCallDspy = true;
-	        }
-          if (directStructuralSteps.length > 0) {
-            newSteps.push(...directStructuralSteps);
-          }
-          if (directDeterministicCopy && Object.keys(directDeterministicCopy).length > 0) {
-            didCallDspy = true;
-            for (const [stepId, copyPatch] of Object.entries(directDeterministicCopy)) {
-              if (!stepId || !copyPatch || typeof copyPatch !== "object") continue;
-              if (!legacyBudgetUploadEnabled && stepId === DETERMINISTIC_BUDGET_ID) continue;
-              const patch: Record<string, any> = {};
-              if (typeof (copyPatch as any).question === "string") {
-                patch.question = (copyPatch as any).question;
-              }
-              if (stepId === DETERMINISTIC_STYLE_ID) {
-                if (typeof (copyPatch as any).min_selections === "number") patch.min_selections = (copyPatch as any).min_selections;
-                if (typeof (copyPatch as any).max_selections === "number") patch.max_selections = (copyPatch as any).max_selections;
-              }
-              if (stepId === DETERMINISTIC_BUDGET_ID) {
-                const headline = (copyPatch as any).headline ?? (copyPatch as any).question;
-                const subtext = (copyPatch as any).subtext;
-                if (typeof headline === "string" || typeof subtext === "string") {
-                  patch.copy = {
-                    ...((state?.steps || []).find((s: any) => String((s as any)?.id) === stepId) as any)?.copy,
-                    ...(typeof headline === "string" ? { headline } : {}),
-                    ...(typeof subtext === "string" ? { subtext } : {}),
-                  };
-                }
-              }
-              if (Object.keys(patch).length > 0) {
-                patchStep(stepId, patch);
-              }
-            }
-          }
-          if (typeof directReadyForImageGen === "boolean") {
-            updateStepData("__readyForImageGen", directReadyForImageGen);
-          }
-        if (directCapabilities && typeof directCapabilities === "object" && !Array.isArray(directCapabilities)) {
-          updateStepData("__capabilities", directCapabilities);
-        } else if (typeof directReadyForImageGen === "boolean" && directReadyForImageGen === true) {
-          // Back-compat: only ever enable capabilities from readiness; don't overwrite existing true -> false.
-          updateStepData("__capabilities", { image_preview: true });
-        }
-          if (typeof directSatiety === "number") {
-            updateStepData("__satiety", directSatiety);
-          }
-	          if (typeof directCallsUsed === "number") {
-	            backendCallsUsed = directCallsUsed;
-	          }
-	          if (typeof directMaxCalls === "number") {
-	            backendMaxCalls = directMaxCalls;
-              backendMaxCallsRef.current = directMaxCalls;
-	          }
-          if (directDidCall === true) {
-            didCallDspy = true;
-          }
-
-        for (const obj of frames) {
-          if (!obj || typeof obj !== "object") continue;
-            if (directMiniSteps.length === 0 && obj.type === "step" && obj.step) {
-              // Log to verify options are present when received
-              if (obj.step.type === 'multiple_choice' || obj.step.type === 'choice') {
-                console.log('[StepEngine] Step received (FULL OBJECT):', {
-                  id: obj.step.id,
-                  type: obj.step.type,
-                  hasOptions: Array.isArray(obj.step.options),
-                  optionsCount: Array.isArray(obj.step.options) ? obj.step.options.length : 0,
-                  options: obj.step.options ? obj.step.options.slice(0, 3).map((opt: any) => ({ label: opt.label, value: opt.value })) : 'MISSING',
-                  allStepKeys: Object.keys(obj.step), // Show all keys to verify nothing is stripped
-                });
-              }
-              // CRITICAL: Push the FULL step object as-is - no transformation
-              newSteps.push(obj.step);
-            }
-            if (obj.type === "meta") {
-              const requestPayload =
-                obj.payloadRequest ??
-                obj.requestPayload ??
-                obj.payload?.request ??
-                obj.request ??
-                null;
-              const responsePayload =
-                obj.payloadResponse ??
-                obj.responsePayload ??
-                obj.payload?.response ??
-                obj.response ??
-                null;
-              const responseDspy = (responsePayload as any)?.dspyResponse ?? null;
-              const extractDeterministicPlacements = (raw: any) => {
-                if (raw && typeof raw === "object" && (raw as any).deterministicPlacements) {
-                  return (raw as any).deterministicPlacements;
-                }
-                return null;
-              };
-
-              const maybeUIPlan =
-                extractDeterministicPlacements(obj as any) ||
-                extractDeterministicPlacements(responsePayload as any) ||
-                extractDeterministicPlacements((responsePayload as any)?.meta) ||
-                extractDeterministicPlacements((responsePayload as any)?.upstream) ||
-                extractDeterministicPlacements(responseDspy as any) ||
-                null;
-              if (maybeUIPlan && flowPlan?.sessionId) {
-                saveUIPlan(flowPlan.sessionId, maybeUIPlan);
-              }
-
-              if (devModeEnabled) {
-                const requestState = requestPayload && typeof requestPayload === "object" ? (requestPayload as any).state : null;
-                const requestDeterministicPlacements = extractDeterministicPlacements(requestState);
-                const responseDeterministicPlacements =
-                  extractDeterministicPlacements(responsePayload as any) ||
-                  extractDeterministicPlacements((responsePayload as any)?.meta) ||
-                  extractDeterministicPlacements((responsePayload as any)?.upstream) ||
-                  extractDeterministicPlacements(responseDspy as any) ||
-                  null;
-                console.log("[StepEngine] Plan trace", {
-                  request: { deterministicPlacements: requestDeterministicPlacements },
-                  response: { deterministicPlacements: responseDeterministicPlacements },
-                });
-              }
-
-              pendingBatchTraceRef.current = {
-                requestPayload,
-                responsePayload,
-              };
-              onMeta?.(obj);
-            }
-            if (obj.type === "complete") {
-              onMeta?.(obj);
-              const batchMeta: StepMeta = {
-                batchId: obj?.batchId ?? batchIdFromIndex(formState?.batchIndex),
-                modelRequestId: obj?.modelRequestId ?? null,
-              };
-              if (typeof (obj as any).callsUsed === "number") backendCallsUsed = (obj as any).callsUsed;
-              if (typeof (obj as any).maxCalls === "number") backendMaxCalls = (obj as any).maxCalls;
-              if (batchMeta.batchId || batchMeta.modelRequestId) {
-                lastBatchMetaRef.current = batchMeta;
-                if (batchMeta.modelRequestId) {
-                  lastModelRequestIdRef.current = batchMeta.modelRequestId;
-                }
-                if (flowPlan?.sessionId) {
-                  const now = Date.now();
-                  const normalizedBatchId = normalizeBatchId(batchMeta.batchId) ?? undefined;
-                  const batchTrace = pendingBatchTraceRef.current;
-                  emitTelemetry({
-                    sessionId: flowPlan.sessionId,
-                    instanceId,
-                    eventType: "batch_completed",
-                    batchId: normalizedBatchId,
-                    modelRequestId: batchMeta.modelRequestId ?? undefined,
-                    timestamp: now,
-                    payload: {
-                      batch_id: normalizedBatchId ?? null,
-                      model_request_id: batchMeta.modelRequestId ?? null,
-                      calls_used: (obj as any)?.callsUsed ?? null,
-                      max_calls: (obj as any)?.maxCalls ?? null,
-                      total_steps: (obj as any)?.totalSteps ?? null,
-                      answered_steps: (obj as any)?.answeredSteps ?? null,
-                      satiety: (obj as any)?.satiety ?? null,
-                      is_last_batch: (obj as any)?.isLastBatch ?? null,
-                      request_payload: batchTrace?.requestPayload ?? null,
-                      response_payload: batchTrace?.responsePayload ?? null,
-                      timestamp: now,
-                    },
-                  });
-                }
-              }
-              if (obj.didCall === true) {
-                didCallDspy = true;
-              }
-              if (typeof obj.readyForImageGen === "boolean") {
-                updateStepData("__readyForImageGen", obj.readyForImageGen);
-                if (obj.readyForImageGen === true) {
-                  batchReachedPreviewStage = true;
-                }
-                const frameCaps = (obj as any)?.capabilities;
-                if (frameCaps && typeof frameCaps === "object" && !Array.isArray(frameCaps)) {
-                  updateStepData("__capabilities", frameCaps);
-                } else if (obj.readyForImageGen === true) {
-                  // Back-compat: only enable (never disable) preview capability from readiness.
-                  updateStepData("__capabilities", { image_preview: true });
-                }
-              }
-              if (typeof obj.satiety === "number") {
-                updateStepData("__satiety", obj.satiety);
-              }
-
-              // When DSPy is "done" it can return structural steps (uploads/designer/lead/pricing/confirmation)
-              // in the complete frame. If we don't append them, the user gets stuck on the last question step.
-              const structuralFromComplete: any[] = Array.isArray((obj as any)?.structuralSteps)
-                ? ((obj as any).structuralSteps as any[])
-                : Array.isArray((obj as any)?.structural_steps)
-                  ? ((obj as any).structural_steps as any[])
-                  : [];
-              if (structuralFromComplete.length > 0) {
-                newSteps.push(...structuralFromComplete);
-              }
-
-              // Log satiety info from backend if available
-              if (typeof obj.satiety === 'number') {
-                console.log('[StepEngine] Batch complete - satiety from backend:', {
-                  satiety: obj.satiety,
-                  answeredSteps: obj.answeredSteps,
-                  totalSteps: obj.totalSteps,
-                  isLastBatch: obj.isLastBatch,
-                });
-              }
-              sawComplete = true;
-            }
-            // If server reports an error frame, stop parsing; we may still have received fallback steps.
-            if (obj.type === "error") {
-              console.warn("[StepEngine] generate-steps error", obj);
-              const details = obj.details ? ` (${String(obj.details).slice(0, 300)})` : '';
-              sseError = `${obj.error || "DSPy service error"}${details}`;
-              sawComplete = true;
-            }
-          if (sawComplete) break;
-        }
-        if (sseError) {
-          setBatchError(sseError);
-          return;
-        }
-        // Guardrail: never allow legacy prompt/designer endcaps from backend/legacy state
-        // into the planner question flow.
-        for (let i = newSteps.length - 1; i >= 0; i -= 1) {
-          const step = newSteps[i];
-          const stepId = String((step as any)?.id || "").trim();
-          const stepType = String((step as any)?.type || "").trim().toLowerCase();
-          if (
-            stepId === "step-promptInput" ||
-            stepId === "step-designer" ||
-            stepType === "prompt_input" ||
-            stepType === "designer"
-          ) {
-            newSteps.splice(i, 1);
-          }
-        }
-        if (!legacyBudgetUploadEnabled) {
-          for (let i = newSteps.length - 1; i >= 0; i -= 1) {
-            const stepId = String((newSteps[i] as any)?.id || "").trim();
-            if (
-              stepId === DETERMINISTIC_BUDGET_ID ||
-              stepId === DETERMINISTIC_SCENE_IMAGE_ID ||
-              stepId === DETERMINISTIC_USER_IMAGE_ID ||
-              stepId === DETERMINISTIC_PRODUCT_IMAGE_ID
-            ) {
-              newSteps.splice(i, 1);
-            }
-          }
-        }
-        // If backend signals preview stage readiness, do not append any remaining planner
-        // question steps from this batch (e.g. "project type"). Refinements take over here.
-        if (batchReachedPreviewStage) {
-          for (let i = newSteps.length - 1; i >= 0; i -= 1) {
-            const step = newSteps[i];
-            if (!isStructuralStep(step)) {
-              newSteps.splice(i, 1);
-            }
-          }
-        }
-
-        const batchMeta = lastBatchMetaRef.current;
-        const batchTrace = pendingBatchTraceRef.current;
-        if (batchMeta && newSteps.length > 0) {
-          const attachMeta = (steps: any[]) => {
-            for (const step of steps) {
-              if (!step || typeof step !== "object") continue;
-              const stepId = (step as any).id;
-              if (!stepId) continue;
-              stepMetaRef.current.set(stepId, {
-                batchId: batchMeta.batchId ?? null,
-                modelRequestId: batchMeta.modelRequestId ?? null,
-                payloadRequest: batchTrace?.requestPayload ?? null,
-                payloadResponse: batchTrace?.responsePayload ?? null,
-              });
-            }
-          };
-          attachMeta(newSteps);
-        }
-        pendingBatchTraceRef.current = null;
-
-        // Append sanitized steps from backend/model only.
-        // CRITICAL: If user was on last step waiting for next steps, auto-advance to the first newly generated step
-        if (newSteps.length > 0) {
-          setHasReceivedQuestionsFromGenerateSteps(true);
-          if (initialQuestionCountSnapshot === null && requestedBatchIndex === 0) {
-            const totalAfterInitialBatch = countPreviewGateQuestions([...(state?.steps || []), ...newSteps]);
-            if (totalAfterInitialBatch > 0) {
-              setInitialQuestionCountSnapshot(totalAfterInitialBatch);
-            }
-          }
-
-          // Use the wasOnLastStep parameter passed from handleStepComplete
-          // Only auto-advance if user was waiting (showLoading=true means they saw the loader)
-          const shouldAutoAdvance = wasOnLastStep && showLoading;
-          
-          console.log('[StepEngine] 📝 Adding new question steps', {
-            count: newSteps.length,
-            stepIds: newSteps.map(s => s.id),
-            currentTotalSteps: state?.steps.length || 0,
-            currentStepIndex: state?.currentStepIndex,
-            wasOnLastStep,
-            showLoading,
-            shouldAutoAdvance,
-            behavior: shouldAutoAdvance 
-              ? 'Auto-advancing to Q1 of next batch (user was waiting)' 
-              : 'Silent append - user continues normally',
-          });
-          
-          // Auto-advance if user was on last step waiting, otherwise append silently
-          addSteps(newSteps, shouldAutoAdvance);
-        } else if (
-          disableLegacyBudgetUploadSteps &&
-          batchReachedPreviewStage &&
-          !hasMeaningfulAnswer((mergedStepData as any)?.[DETERMINISTIC_STYLE_ID]) &&
-          deterministicStyleStep
-        ) {
-          setHasReceivedQuestionsFromGenerateSteps(true);
-          addSteps([deterministicStyleStep as any], true, {
-            insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
-            moveExisting: true,
-          });
-        } else if (
-          disableLegacyBudgetUploadSteps &&
-          batchReachedPreviewStage &&
-          hasMeaningfulAnswer((mergedStepData as any)?.[DETERMINISTIC_STYLE_ID])
-        ) {
-          setHasReceivedQuestionsFromGenerateSteps(true);
-          setPreviewEverEnabled(true);
-        }
-
-	        if ((didCallDspy || typeof backendCallsUsed === "number" || typeof backendMaxCalls === "number") && flowPlan?.sessionId) {
-	          const baseState = formState ?? effectiveFormState;
-	          const effectiveMaxCalls =
-	            (typeof backendMaxCalls === "number" ? backendMaxCalls : null) ??
-	            (typeof backendMaxCallsRef.current === "number" ? backendMaxCallsRef.current : null);
-	          const maxBatchIndex = typeof effectiveMaxCalls === "number" ? Math.max(0, effectiveMaxCalls - 1) : null;
-	          // Backend reports `callsUsed` as 1-based; the next `batchIndex` is `callsUsed` (0-based).
-	          const computedNextBatchIndex =
-	            typeof backendCallsUsed === "number"
-	              ? Math.max(0, Math.floor(backendCallsUsed))
-	              : didCallDspy
-	                ? baseState.batchIndex + 1
-	                : baseState.batchIndex;
-	          const nextBatchIndex =
-	            typeof maxBatchIndex === "number" ? Math.min(computedNextBatchIndex, maxBatchIndex) : computedNextBatchIndex;
-	          // Keep maxBatches purely informational (do not default); do not rely on it client-side.
-	          const nextState: FormState = {
-	            ...baseState,
-	            ...(typeof effectiveMaxCalls === "number" ? { maxBatches: effectiveMaxCalls } : {}),
-	            batchIndex: nextBatchIndex,
-	          };
-	          setFormState(nextState);
-	          saveFormState(flowPlan.sessionId, nextState);
-	        }
-        if (typeof requestedBatchIndex === "number") {
-          completedBatchIndexesRef.current.add(requestedBatchIndex);
-        }
-      } finally {
-        setIsBatchLoading(false);
-        batchingRef.current = false;
-        sceneUploadJustCompletedRef.current = false;
-        if (typeof requestedBatchIndex === "number") {
-          inFlightBatchIndexesRef.current.delete(requestedBatchIndex);
-        }
-      }
+      await fetchAndAppendGenerateStepsBatch(stepDataSoFar, showLoading, wasOnLastStep, {
+        instanceId,
+        flowPlanSessionId: flowPlan.sessionId,
+        flowPlan,
+        state,
+        formState,
+        config,
+        onMeta,
+        deterministicStyleStep,
+        disableLegacyBudgetUploadSteps,
+        legacyBudgetUploadEnabled,
+        initialQuestionCountSnapshot,
+        setBatchError,
+        setIsBatchLoading,
+        setFormState,
+        setHasReceivedQuestionsFromGenerateSteps,
+        setInitialQuestionCountSnapshot,
+        setPreviewEverEnabled,
+        updateStepData,
+        addSteps,
+        patchStep,
+        batchingRef,
+        pendingBatchTraceRef,
+        completedBatchIndexesRef,
+        inFlightBatchIndexesRef,
+        lastBatchMetaRef,
+        lastModelRequestIdRef,
+        backendMaxCallsRef,
+        stepMetaRef,
+        sceneUploadJustCompletedRef,
+      });
     },
-    [addSteps, deterministicStyleStep, disableLegacyBudgetUploadSteps, patchStep, flowPlan, formState, initialQuestionCountSnapshot, instanceId, legacyBudgetUploadEnabled, onMeta, setPreviewEverEnabled, state?.currentStepIndex, state?.steps, state?.stepData, updateStepData, config?.useCase]
+    [
+      addSteps,
+      config,
+      deterministicStyleStep,
+      disableLegacyBudgetUploadSteps,
+      flowPlan,
+      formState,
+      initialQuestionCountSnapshot,
+      instanceId,
+      legacyBudgetUploadEnabled,
+      onMeta,
+      patchStep,
+      state,
+      updateStepData,
+    ]
   );
 
   const requestNextBatch = useCallback(
@@ -2446,8 +1383,16 @@ export function StepEngine({
       stepDataSoFar: Record<string, any>,
       opts: { showLoading: boolean; wasOnLastStep: boolean; reason: string; onError?: (e: unknown) => void }
     ) => {
-      if (leadGateLocksQuestionAreaRef.current) {
-        console.log(`[StepEngine] Lead gate active; skipping generate-steps request (${opts.reason})`);
+      if (localSkeletonMode) {
+        console.log(`[StepEngine] Local skeleton mode: skipped generate-steps request (${opts.reason})`);
+        return;
+      }
+      const singlePlanModeEnabled = true;
+      const allowFollowUpBatchRequest = opts.wasOnLastStep || opts.reason === "initial-autofetch";
+      if (singlePlanModeEnabled && !allowFollowUpBatchRequest) {
+        // Consolidated mode: question planning runs once at startup.
+        // Allow follow-up generation when the user actually exhausts the current batch.
+        console.log(`[StepEngine] Single-plan mode: skipped generate-steps request (${opts.reason})`);
         return;
       }
       fetchAndAppendBatch(stepDataSoFar, opts.showLoading, opts.wasOnLastStep).catch((e) => {
@@ -2455,10 +1400,11 @@ export function StepEngine({
         opts.onError?.(e);
       });
     },
-    [fetchAndAppendBatch]
+    [fetchAndAppendBatch, localSkeletonMode]
   );
 
   useEffect(() => {
+    if (localSkeletonMode) return;
     if (!state) return;
     const previousServiceId = previousSelectedServiceIdRef.current;
     const serviceChanged = Boolean(previousServiceId && previousServiceId !== selectedServiceId);
@@ -2507,31 +1453,44 @@ export function StepEngine({
 
     const existingSignature = JSON.stringify({
       question: existingStyleStep?.question ?? null,
+      humanism: existingStyleStep?.humanism ?? null,
       options: Array.isArray(existingStyleStep?.options) ? existingStyleStep.options : [],
       multi_select: Boolean(existingStyleStep?.multi_select),
+      min_selections: existingStyleStep?.min_selections ?? null,
+      max_selections: existingStyleStep?.max_selections ?? null,
+      columns: existingStyleStep?.columns ?? null,
     });
     const nextSignature = JSON.stringify({
       question: (deterministicStyleStep as any).question ?? null,
+      humanism: (deterministicStyleStep as any).humanism ?? null,
       options: Array.isArray((deterministicStyleStep as any)?.options) ? (deterministicStyleStep as any).options : [],
       multi_select: Boolean((deterministicStyleStep as any)?.multi_select),
+      min_selections: (deterministicStyleStep as any)?.min_selections ?? null,
+      max_selections: (deterministicStyleStep as any)?.max_selections ?? null,
+      columns: (deterministicStyleStep as any)?.columns ?? null,
     });
     if (existingSignature !== nextSignature || existingStyleStep?.type !== "image_choice_grid") {
       patchStep(DETERMINISTIC_STYLE_ID, {
         type: "image_choice_grid",
         question: (deterministicStyleStep as any).question,
+        humanism: (deterministicStyleStep as any).humanism,
         options: (deterministicStyleStep as any).options,
         multi_select: Boolean((deterministicStyleStep as any)?.multi_select),
+        min_selections: (deterministicStyleStep as any)?.min_selections,
+        max_selections: (deterministicStyleStep as any)?.max_selections,
+        columns: (deterministicStyleStep as any)?.columns,
       } as any);
     }
 
     if (serviceChanged) {
       removeContextEntry(DETERMINISTIC_STYLE_ID);
     }
-  }, [addSteps, deterministicStyleStep, disableLegacyBudgetUploadSteps, hasReceivedQuestionsFromGenerateSteps, patchStep, removeContextEntry, requestNextBatch, selectedServiceId, state]);
+  }, [addSteps, deterministicStyleStep, disableLegacyBudgetUploadSteps, hasReceivedQuestionsFromGenerateSteps, localSkeletonMode, patchStep, removeContextEntry, requestNextBatch, selectedServiceId, state]);
 
   // If the user refreshes after completing deterministic steps, there may be no AI steps yet.
   // In that case, automatically fetch the first batch once we have the deterministic answers.
   useEffect(() => {
+    if (localSkeletonMode) return;
     if (!state || !flowPlan?.sessionId) return;
     if (initialAutofetchRef.current) return;
     const stepData = state.stepData || {};
@@ -2559,682 +1518,32 @@ export function StepEngine({
         initialAutofetchRef.current = false;
       },
     });
-  }, [state, flowPlan?.sessionId, formState, requestNextBatch]);
+  }, [state, flowPlan?.sessionId, formState, localSkeletonMode, requestNextBatch]);
 
-  const handleStepComplete = async (data: any) => {
-    if (!currentStep) return;
-    const isRefinementSceneUploadStep = currentStep.id === "step-refinement-upload-scene-image";
-    const isSceneUploadStep =
-      currentStep.id === DETERMINISTIC_SCENE_IMAGE_ID || currentStep.id === REFINEMENT_UPLOAD_STEP_ID;
-    const isRefinementQuestionStep = Boolean((currentStep as any)?.__refinementStep);
-    const wasRefinementQuestionAlreadyAnswered =
-      isRefinementQuestionStep && isStepAnsweredForCounts(currentStep, state?.stepData);
-    const nextAnsweredRefinementQuestionCount =
-      answeredRefinementQuestionCount +
-      (isRefinementQuestionStep && hasMeaningfulAnswer(data) && !wasRefinementQuestionAlreadyAnswered ? 1 : 0);
-    const isSceneUploadSkipped =
-      isSceneUploadStep &&
-      (data === null || data === undefined || data === "__skip__" || data === "" || (Array.isArray(data) && data.length === 0));
-    if (isSceneUploadSkipped) {
-      setPendingPreviewSceneUploadUrl(null);
-    }
-    const shouldMirrorRefinementSceneUpload =
-      isRefinementSceneUploadStep &&
-      typeof data === "string" &&
-      (data.startsWith("http://") || data.startsWith("https://") || data.startsWith("data:image/"));
-    const shouldPauseForRefinementPreviewRefresh = Boolean(
-      previewHasImage &&
-        isRefinementQuestionStep &&
-        hasMeaningfulAnswer(data) &&
-        nextAnsweredRefinementQuestionCount > 0 &&
-        nextAnsweredRefinementQuestionCount % 2 === 0
-    );
-    const uploadedSceneImageUrl =
-      isSceneUploadStep &&
-      typeof data === "string" &&
-      (data.startsWith("http://") || data.startsWith("https://") || data.startsWith("data:image/"))
-        ? data
-        : null;
-    const persistStepAnswer = () => {
-      updateStepData(currentStep.id, data);
-      if (shouldMirrorRefinementSceneUpload) {
-        updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, data);
-      }
-    };
-
-    if (uploadedSceneImageUrl && previewHasImage) {
-      setPendingPreviewSceneUploadUrl(uploadedSceneImageUrl);
-      setPreviewRefreshNonce((prev) => prev + 1);
-    }
-    if (shouldPauseForRefinementPreviewRefresh) {
-      setPreviewAutoGenerationPending(true);
-      setPreviewRefreshNonce((prev) => prev + 1);
-    }
-    
-    console.log('[StepEngine] Step completed', {
-      stepId: currentStep.id,
-      stepType: 'type' in currentStep ? currentStep.type : 'componentType' in currentStep ? currentStep.componentType : 'unknown',
-      currentStepIndex: state?.currentStepIndex,
-      totalSteps: state?.steps.length,
-      stepData: data,
-      allStepDataKeys: Object.keys(state?.stepData || {}),
-    });
-
-    const stepTypeForMetrics = getStepType(currentStep);
-    const gateContextForMetrics = normalizeOptionalString((currentStep as any)?.blueprint?.validation?.gate_context);
-    const isLeadStepForMetrics = stepTypeForMetrics === "lead_capture" || currentStep.id.startsWith("step-lead");
-
-    if (sessionId) {
-      const stepId = currentStep.id;
-      const meta = stepMetaRef.current.get(stepId);
-      const start = stepStartRef.current[stepId];
-      const now = Date.now();
-      const latencyMs = typeof start === "number" ? now - start : null;
-      const stepType = stepTypeForMetrics;
-      if (meta?.modelRequestId) {
-        lastModelRequestIdRef.current = meta.modelRequestId;
-      }
-      // Determine step source and characteristics
-      const isDeterministic =
-        isStructuralStep(currentStep) ||
-        isBootstrapStepIdValue(stepId);
-      const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
-      const totalSteps = state?.steps?.length || 0;
-      const stepNumber = (state?.currentStepIndex ?? 0) + 1;
-      const requestPayload = meta?.payloadRequest ?? null;
-      const responsePayload = meta?.payloadResponse ?? null;
-      const gateContext = gateContextForMetrics;
-      const isLeadStep = isLeadStepForMetrics;
-      
-      // Only emit step_answered once per step completion with full step data
-      emitTelemetry({
-        sessionId,
-        instanceId,
-        eventType: "step_answered",
-        stepId,
-        batchId: normalizeBatchId(meta?.batchId) ?? batchIdFromIndex(formState?.batchIndex) ?? undefined,
-        modelRequestId: meta?.modelRequestId ?? undefined,
-        timestamp: now,
-        payload: {
-          step_number: stepNumber,
-          total_steps: totalSteps,
-          step_type: stepType,
-          is_deterministic: isDeterministic,
-          source: stepSource,
-          latency_ms: latencyMs,
-          value_type: getValueType(data),
-          filled_other: detectFilledOther(data),
-          step_json: currentStep, // Full step object
-          answer_value: data, // The actual answer value
-          has_options: Array.isArray((currentStep as any)?.options),
-          options_count: Array.isArray((currentStep as any)?.options) ? (currentStep as any).options.length : 0,
-          question: (currentStep as any)?.question || null,
-          request_payload: requestPayload,
-          response_payload: responsePayload,
-          gate_context: gateContext,
-        },
-      });
-
-      if (isLeadStep) {
-        emitTelemetry({
-          sessionId,
-          instanceId,
-          eventType: "conversion",
-          stepId,
-          batchId: normalizeBatchId(meta?.batchId) ?? undefined,
-          modelRequestId: meta?.modelRequestId ?? undefined,
-          timestamp: now,
-          payload: {
-            step_number: stepNumber,
-            total_steps: totalSteps,
-            step_type: stepType,
-            is_deterministic: isDeterministic,
-            source: stepSource,
-            step_json: currentStep, // Full step object
-            conversion_type: "lead_submitted",
-            gate_context: gateContext,
-          },
-        });
-      }
-    }
-    
-    trackStepComplete(currentStep.id, {
-      droppedOff: false,
-      backNavigation: false,
-      leadInputCompleted: isLeadStepForMetrics,
-      componentType: ('componentType' in currentStep ? currentStep.componentType : 'unknown') as any,
-      metadata: gateContextForMetrics ? { gate_context: gateContextForMetrics } : undefined,
-    });
-
-    if (onStepComplete) {
-      onStepComplete(currentStep.id, data);
-    }
-
-    // PREVIEW GATE: once the preview has produced a real image, block further question advancement
-    // until the lead is captured. We still persist the answer, then show the unlock UI.
-    const shouldGatePreviewAdvance =
-      leadGateLocksQuestionAreaRef.current && isPreviewGateQuestionStep(currentStep) && !isLeadStepForMetrics;
-    if (shouldGatePreviewAdvance) {
-      pendingPreviewAdvanceRef.current = { stepId: currentStep.id, data };
-      persistStepAnswer();
-      setPreviewAdvanceGateOpen(true);
-      return;
-    }
-
-    // If user is on the last currently-known step, trigger JIT batching to fetch more.
-    // `generate-steps` expects stepDataSoFar + existingStepIds to generate the next question batch.
-    const isLastKnownStep = Boolean(state && state.currentStepIndex >= (state.steps.length - 1));
-    const updatedStepDataSoFar: Record<string, any> = {
-      ...(state?.stepData || {}),
-      [currentStep.id]: data,
-      ...(shouldMirrorRefinementSceneUpload ? { [DETERMINISTIC_SCENE_IMAGE_ID]: data } : {}),
-    };
-    const nextSelectedServiceId =
-      currentStep.id === DETERMINISTIC_SERVICE_ID && typeof data === "string" && data.trim()
-        ? data.trim()
-        : selectedServiceId;
-    const nextSelectedServiceMeta =
-      nextSelectedServiceId && serviceCatalogSnapshot?.byServiceId
-        ? (serviceCatalogSnapshot.byServiceId as any)[nextSelectedServiceId]
-        : null;
-    const nextDeterministicStyleStep = buildDeterministicStyleStep(nextSelectedServiceMeta);
-    let effectiveDeterministicStyleStep = nextDeterministicStyleStep || deterministicStyleStep;
-    if (!effectiveDeterministicStyleStep && sessionId) {
-      const persistedCatalog = loadServiceCatalog(sessionId);
-      const byServiceId = persistedCatalog?.byServiceId;
-      if (byServiceId && typeof byServiceId === "object") {
-        for (const item of Object.values(byServiceId as Record<string, any>)) {
-          const candidate = buildDeterministicStyleStep(item);
-          if (candidate) {
-            effectiveDeterministicStyleStep = candidate;
-            break;
-          }
-        }
-      }
-    }
-    if (!effectiveDeterministicStyleStep && disableLegacyBudgetUploadSteps) {
-      try {
-        const widgetRes = await fetch(`/api/widget/${instanceId}`, {
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
-        const widgetJson = widgetRes.ok ? await widgetRes.json().catch(() => null) : null;
-        const widgetServiceOptions = Array.isArray(widgetJson?.serviceOptions) ? widgetJson.serviceOptions : [];
-        if (widgetServiceOptions.length > 0 && sessionId) {
-          saveServiceCatalog(
-            sessionId,
-            widgetServiceOptions
-              .map((o: any) => ({
-                serviceId: String(o?.value || ""),
-                serviceName:
-                  typeof o?.serviceName === "string"
-                    ? o.serviceName
-                    : typeof o?.label === "string"
-                      ? o.label
-                      : null,
-                industryId: typeof o?.industryId === "string" ? o.industryId : null,
-                industryName: typeof o?.industryName === "string" ? o.industryName : null,
-                serviceSummary:
-                  typeof o?.serviceSummary === "string"
-                    ? o.serviceSummary
-                    : typeof o?.service_summary === "string"
-                      ? o.service_summary
-                      : null,
-                styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
-                styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
-              }))
-              .filter((item: any) => item.serviceId),
-          );
-        }
-        const fallbackServiceOption =
-          (nextSelectedServiceId
-            ? widgetServiceOptions.find((o: any) => String(o?.value || "") === nextSelectedServiceId)
-            : null) || widgetServiceOptions[0];
-        const fallbackStyleStep = buildDeterministicStyleStep(fallbackServiceOption);
-        if (fallbackStyleStep) {
-          effectiveDeterministicStyleStep = fallbackStyleStep;
-        }
-      } catch {
-        // Leave style-step fallback best-effort only.
-      }
-    }
-    const scopeStepIdsInFlow = (state?.steps || [])
-      .map((step: any) => String((step as any)?.id || ""))
-      .filter((stepId) => PRE_CONCEPT_SCOPE_STEP_IDS.has(stepId));
-    const completesAdventureScopeGate =
-      disableLegacyBudgetUploadSteps &&
-      PRE_CONCEPT_SCOPE_STEP_IDS.has(currentStep.id) &&
-      scopeStepIdsInFlow.length > 0 &&
-      scopeStepIdsInFlow.every((stepId) => hasMeaningfulAnswer(updatedStepDataSoFar[stepId]));
-    const shouldRouteToAdventureStyleStep =
-      completesAdventureScopeGate &&
-      Boolean(effectiveDeterministicStyleStep) &&
-      !hasMeaningfulAnswer(updatedStepDataSoFar[DETERMINISTIC_STYLE_ID]);
-    const shouldRouteToDeterministicStyleStep =
-      !disableLegacyBudgetUploadSteps &&
-      currentStep.id === DETERMINISTIC_SERVICE_ID &&
-      Boolean(nextDeterministicStyleStep) &&
-      !hasMeaningfulAnswer(updatedStepDataSoFar[DETERMINISTIC_STYLE_ID]);
-
-    // Persist personalization + lead-gate state into session-scoped FormState.
-    if (flowPlan?.sessionId && formState) {
-      const now = Date.now();
-
-      if (currentStep.id === DETERMINISTIC_FULL_NAME_ID) {
-        const fullName = normalizeOptionalString(data);
-        const firstName = extractFirstName(fullName);
-        const nextState: FormState = {
-          ...formState,
-          ...(fullName ? { userFullName: fullName } : {}),
-          ...(firstName ? { userFirstName: firstName } : {}),
-        };
-        setFormState(nextState);
-        saveFormState(flowPlan.sessionId, nextState);
-      }
-
-      if (isLeadStepForMetrics) {
-        const email = normalizeOptionalString((data as any)?.email);
-        const gateContext = gateContextForMetrics || "design_and_estimate";
-        const leadGates = {
-          ...(formState.leadGates && typeof formState.leadGates === "object" ? formState.leadGates : {}),
-          [gateContext]: {
-            ...(formState.leadGates?.[gateContext] || {}),
-            completedAt: now,
-          },
-        };
-        const nextState: FormState = {
-          ...formState,
-          leadCaptured: true,
-          ...(email ? { leadEmail: email } : {}),
-          leadCapturedAt: formState.leadCapturedAt ?? now,
-          leadGates,
-        };
-        setFormState(nextState);
-        saveFormState(flowPlan.sessionId, nextState);
-      }
-    }
-
-    // Persist monotonic flow progress to FormState (so it doesn't jump to 100% after Q1
-    // and get stuck there when we append more questions later).
-    if (flowPlan?.sessionId && formState && isQuestionStepForAskedIds(currentStep) && hasMeaningfulAnswer(data)) {
-      const counted = new Set(formState.metricProgressCountedStepIds || []);
-      if (!counted.has(currentStep.id)) {
-        counted.add(currentStep.id);
-        const nextMetric = clamp01((formState.metricProgress ?? 0) + getMetricGain(currentStep));
-        const nextState: FormState = {
-          ...formState,
-          metricProgress: nextMetric,
-          metricProgressCountedStepIds: Array.from(counted),
-        };
-        setFormState(nextState);
-        saveFormState(flowPlan.sessionId, nextState);
-      }
-    }
-
-    // Back-compat: also store an underscore alias for planner triggers (e.g. bathroom_type).
-    // Only do this for question steps (not structural/functionCall).
-    if (isQuestionStepForAskedIds(currentStep)) {
-      const alias = legacyAliasKeyForStepId(currentStep.id);
-      if (alias && alias !== currentStep.id && (state?.stepData || {})[alias] === undefined) {
-        updateStepData(alias, data);
-      }
-    }
-
-    if (leadGateLocksQuestionAreaRef.current && !isLeadStepForMetrics) {
-      // Keep answers/state, but never continue loading or advancing question flow until lead capture.
-      persistStepAnswer();
-      return;
-    }
-
-    if (shouldPauseForRefinementPreviewRefresh) {
-      persistStepAnswer();
-      pendingRefinementPreviewAdvanceRef.current = { stepId: currentStep.id, data };
-      pendingRefinementPreviewAdvanceStageRef.current = "waiting_for_start";
-      return;
-    }
-
-    if (shouldRouteToAdventureStyleStep || shouldRouteToDeterministicStyleStep) {
-      const existingStyleIndex = (state?.steps || []).findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_STYLE_ID);
-      persistStepAnswer();
-      markStepComplete(currentStep.id);
-      if (existingStyleIndex >= 0) {
-        goToStep(existingStyleIndex);
-        return;
-      }
-      if (effectiveDeterministicStyleStep) {
-        addSteps([effectiveDeterministicStyleStep as any], true, {
-          insertAtIndex: (state?.currentStepIndex ?? 0) + 1,
-          moveExisting: true,
-        });
-        if (!shouldRouteToAdventureStyleStep) {
-          // Fetch AI-generated style copy; when response arrives, patchStep will apply it
-          requestNextBatch(updatedStepDataSoFar, {
-            showLoading: false,
-            wasOnLastStep: false,
-            reason: "style-copy",
-          });
-        }
-        return;
-      }
-    }
-    
-    // Optional lookahead: allow fetching the next batch *after an input* a few steps before the end.
-    // Default is `0` (disabled) so `/generate-steps` only happens when the user finishes the last step.
-    const prefetchStepsBeforeEndRaw = Number((config as any)?.prefetchStepsBeforeEnd ?? 0);
-    const prefetchStepsBeforeEnd = Number.isFinite(prefetchStepsBeforeEndRaw)
-      ? Math.max(0, Math.floor(prefetchStepsBeforeEndRaw))
-      : 0;
-
-    const currentStepIndex = state?.currentStepIndex ?? -1;
-    const totalStepsCount = state?.steps?.length ?? 0;
-    const stepsRemaining = Math.max(0, totalStepsCount - 1 - currentStepIndex);
-    const hasDeterministicAnswers = deterministicAnswersPresent({ steps: state?.steps, stepData: state?.stepData });
-    
-    // SIMPLE LOGIC (works for any batch n → batch n+1, up to call cap):
-    // 1. If on last step AND batch is loading → show loader, wait, then auto-advance to the first newly generated step
-    // 2. If on last step AND batch NOT loading → trigger next batch fetch with loader, wait, then auto-advance
-    // 3. If prefetch trigger hit → fetch silently in background, continue normally
-    // 4. Otherwise → continue normally (advance to next step)
-    
-    const isOnLastStep = isLastKnownStep;
-    const batchCurrentlyLoading = batchingRef.current;
-    const shouldPrefetchNextBatch =
-      prefetchStepsBeforeEnd > 0 &&
-      hasDeterministicAnswers &&
-      !isOnLastStep &&
-      !batchCurrentlyLoading &&
-      stepsRemaining <= prefetchStepsBeforeEnd;
-    
-    console.log('[StepEngine] Step complete logic check', {
-      isOnLastStep,
-      batchCurrentlyLoading,
-      shouldPrefetchNextBatch,
-      currentStepIndex,
-      totalSteps: totalStepsCount,
-      stepsRemaining,
-      prefetchStepsBeforeEnd,
-      willAdvance: !isOnLastStep || !batchCurrentlyLoading,
-    });
-    
-    if (isOnLastStep) {
-      // Mark current step complete so upload skip = same as upload: preview can generate immediately.
-      markStepComplete(currentStep.id);
-
-      // If completing a scene upload step, prefer the preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders
-      const hasValidSceneData =
-        isSceneUploadStep &&
-        !isSceneUploadSkipped &&
-        (typeof data === "string" ? data.startsWith("http") || data.startsWith("data:image") : Array.isArray(data) && data.some((v) => typeof v === "string" && (v.startsWith("http") || v.startsWith("data:image"))));
-      if (hasValidSceneData) {
-        sceneUploadJustCompletedRef.current = true;
-      }
-
-      // User is on last step - need next batch (batch n+1, up to call cap)
-      if (batchCurrentlyLoading) {
-        // Next batch is already loading - just show loader, wait for it to arrive
-        // When batch arrives, auto-advance will happen in addSteps
-        console.log('[StepEngine] ⏳ On last step, next batch already loading - showing loader, will auto-advance when ready');
-        persistStepAnswer();
-        // Don't advance yet - wait for batch to arrive
-        return;
-      } else {
-        // On last step, next batch not loading yet - trigger fetch with loader
-        console.log('[StepEngine] 🚀 On last step - triggering next batch fetch with loader', {
-          stepDataSoFarKeys: Object.keys(updatedStepDataSoFar),
-          answeredSteps: Object.keys(updatedStepDataSoFar).length,
-          currentStepIndex,
-          totalStepsCount,
-        });
-        
-        persistStepAnswer();
-        
-        // Fetch with loading indicator - when batch arrives, auto-advance will happen
-        requestNextBatch(updatedStepDataSoFar, {
-          showLoading: true,
-          wasOnLastStep: true,
-          reason: "last-step",
-        });
-        
-        // Don't advance yet - wait for batch to arrive, then auto-advance
-        return;
-      }
-    } else if (shouldPrefetchNextBatch && !batchingRef.current) {
-      // Prefetch trigger hit - fetch silently in background, continue normally
-      console.log('[StepEngine] 🎯 Prefetch trigger - fetching next batch silently in background', {
-        stepDataSoFarKeys: Object.keys(updatedStepDataSoFar),
-        currentStepIndex,
-        stepsRemaining,
-        prefetchStepsBeforeEnd,
-      });
-      
-      persistStepAnswer();
-      
-      // Fetch silently (no loading indicator)
-      requestNextBatch(updatedStepDataSoFar, {
-        showLoading: false,
-        wasOnLastStep: false,
-        reason: "prefetch",
-      });
-      
-      // Continue normally - advance to next step
-      await goToNextStep(data);
-    } else {
-      // Normal flow - not on last step, not prefetch trigger - just advance
-      console.log('[StepEngine] ✅ Normal flow - advancing to next step');
-      await goToNextStep(data);
-    }
-  };
-
-  // Track dropoff to prevent duplicates across effect re-runs
-  const dropoffFiredRef = useRef<Set<string>>(new Set());
-  const pageLoadTimeRef = useRef<number>(Date.now());
-  const isInitialMountRef = useRef<boolean>(true);
-  
-  // Reset page load time on mount to prevent false dropoffs during hot reload
-  useEffect(() => {
-    if (isInitialMountRef.current) {
-      pageLoadTimeRef.current = Date.now();
-      isInitialMountRef.current = false;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!sessionId || !currentStep) return;
-    
-    const stepId = currentStep.id;
-    const dropoffKey = `${sessionId}-${stepId}`;
-    
-    // Skip if already fired for this session+step combo
-    if (dropoffFiredRef.current.has(dropoffKey)) return;
-    
-    const handleDropoff = (e: Event) => {
-      // Don't fire if form is completed
-      if (flowCompletedRef.current) return;
-
-      if (typeof window !== "undefined") {
-        const params = new URLSearchParams(window.location.search);
-        const isFresh = params.get("fresh") === "1" || params.get("fresh") === "true";
-        if (isFresh) {
-          return;
-        }
-      }
-      
-      // Don't fire within 10 seconds of page load (prevents false dropoffs on initial load/hot reload)
-      const timeSinceLoad = Date.now() - pageLoadTimeRef.current;
-      if (timeSinceLoad < 10000) {
-        return; // Too soon after page load - likely not a real dropoff
-      }
-      
-      // Don't fire on refresh or back/forward cache
-      if (e.type === 'pagehide' && (e as PageTransitionEvent).persisted) {
-        return; // This is a back/forward cache, not a real navigation
-      }
-      
-      // Don't fire during development hot reloads (check for HMR)
-      if (process.env.NODE_ENV === 'development' && e.type === 'beforeunload') {
-        // In dev, beforeunload can fire during hot reload - be more conservative
-        if (timeSinceLoad < 30000) { // 30 seconds in dev
-          return;
-        }
-      }
-      
-      // Check if already fired for this step
-      if (dropoffFiredRef.current.has(dropoffKey)) return;
-      dropoffFiredRef.current.add(dropoffKey);
-      
-      const meta = stepMetaRef.current.get(stepId);
-      const isDeterministic =
-        isStructuralStep(currentStep) ||
-        isBootstrapStepIdValue(stepId);
-      const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
-      const totalSteps = state?.steps?.length || 0;
-      const stepNumber = (state?.currentStepIndex ?? 0) + 1;
-      
-        emitTelemetry(
-          {
-            sessionId,
-            instanceId,
-            eventType: "dropoff",
-            stepId,
-            batchId: normalizeBatchId(meta?.batchId) ?? batchIdFromIndex(formState?.batchIndex) ?? undefined,
-            modelRequestId: meta?.modelRequestId ?? undefined,
-            timestamp: Date.now(),
-            payload: {
-              step_number: stepNumber,
-              total_steps: totalSteps,
-              step_type: getStepType(currentStep),
-              is_deterministic: isDeterministic,
-              source: stepSource,
-              step_json: currentStep, // Full step object
-              has_options: Array.isArray((currentStep as any)?.options),
-              options_count: Array.isArray((currentStep as any)?.options) ? (currentStep as any).options.length : 0,
-              question: (currentStep as any)?.question || null,
-              order: stepNumber, // Keep for backward compatibility
-              request_payload: meta?.payloadRequest ?? null,
-              response_payload: meta?.payloadResponse ?? null,
-            },
-          },
-          { beacon: true }
-        );
-    };
-
-    // Dropoff should only fire when user actually exits/closes the form, not just when tab becomes hidden
-    // Use beforeunload/pagehide for actual navigation away, not visibilitychange
-    // Session stays active as long as the tab is open, even if hidden
-    
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // User is actually leaving/closing the page
-      if (!flowCompletedRef.current) {
-        handleDropoff(e);
-      }
-    };
-
-    const handlePageHide = (e: PageTransitionEvent) => {
-      // Only fire if it's a real navigation away (not back/forward cache)
-      if (!e.persisted && !flowCompletedRef.current) {
-        handleDropoff(e);
-      }
-    };
-
-    // Use beforeunload for most browsers, pagehide as fallback
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("pagehide", handlePageHide);
-    
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("pagehide", handlePageHide);
-    };
-  }, [currentStep, formState?.batchIndex, instanceId, sessionId, state?.currentStepIndex]);
-
-  const handleBack = useCallback(async () => {
-    setAdventureInputMode("questions");
-    if (!state || !currentStep) {
-      await goToPreviousStep();
-      return;
-    }
-    const fromIndex = state.currentStepIndex;
-    const toIndex = Math.max(0, fromIndex - 1);
-    const toStep = state.steps[toIndex];
-      if (sessionId && toStep) {
-        const toStepId = (toStep as any).id;
-        const meta = stepMetaRef.current.get(toStepId);
-        const isDeterministic =
-          isStructuralStep(toStep) ||
-          isBootstrapStepIdValue(toStepId);
-        const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
-        const totalSteps = state?.steps?.length || 0;
-        const requestPayload = meta?.payloadRequest ?? null;
-        const responsePayload = meta?.payloadResponse ?? null;
-        
-        emitTelemetry({
-          sessionId,
-          instanceId,
-          eventType: "step_backtracked",
-        stepId: toStepId,
-        batchId: normalizeBatchId(meta?.batchId) ?? batchIdFromIndex(formState?.batchIndex) ?? undefined,
-        modelRequestId: meta?.modelRequestId ?? undefined,
-        timestamp: Date.now(),
-          payload: {
-            step_number: toIndex + 1,
-            total_steps: totalSteps,
-            step_type: getStepType(toStep),
-            is_deterministic: isDeterministic,
-            source: stepSource,
-            step_json: toStep, // Full step object
-            from_step_id: currentStep.id,
-            to_step_id: toStepId,
-            from_order: fromIndex + 1,
-            to_order: toIndex + 1,
-            request_payload: requestPayload,
-            response_payload: responsePayload,
-          },
-        });
-    }
-    await goToPreviousStep();
-  }, [currentStep, formState?.batchIndex, goToPreviousStep, instanceId, sessionId, setAdventureInputMode, state]);
-
-  const handleNavigateToStep = useCallback(
-    (stepIndex: number) => {
-      if (!state) return;
-      if (sessionId && stepIndex < state.currentStepIndex) {
-        const fromStep = state.steps[state.currentStepIndex];
-        const toStep = state.steps[stepIndex];
-        if (fromStep && toStep) {
-          const toStepId = (toStep as any).id;
-          const meta = stepMetaRef.current.get(toStepId);
-          const isDeterministic =
-            isStructuralStep(toStep) ||
-            isBootstrapStepIdValue(toStepId);
-          const stepSource = isDeterministic ? 'frontend_deterministic' : (meta?.modelRequestId ? 'backend_ai' : 'unknown');
-          const totalSteps = state?.steps?.length || 0;
-          
-          emitTelemetry({
-            sessionId,
-            instanceId,
-            eventType: "step_backtracked",
-            stepId: toStepId,
-            batchId: normalizeBatchId(meta?.batchId) ?? batchIdFromIndex(formState?.batchIndex) ?? undefined,
-            modelRequestId: meta?.modelRequestId ?? undefined,
-            timestamp: Date.now(),
-            payload: {
-              step_number: stepIndex + 1,
-              total_steps: totalSteps,
-              step_type: getStepType(toStep),
-              is_deterministic: isDeterministic,
-              source: stepSource,
-              step_json: toStep, // Full step object
-              from_step_id: (fromStep as any).id,
-              to_step_id: toStepId,
-              from_order: state.currentStepIndex + 1,
-              to_order: stepIndex + 1,
-            },
-          });
-        }
-      }
-      goToStep(stepIndex);
-    },
-    [formState?.batchIndex, goToStep, instanceId, sessionId, state]
-  );
+  useStepEngineDropoffTelemetry({
+    sessionId,
+    currentStep,
+    flowCompletedRef,
+    stepMetaRef,
+    isStructuralStep,
+    isBootstrapStepIdValue,
+    state,
+    instanceId,
+    formBatchIndex: formState?.batchIndex,
+  });
+  const { handleBack, handleNavigateToStep } = useStepNavigation({
+    state,
+    currentStep,
+    sessionId,
+    instanceId,
+    formBatchIndex: formState?.batchIndex,
+    stepMetaRef,
+    isBootstrapStepIdValue,
+    isStructuralStep,
+    goToPreviousStep,
+    goToStep,
+    setAdventureInputMode,
+  });
 
   const completedQuestionCount = useMemo(() => {
     if (!state?.steps || !state?.stepData) return 0;
@@ -3277,32 +1586,80 @@ export function StepEngine({
     ? answeredRefinementQuestionCount
     : autoPreviewAnsweredQuestionCount;
   const previewAutoGenerationCounterScope = hasRefinementQuestions ? "refinement" : "base";
-
-  const isBootstrapStepId = useCallback((stepId: string | null | undefined) => {
-    return isBootstrapStepIdValue(stepId);
-  }, []);
+  const { handleStepComplete } = useStepCompletion({
+    currentStep,
+    state,
+    answeredRefinementQuestionCount,
+    isStepAnsweredForCounts,
+    previewHasImage,
+    instanceId,
+    sessionId,
+    flowPlan,
+    formState,
+    setFormState: (next) => setFormState(next),
+    onStepComplete,
+    selectedServiceId,
+    serviceCatalogSnapshot,
+    deterministicStyleStep,
+    disableLegacyBudgetUploadSteps,
+    localSkeletonMode,
+    config,
+    batchingRef,
+    sceneUploadJustCompletedRef,
+    pendingRefinementPreviewAdvanceRef,
+    pendingRefinementPreviewAdvanceStageRef,
+    stepMetaRef,
+    stepStartRef,
+    lastModelRequestIdRef,
+    updateStepData,
+    addSteps,
+    markStepComplete,
+    goToStep,
+    goToNextStep,
+    requestNextBatch,
+    trackStepComplete,
+    setPendingPreviewSceneUploadUrl,
+    setPreviewRefreshNonce,
+    setPreviewAutoGenerationPending,
+    refinementUploadStepId: REFINEMENT_UPLOAD_STEP_ID,
+  });
 
   // If the user resumes a session where steps are already present (e.g. from localStorage),
   // make sure the preview system is allowed to activate without requiring a fresh generate-steps request.
   useEffect(() => {
+    if (localSkeletonMode && state?.steps?.length) {
+      setHasReceivedQuestionsFromGenerateSteps(true);
+    }
     if (hasReceivedQuestionsFromGenerateSteps) return;
     if (!state?.steps || state.steps.length === 0) return;
     const hasAnyNonBootstrapQuestion = state.steps.some((s) => {
       const id = String((s as any)?.id || "");
       if (!id) return false;
-      if (isBootstrapStepId(id)) return false;
+      if (isBootstrapStepIdValue(id)) return false;
       return isQuestionStepForAskedIds(s);
     });
     if (hasAnyNonBootstrapQuestion) setHasReceivedQuestionsFromGenerateSteps(true);
-  }, [hasReceivedQuestionsFromGenerateSteps, isBootstrapStepId, state?.steps]);
+  }, [hasReceivedQuestionsFromGenerateSteps, localSkeletonMode, state?.steps]);
 
-  // Show ease feedback after the first preview image exists (hero generated),
-  // while still respecting lead capture and one-time submission.
-  const showEasePrompt =
-    effectiveLeadCompleteForPreviewFlow &&
-    previewHasImage &&
-    !flowCompleted &&
-    !easeFeedbackSent;
+  useEffect(() => {
+    if (!localSkeletonMode) return;
+    if (!state?.steps?.length) return;
+    if (initialQuestionCountSnapshot !== null) return;
+    setInitialQuestionCountSnapshot(countPreviewGateQuestions(state.steps));
+  }, [initialQuestionCountSnapshot, localSkeletonMode, state?.steps]);
+
+  useEffect(() => {
+    if (!localSkeletonMode) return;
+    if (!state) return;
+    const caps = (state.stepData as any)?.__capabilities;
+    if (caps && typeof caps === "object" && !Array.isArray(caps) && (caps as any).image_preview === true) return;
+    updateStepData("__capabilities", {
+      ...(caps && typeof caps === "object" && !Array.isArray(caps) ? caps : {}),
+      image_preview: true,
+    });
+  }, [localSkeletonMode, state, state?.stepData, updateStepData]);
+
+  const showEasePrompt = false;
 
   const handleEaseFeedback = useCallback(
     (vote: "up" | "down") => {
@@ -3399,7 +1756,7 @@ export function StepEngine({
     formStateMetricProgress: formState?.metricProgress ?? null,
     hasReceivedQuestionsFromGenerateSteps,
     initialQuestionCountSnapshot,
-    isBootstrapStepId,
+    isBootstrapStepId: isBootstrapStepIdValue,
     previewEverEnabled,
     progressPercentage: progress?.percentage ?? null,
     setPreviewEverEnabled,
@@ -3411,10 +1768,8 @@ export function StepEngine({
 
   const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
 
-  // Gate question pane + bottom bar until lead capture is completed (skipped when lead_capture_enabled is false).
-  const leadGateLocksQuestionArea = Boolean(
-    previewEnabled && previewHasImage && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow
-  );
+  // Consolidated mode: question flow is always owned by the step engine.
+  const leadGateLocksQuestionArea = false;
   useEffect(() => {
     leadGateLocksQuestionAreaRef.current = leadGateLocksQuestionArea;
   }, [leadGateLocksQuestionArea]);
@@ -3437,6 +1792,7 @@ export function StepEngine({
       (!effectiveCurrentStep || isWaitingForNextBatch) &&
       !previewEnabled
   );
+  const isStyleStepActive = Boolean(currentStep?.id === DETERMINISTIC_STYLE_ID);
   const showPreviewSection = previewEnabled || showPreviewGeneratingEarly || isInitialLoading;
 
   const {
@@ -3461,22 +1817,30 @@ export function StepEngine({
 
   const previewRailActive = showPreviewSection;
   const density = previewRailActive ? "compact" : "normal";
-  const desktopQuestionMinHeight = "clamp(300px, 36dvh, 520px)";
-  const previewSectionBasis = "47%";
-  const questionSectionBasis = "53%";
-  const mobilePreviewSectionBasis = "70%";
-  const mobileQuestionSectionBasis = "30%";
   useEffect(() => {
     if (!showPreviewSection) setPreviewVisible(false);
     else if (showPreviewGeneratingEarly) setPreviewVisible(true);
   }, [showPreviewSection, showPreviewGeneratingEarly]);
 
   const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
+  const pricedGridStepActive = Boolean(currentStep?.id === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
   const showAccuratePricingLoader =
     !showPreviewSection &&
     (!effectiveCurrentStep || isWaitingForNextBatch) &&
     !isPreviewGenerationStage &&
     !showPreviewGeneratingEarly;
+  const hasLoadedFirstNonBootstrapQuestion = Boolean(
+    hasReceivedQuestionsFromGenerateSteps ||
+      (state?.steps || []).some((step: any) => {
+        const stepId = String((step as any)?.id || "");
+        if (!stepId || isBootstrapStepIdValue(stepId)) return false;
+        return isQuestionStepForAskedIds(step);
+      })
+  );
+  const showUnifiedStartupLoader = Boolean(
+    !(engineError || batchError) &&
+      (isInitialLoading || (!hasLoadedFirstNonBootstrapQuestion && (isBatchLoading || showAccuratePricingLoader)))
+  );
 
   const devModeUI = useMemo<DevModeUIState>(
     () => ({
@@ -3540,19 +1904,40 @@ export function StepEngine({
       setPreviewQuestionRevealReady(true);
       return;
     }
+    const allowSameStepRevealForLocalSkeletonStyle = Boolean(
+      localSkeletonMode &&
+        flowCompleted &&
+        capturedId === DETERMINISTIC_STYLE_ID &&
+        currentId === DETERMINISTIC_STYLE_ID
+    );
     // When moving forward: hide on the captured step to prevent stale content flash.
     // When backtracking: always show—user explicitly navigated back to see the question.
     // When lead captured: always show—unlock to reveal the next guided question.
-    if (!currentId || (currentId === capturedId && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow)) {
+    if (
+      !currentId ||
+      (currentId === capturedId &&
+        !isBacktrackingInForm &&
+        !effectiveLeadCompleteForPreviewFlow &&
+        !allowSameStepRevealForLocalSkeletonStyle)
+    ) {
       setPreviewQuestionRevealReady(false);
       return;
     }
     setPreviewQuestionRevealReady(true);
-  }, [currentStep?.id, previewEnabled, previewHasImage, isBacktrackingInForm, effectiveLeadCompleteForPreviewFlow]);
+  }, [
+    currentStep?.id,
+    previewEnabled,
+    previewHasImage,
+    isBacktrackingInForm,
+    effectiveLeadCompleteForPreviewFlow,
+    flowCompleted,
+    localSkeletonMode,
+  ]);
   const previewLayoutActive = Boolean(
     (usePreviewDominantLayout || useDesktopPreviewLayout) &&
       (previewHasImage || previewVisible || !previewQuestionRevealReady)
   );
+  const allowConceptGallery = Boolean(localSkeletonMode && flowCompleted);
   useEffect(() => {
     if (!previewAutoGenerationPending) return;
     if (previewAutoGenerationBusy) {
@@ -3566,14 +1951,9 @@ export function StepEngine({
     }
   }, [hasRefinementQuestions, previewAutoGenerationPending, previewHasImage]);
   const isAutoPreviewRefreshLocked = Boolean(previewHasImage && previewAutoGenerationBusy);
-  // Keep the question pane hidden while waiting for lead capture; skipped when lead capture is disabled in config.
-  const shouldHideQuestionPaneForLeadGate = Boolean(
-    previewEnabled && previewHasImage && !isBacktrackingInForm && !effectiveLeadCompleteForPreviewFlow
-  );
   const showQuestionPaneUnderPreview =
     !isPreviewGenerationStage &&
     previewQuestionRevealReady &&
-    !shouldHideQuestionPaneForLeadGate &&
     (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
   // Hide while advancing after lead capture (waiting for next step to load)
   const advancingStepId = leadCapturedAdvanceStepIdRef.current;
@@ -3588,7 +1968,6 @@ export function StepEngine({
   }, [currentStep?.id]);
   const hideQuestionPane = Boolean(
     isInitialLoading ||
-    leadGateLocksQuestionArea ||
     !showQuestionPaneUnderPreview ||
     isAdvancingAfterLeadCapture
   );
@@ -3616,7 +1995,7 @@ export function StepEngine({
       previewVisible: Boolean(previewVisible),
       previewHasImage: Boolean(previewHasImage),
       leadCaptured: Boolean(effectiveLeadCompleteForPreviewFlow),
-      showQuestionPane: Boolean(showQuestionPaneUnderPreview && !leadGateLocksQuestionArea),
+      showQuestionPane: Boolean(showQuestionPaneUnderPreview),
       showEaseFeedback: Boolean(showEasePrompt),
       showReflectionFeedback: Boolean(flowCompleted && !reflectionFeedbackSent),
     }));
@@ -3625,7 +2004,6 @@ export function StepEngine({
     isDesktopViewport,
     isMobileViewport,
     effectiveLeadCompleteForPreviewFlow,
-    leadGateLocksQuestionArea,
     previewEnabled,
     previewHasImage,
     previewVisible,
@@ -3668,7 +2046,7 @@ export function StepEngine({
     );
   }
 
-  if (isInitialLoading && !engineError && !batchError) {
+  if (showUnifiedStartupLoader && !engineError && !batchError) {
     return (
       <div className="flex items-center justify-center min-h-screen px-6">
         <AdventureLoader phase="initial" active={true} className="min-h-0 py-8" />
@@ -3683,304 +2061,131 @@ export function StepEngine({
         order: (state?.currentStepIndex ?? 0) + 1,
       }
     : null;
-  const guidedThumbnailMode = Boolean(previewLayoutActive && showQuestionPaneUnderPreview);
-  const compactQuestionHost = Boolean(previewLayoutActive && showQuestionPaneUnderPreview && previewHasImage);
+  const guidedThumbnailMode = Boolean(previewLayoutActive && showQuestionPaneUnderPreview && !pricedGridStepActive);
+  const compactQuestionHost = Boolean(previewLayoutActive && showQuestionPaneUnderPreview && previewHasImage && !pricedGridStepActive);
   const compactStepType = String((stepForRenderer as any)?.type || (stepForRenderer as any)?.componentType || "").toLowerCase();
   const compactLargeQuestionHost = compactStepType === "image_choice_grid";
   const isRefinementUploadStep = String((stepForRenderer as any)?.id) === REFINEMENT_UPLOAD_STEP_ID;
   const hasPreviewSubsections = showEasePrompt;
-  const parseBatchOrder = (batchId: string | null | undefined): number | null => {
-    if (!batchId) return null;
-    const normalized = normalizeBatchId(batchId);
-    if (!normalized) return null;
-    const match = normalized.match(/^batch-(\d+)$/i);
-    if (!match) return null;
-    const n = Number(match[1]);
-    return Number.isFinite(n) ? n : null;
-  };
-  const stepJoggerRevealBatchOrder = (() => {
-    if (!state?.steps?.length) return null;
-    const revealThroughIndex = Math.max(state.currentStepIndex ?? 0, maxVisitedIndex ?? 0);
-    let maxOrder: number | null = null;
-    for (let i = 0; i <= revealThroughIndex && i < state.steps.length; i += 1) {
-      const stepId = String((state.steps[i] as any)?.id || "");
-      if (!stepId) continue;
-      const meta = stepMetaRef.current.get(stepId);
-      const order = parseBatchOrder(meta?.batchId);
-      if (order === null) continue;
-      maxOrder = maxOrder === null ? order : Math.max(maxOrder, order);
-    }
-    return maxOrder;
-  })();
-  const stepJoggerSteps = (() => {
-    if (!state?.steps?.length) return [];
-    const indexed = state.steps.map((step, index) => ({ step, index }));
-    const withoutRefinementUpload = indexed.filter(({ step }) => String((step as any)?.id || "") !== REFINEMENT_UPLOAD_STEP_ID);
-    // After lead modal is completed, budget/upload are hidden visually — hide from jogger only then.
-    const withoutBudgetUploadWhenLeadCaptured =
-      effectiveLeadCompleteForPreviewFlow && previewHasImage
-        ? withoutRefinementUpload.filter(({ step }) => !belowPreviewControlStepIds.has(String((step as any)?.id || "")))
-        : withoutRefinementUpload;
-    if (effectiveLeadCompleteForPreviewFlow && previewHasImage) return withoutBudgetUploadWhenLeadCaptured;
-    // Before lead capture: only show batch-1 and earlier. Hide batch-2+ until lead form is filled.
-    const effectiveRevealBatchOrder = Math.min(stepJoggerRevealBatchOrder ?? 1, 1);
-    return withoutBudgetUploadWhenLeadCaptured.filter(({ step }) => {
-      const stepId = String((step as any)?.id || "");
-      if (!stepId) return true;
-      const meta = stepMetaRef.current.get(stepId);
-      const order = parseBatchOrder(meta?.batchId);
-      if (order === null || effectiveRevealBatchOrder === null) return true;
-      return order <= effectiveRevealBatchOrder;
-    });
-  })();
+  const stepJoggerSteps = buildStepJoggerSteps({
+    steps: state?.steps || [],
+    currentStepIndex: state?.currentStepIndex ?? 0,
+    maxVisitedIndex,
+    effectiveLeadCompleteForPreviewFlow,
+    previewHasImage,
+    belowPreviewControlStepIds,
+    refinementUploadStepId: REFINEMENT_UPLOAD_STEP_ID,
+    getStepMetaById: (stepId) => stepMetaRef.current.get(stepId) ?? null,
+  });
   const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1);
-  const headerVisible = Boolean(showProgressBar || stepJoggerVisible);
-  const getStepJoggerLabel = (step: any, index: number): string => {
-    const stepId = String(step?.id || "");
-    if (stepId.startsWith("step-service-primary")) return "Service";
-    if (stepId === DETERMINISTIC_STYLE_ID) return "Style";
-    if (stepId.includes("budget")) return "Budget";
-    if (stepId.includes("upload-scene")) return "Upload Photo";
-    if (stepId.includes("upload-user")) return "Person Photo";
-    if (stepId.includes("upload-product")) return "Product Photo";
-    if (stepId.includes("lead") || stepId.includes("email") || stepId.includes("phone") || stepId.includes("full-name")) return "Contact";
-    if ((step as any)?.functionCall?.name) {
-      const fn = String((step as any).functionCall.name).replace(/[_-]+/g, " ").trim();
-      return fn ? fn.replace(/\b\w/g, (c) => c.toUpperCase()) : `Step ${index + 1}`;
-    }
-
-    const raw = String(step?.copy?.headline || step?.question || step?.content?.prompt || "").trim();
-    if (!raw) return `Step ${index + 1}`;
-
-    const firstClause = raw.split(/[?.!]/)[0]?.trim() || raw;
-    const cleaned = firstClause
-      .replace(/^(what|which|how|where|when|tell us|let us|please)\s+/i, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const words = cleaned.split(" ").filter(Boolean);
-    return (words.slice(0, 4).join(" ") || `Step ${index + 1}`).replace(/\b\w/g, (c) => c.toUpperCase());
-  };
   return (
 	  <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent text-foreground" style={{ color: theme.textColor }}>
 	      {/* Header always owns its height budget so the body starts below it. */}
-	      <div
-          className={cn(
-            "z-50 shrink-0 backdrop-blur"
-          )}
-          style={{ backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.85))" }}
-        >
-        {/* Progress Bar */}
-        {showProgressBar ? (
-          <div className="px-4 pt-2 pb-1">
-            {/* Progress fill only (no grey track) */}
-            <div className="h-1.5">
-              <motion.div
-                className="h-full rounded-full"
-                initial={{ width: 0 }}
-                animate={{
-                  width: `${
-                    typeof formState?.metricProgress === "number" && Number.isFinite(formState.metricProgress)
-                      ? Math.round(Math.max(0, Math.min(1, formState.metricProgress)) * 100)
-                      : progress.percentage
-                  }%`,
-                }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                style={{ backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)" }}
-              />
-            </div>
-          </div>
-        ) : null}
-        {stepJoggerVisible ? (
-          <div className="px-4 pb-2">
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
-              {stepJoggerSteps.map(({ step, index }) => {
-                const isCurrent = index === (state?.currentStepIndex || 0);
-                const canNavigate = index <= maxVisitedIndex && !isCurrent;
-                const label = getStepJoggerLabel(step, index);
-                return (
-                  <button
-                    key={String(step?.id || `step-${index}`)}
-                    type="button"
-                    disabled={!canNavigate}
-                    onClick={() => {
-                      if (!canNavigate) return;
-                      setAdventureInputMode("questions");
-                      handleNavigateToStep(index);
-                    }}
-                    title={label}
-                    className={cn(
-                      "inline-flex max-w-[260px] items-center gap-2 rounded-full px-3 py-1.5 text-xs shadow-sm transition-colors",
-                      isCurrent ? "font-semibold" : "font-medium",
-                      canNavigate ? "cursor-pointer hover:bg-primary/10" : "cursor-default opacity-70"
-                    )}
-                    style={{
-                      backgroundColor: isCurrent ? (theme.primaryColor || "#3b82f6") : "transparent",
-                      color: isCurrent ? "#fff" : theme.textColor,
-                      fontFamily: theme.fontFamily,
-                    }}
-                  >
-                    <span
-                      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold"
-                      style={{
-                        backgroundColor: isCurrent ? "rgba(255,255,255,0.25)" : (hexToRgba(theme.primaryColor || "#3b82f6", 0.18) ?? "rgba(59,130,246,0.18)"),
-                        color: isCurrent ? "#fff" : theme.textColor,
-                      }}
-                    >
-                      {index + 1}
-                    </span>
-                    <span className="truncate">{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-      </div>
+        <StepEngineHeaderSection
+          showProgressBar={showProgressBar}
+          metricProgress={formState?.metricProgress}
+          progressPercentage={progress?.percentage ?? null}
+          stepJoggerVisible={stepJoggerVisible}
+          stepJoggerSteps={stepJoggerSteps}
+          currentStepIndex={state?.currentStepIndex || 0}
+          maxVisitedIndex={maxVisitedIndex}
+          onNavigateToStep={handleNavigateToStep}
+          onSetAdventureInputModeQuestions={() => setAdventureInputMode("questions")}
+          theme={{ primaryColor: theme.primaryColor, textColor: theme.textColor, fontFamily: theme.fontFamily }}
+        />
 
 	      {/* Main body inherits the post-header height budget. */}
-	      <main className="relative flex flex-1 min-h-0 items-stretch justify-center overflow-hidden px-2 pb-0 pt-2 sm:px-3 sm:pb-3 sm:pt-3">
-		        <div className="mx-auto h-full min-h-0 w-full max-w-[92rem] overflow-hidden">
-          <motion.div
-              ref={previewColumnRef}
-              layout={false}
-				              className={cn(
-				                "relative flex h-full min-h-0 max-h-full flex-col overflow-hidden",
-				                previewLayoutActive
-                              ? (isMobileViewport ? "gap-0" : "gap-1.5")
-                              : usePreviewDominantLayout
-                                ? "gap-2"
-                                : previewRailOpen
-                                  ? "gap-2"
-                                  : "gap-0"
-				              )}
-				            >
-                  {showPreviewSection ? (
-                    <div
-                      ref={previewViewportRef}
-                      className={cn(
-                        "flex min-h-0 flex-col overflow-hidden",
-                        previewLayoutActive ? "flex-1 min-h-0" : "shrink-0"
-                      )}
-                    >
-                      <PreviewSection
-                        adventureInputMode={adventureInputMode}
-                        answeredQuestionCount={previewAutoAnsweredQuestionCount}
-                        autoGenerationCounterScope={previewAutoGenerationCounterScope}
-                        config={config}
-                        hasPreviewSubsections={hasPreviewSubsections}
-                        instanceId={instanceId}
-                        isAdventureSurface={isAdventureSurface}
-                        isRefinementUploadStep={isRefinementUploadStep}
-                        previewMaxPx={previewMaxPx}
-                        previewHasImage={previewHasImage}
-                        previewRefreshNonce={previewRefreshNonce}
-                        pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
-                        promptDraft={promptDraft}
-                        promptSubmitCount={promptSubmitCount}
-                        sessionId={sessionId}
-                        setAutoGenerationBusy={setPreviewAutoGenerationBusy}
-                        setPreviewHasImage={setPreviewHasImage}
-                        setPreviewVisible={setPreviewVisible}
-                        showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
-                        stateStepData={state?.stepData}
-                        useDesktopPreviewLayout={useDesktopPreviewLayout}
-                        useMobilePreviewLayout={useMobilePreviewLayout}
-                        usePreviewDominantLayout={previewLayoutActive}
-                      />
-                    </div>
-                  ) : null}
-                  {!hideQuestionPane ? (
-                  <div
-                    className={cn(
-                      compactQuestionHost
-                        ? isMobileViewport
-                          ? cn(
-                              "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden",
-                              compactLargeQuestionHost ? "h-[22vh] max-h-[22vh]" : "h-[19vh] max-h-[19vh]"
-                            )
-                          : cn(
-                              "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden",
-                              compactLargeQuestionHost ? "h-[20vh] max-h-[20vh]" : "h-[17vh] max-h-[17vh]"
-                            )
-                        : "flex flex-col flex-1 min-h-0"
-                    )}
-                  >
-                    <FormQuestionSection
-                      config={config}
-                      effectiveCurrentStep={effectiveCurrentStep}
-                      flowCompleted={flowCompleted}
-                      guidedThumbnailMode={guidedThumbnailMode}
-                      handleBack={handleBack}
-                      handleEaseFeedback={handleEaseFeedback}
-                      handleReflectionFeedback={handleReflectionFeedback}
-                      handleStepComplete={handleStepComplete}
-                      hideQuestionPane={hideQuestionPane}
-                      instanceId={instanceId}
-                      isBatchLoading={isBatchLoading}
-                      isFetchingNext={isFetchingNext || isAutoPreviewRefreshLocked}
-                      isMobileViewport={isMobileViewport}
-                      isRefinementUploadStep={isRefinementUploadStep}
-                      leadCapturedForUI={effectiveLeadCompleteForPreviewFlow}
-                      leadGateLocksQuestionArea={leadGateLocksQuestionArea}
-	                      adventureInputMode={adventureInputMode}
-	                      setAdventureInputMode={setAdventureInputMode}
-	                      budgetSliderConfig={budgetSliderConfig}
-	                      budgetValue={budgetValue}
-	                      onBudgetChange={handleBudgetChange}
-	                      promptDraft={promptDraft}
-	                      setPromptDraft={setPromptDraft}
-	                      handlePromptSubmit={(uploadedUrl?: string) => {
-                          if (uploadedUrl && typeof uploadedUrl === "string") {
-                            setPendingPreviewSceneUploadUrl(uploadedUrl);
-                          }
-	                        setPromptSubmitCount((prev) => prev + 1);
-	                        setPreviewRefreshNonce((prev) => prev + 1);
-                      }}
-                      onRegeneratePreview={(uploadedUrl?: string) => {
-                        if (uploadedUrl && typeof uploadedUrl === "string") {
-                          setPendingPreviewSceneUploadUrl(uploadedUrl);
-                          updateStepData(REFINEMENT_UPLOAD_STEP_ID, uploadedUrl);
-                          updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, uploadedUrl);
-                        }
-                        setPreviewRefreshNonce((prev) => prev + 1);
-                      }}
-                      previewEnabled={previewEnabled}
-                      previewHasImage={previewHasImage}
-                      questionContentRef={questionContentRef}
-                      questionScale={questionScale}
-                      questionViewportRef={questionViewportRef}
-                      refinementUploadInputRef={refinementUploadInputRef}
-                      refinementUploading={refinementUploading}
-                      reflectionFeedbackSent={reflectionFeedbackSent}
-                      sessionId={sessionId}
-                      setRefinementUploading={setRefinementUploading}
-                      showStepTransitionSkeleton={
-                        ((isFetchingNext && !showAccuratePricingLoader) || awaitingRefinementAdvance) &&
-                        !isPreviewGenerationStage &&
-                        !showPreviewGeneratingEarly
-                      }
-                      previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly}
-                      showAccuratePricingLoader={showAccuratePricingLoader}
-                      showEasePrompt={showEasePrompt}
-                      showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
-                      state={state}
-                      stepForRenderer={stepForRenderer}
-                      theme={{
-                        borderRadius: theme.borderRadius,
-                        fontFamily: theme.fontFamily,
-                        primaryColor: theme.primaryColor,
-                        secondaryColor: theme.secondaryColor,
-                        textColor: theme.textColor,
-                      }}
-                      layoutDebugEnabled={layoutDebugEnabled}
-                      usePreviewDominantLayout={previewLayoutActive}
-                    />
-                  </div>
-                  ) : null}
-          </motion.div>
-        </div>
-      </main>
+        <StepEngineBodySection
+          previewColumnRef={previewColumnRef}
+          previewLayoutActive={previewLayoutActive}
+          isMobileViewport={isMobileViewport}
+          usePreviewDominantLayout={usePreviewDominantLayout}
+          previewRailOpen={previewRailOpen}
+          showPreviewSection={showPreviewSection}
+          previewEnabled={previewEnabled}
+          previewViewportRef={previewViewportRef}
+          pricedGridStepActive={pricedGridStepActive}
+          allowConceptGallery={allowConceptGallery}
+          styleStepActive={isStyleStepActive}
+          showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
+          adventureInputMode={adventureInputMode}
+          previewAutoAnsweredQuestionCount={previewAutoAnsweredQuestionCount}
+          previewAutoGenerationCounterScope={previewAutoGenerationCounterScope}
+          config={config}
+          hasPreviewSubsections={hasPreviewSubsections}
+          instanceId={instanceId}
+          isAdventureSurface={isAdventureSurface}
+          isRefinementUploadStep={isRefinementUploadStep}
+          previewMaxPx={previewMaxPx}
+          previewHasImage={previewHasImage}
+          previewRefreshNonce={previewRefreshNonce}
+          pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
+          promptDraft={promptDraft}
+          promptSubmitCount={promptSubmitCount}
+          sessionId={sessionId}
+          setPreviewAutoGenerationBusy={setPreviewAutoGenerationBusy}
+          setPreviewHasImage={setPreviewHasImage}
+          setPreviewVisible={setPreviewVisible}
+          state={state}
+          useDesktopPreviewLayout={useDesktopPreviewLayout}
+          useMobilePreviewLayout={useMobilePreviewLayout}
+          hideQuestionPane={hideQuestionPane}
+          compactQuestionHost={compactQuestionHost}
+          compactLargeQuestionHost={compactLargeQuestionHost}
+          flowCompleted={flowCompleted}
+          handleBack={handleBack}
+          handleEaseFeedback={handleEaseFeedback}
+          handleReflectionFeedback={handleReflectionFeedback}
+          handleStepComplete={handleStepComplete}
+          isBatchLoading={isBatchLoading}
+          isFetchingNext={isFetchingNext || isAutoPreviewRefreshLocked}
+          effectiveLeadCompleteForPreviewFlow={effectiveLeadCompleteForPreviewFlow}
+          leadGateLocksQuestionArea={leadGateLocksQuestionArea}
+          setAdventureInputMode={setAdventureInputMode}
+          budgetSliderConfig={budgetSliderConfig}
+          budgetValue={budgetValue}
+          handleBudgetChange={handleBudgetChange}
+          setPromptDraft={setPromptDraft}
+          onPromptSubmit={(uploadedUrl?: string) => {
+            if (uploadedUrl && typeof uploadedUrl === "string") setPendingPreviewSceneUploadUrl(uploadedUrl);
+            setPromptSubmitCount((prev) => prev + 1);
+            setPreviewRefreshNonce((prev) => prev + 1);
+          }}
+          onRegeneratePreview={(uploadedUrl?: string) => {
+            if (uploadedUrl && typeof uploadedUrl === "string") {
+              setPendingPreviewSceneUploadUrl(uploadedUrl);
+              updateStepData(REFINEMENT_UPLOAD_STEP_ID, uploadedUrl);
+              updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, uploadedUrl);
+            }
+            setPreviewRefreshNonce((prev) => prev + 1);
+          }}
+          questionContentRef={questionContentRef}
+          questionScale={questionScale}
+          questionViewportRef={questionViewportRef}
+          refinementUploadInputRef={refinementUploadInputRef}
+          refinementUploading={refinementUploading}
+          reflectionFeedbackSent={reflectionFeedbackSent}
+          setRefinementUploading={setRefinementUploading}
+          showStepTransitionSkeleton={
+            ((isFetchingNext && !showAccuratePricingLoader) || awaitingRefinementAdvance) &&
+            !isPreviewGenerationStage &&
+            !showPreviewGeneratingEarly
+          }
+          previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly}
+          showAccuratePricingLoader={showAccuratePricingLoader}
+          showEasePrompt={showEasePrompt}
+          stepForRenderer={stepForRenderer}
+          theme={{
+            borderRadius: theme.borderRadius,
+            fontFamily: theme.fontFamily,
+            primaryColor: theme.primaryColor,
+            secondaryColor: theme.secondaryColor,
+            textColor: theme.textColor,
+          }}
+          layoutDebugEnabled={layoutDebugEnabled}
+          effectiveCurrentStep={effectiveCurrentStep}
+          guidedThumbnailMode={guidedThumbnailMode}
+        />
 	      <DevModeOverlay
 	        enabled={devModeEnabled}
 	        sessionId={sessionId}

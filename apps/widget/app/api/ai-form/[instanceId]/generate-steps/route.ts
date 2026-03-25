@@ -318,8 +318,9 @@ function dedupeLinkedSubcategoryIds(rows: unknown): string[] {
 }
 
 function getDefaultMaxBatches(): number {
-  const raw = Number(process.env.AI_FORM_MAX_BATCH_CALLS || 2);
-  if (!Number.isFinite(raw)) return 2;
+  // Consolidated form mode defaults to a single upfront planning call.
+  const raw = Number(process.env.AI_FORM_MAX_BATCH_CALLS || 1);
+  if (!Number.isFinite(raw)) return 1;
   return Math.max(1, Math.min(8, Math.floor(raw)));
 }
 
@@ -836,8 +837,12 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
         // - optional: request
         const batchNumber = batchIndex + 1; // Convert 0-based to 1-based (0→1, 1→2)
 
-        // maxSteps is a SUGGESTION to DSPy, not a hard cap. Max 4 questions before concept.
-        const calculatedMaxSteps = 4;
+        // maxSteps is a SUGGESTION to DSPy, not a hard cap.
+        // In consolidated mode we ask for a fuller upfront plan.
+        const configuredMaxSteps = Number((aiFormConfig as any)?.maxSteps);
+        const calculatedMaxSteps = Number.isFinite(configuredMaxSteps)
+          ? Math.max(6, Math.min(24, Math.floor(configuredMaxSteps)))
+          : 12;
 
 	        const includeMeta = process.env.AI_FORM_DEBUG === "true" || (body as any).noCache === true;
         

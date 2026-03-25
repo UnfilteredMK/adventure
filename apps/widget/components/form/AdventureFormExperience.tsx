@@ -9,7 +9,7 @@ import { DesignSettings, defaultDesignSettings } from '@/types/design';
 import { useDemoTheme } from '@/components/widget/demo/DemoThemeContext';
 import { applyThemeToConfig, getPresetByKey, themeForSlugOrName } from '@/lib/demo-themes';
 import { clearStepState, loadStepState, saveStepState } from '@/lib/ai-form/state/step-state';
-import { saveServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
+import { loadServiceCatalog, saveServiceCatalog } from '@/lib/ai-form/state/service-catalog-storage';
 import { upsertFormStateContext } from '@/lib/ai-form/state/form-state-context';
 import { emitTelemetry } from '@/lib/ai-form/telemetry';
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
@@ -18,7 +18,11 @@ import { withWidgetDesignDefaults } from "@/lib/widget-design-defaults";
 import { extractAIFormConfig } from "@/lib/ai-form/config/extract-ai-form-config";
 import { ExperienceStateProvider } from "./state/ExperienceState";
 import { BrandHeader } from "@/components/widget/BrandHeader";
-import { buildDeterministicStyleStep } from "./steps/static/deterministic-style-step";
+import {
+  buildLocalSkeletonFlow,
+  LOCAL_SKELETON_FLOW_MODE,
+  LOCAL_SKELETON_VERSION,
+} from "./steps/runtime/step-engine/utils/build-local-skeleton";
 
 interface AIFormPageRendererProps {
   instanceId: string;
@@ -42,6 +46,115 @@ type DspyMeta = {
   lintFailed?: boolean;
   lintViolationCodes?: string[];
 };
+
+type BootstrapServiceOption = {
+  value: string;
+  label: string;
+  serviceName?: string | null;
+  industryId?: string | null;
+  industryName?: string | null;
+  serviceSummary?: string | null;
+  subcategoryComponents?: Array<{ key: string; label: string; priority: number }>;
+  styleQuestion?: string | null;
+  styleOptions?: Array<{
+    label: string;
+    value: string;
+    imageUrl: string;
+    description?: string | null;
+    priceTier?: string | null;
+  }>;
+};
+
+function readHintedServiceId(params: URLSearchParams): string | null {
+  const raw = params.get("serviceId") || params.get("service_id") || params.get("service") || null;
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return value || null;
+}
+
+function inferBootstrapServiceOptions({
+  instance,
+  sessionId,
+  hintedServiceId,
+}: {
+  instance: any;
+  sessionId: string;
+  hintedServiceId: string | null;
+}): BootstrapServiceOption[] {
+  const cachedCatalog = loadServiceCatalog(sessionId);
+  const cachedByServiceId =
+    cachedCatalog?.byServiceId && typeof cachedCatalog.byServiceId === "object" ? cachedCatalog.byServiceId : null;
+
+  if (cachedByServiceId) {
+    const cachedOptions = Object.entries(cachedByServiceId)
+      .map(([serviceId, meta]: [string, any]) => {
+        const trimmedId = String(serviceId || "").trim();
+        if (!trimmedId) return null;
+        const label =
+          typeof meta?.serviceName === "string" && meta.serviceName.trim()
+            ? meta.serviceName.trim()
+            : trimmedId;
+        return {
+          value: trimmedId,
+          label,
+          serviceName: label,
+          industryId: typeof meta?.industryId === "string" ? meta.industryId : null,
+          industryName: typeof meta?.industryName === "string" ? meta.industryName : null,
+          serviceSummary: typeof meta?.serviceSummary === "string" ? meta.serviceSummary : null,
+          subcategoryComponents: Array.isArray(meta?.subcategoryComponents) ? meta.subcategoryComponents : undefined,
+          styleQuestion: typeof meta?.styleQuestion === "string" ? meta.styleQuestion : null,
+          styleOptions: Array.isArray(meta?.styleOptions) ? meta.styleOptions : undefined,
+        } satisfies BootstrapServiceOption;
+      })
+      .filter(Boolean) as BootstrapServiceOption[];
+
+    if (cachedOptions.length > 0) {
+      if (!hintedServiceId) return cachedOptions;
+      const hinted = cachedOptions.find((option) => String(option.value || "").trim() === hintedServiceId);
+      return hinted ? [hinted] : cachedOptions;
+    }
+  }
+
+  if (hintedServiceId) {
+    const serviceSummary =
+      typeof instance?.company_summary === "string"
+        ? String(instance.company_summary).trim() || null
+        : typeof instance?.service_summary === "string"
+          ? String(instance.service_summary).trim() || null
+          : null;
+    return [
+      {
+        value: hintedServiceId,
+        label: hintedServiceId,
+        serviceName: hintedServiceId,
+        serviceSummary,
+      },
+    ];
+  }
+
+  const configServicesRaw = instance?.config?.aiFormConfig?.services;
+  const configServices = Array.isArray(configServicesRaw)
+    ? configServicesRaw.map((entry: any) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean)
+    : [];
+  if (configServices.length === 1) {
+    const onlyServiceId = configServices[0];
+    const serviceSummary =
+      typeof instance?.company_summary === "string"
+        ? String(instance.company_summary).trim() || null
+        : typeof instance?.service_summary === "string"
+          ? String(instance.service_summary).trim() || null
+          : null;
+    return [
+      {
+        value: onlyServiceId,
+        label: onlyServiceId,
+        serviceName: onlyServiceId,
+        serviceSummary,
+      },
+    ];
+  }
+
+  return [];
+}
 
 function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene" | undefined {
   const v = String(raw || "")
@@ -93,7 +206,8 @@ export function AdventureFormExperience({
   );
   const { themeKey, setThemeKey } = useDemoTheme();
   const isDemoRoute = Boolean(demoType && demoSlug);
-  const sessionScopeKey = isDemoRoute ? `${instanceId}::demo::${demoType}::${demoSlug}` : instanceId;
+  const baseSessionScopeKey = isDemoRoute ? `${instanceId}::demo::${demoType}::${demoSlug}` : instanceId;
+  const sessionScopeKey = `${baseSessionScopeKey}::${LOCAL_SKELETON_VERSION}`;
   const playgroundModeRef = useRef(false);
 
   const recordMeta = useCallback((payload: any) => {
@@ -366,14 +480,234 @@ export function AdventureFormExperience({
           markSessionStarted(sessionScopeKey, sessionId);
         }
 
-        // Bootstrap deterministic steps on the client.
-        // StepEngine is responsible for AI generation (`/generate-steps` calls).
+        // Bootstrap the fixed local skeleton on the client.
+        // StepEngine now only runs/renderers the deterministic flow for form mode.
         const initialUseCase = normalizeUseCase(
           initialInstanceData?.use_case ??
             initialInstanceData?.useCase ??
             initialInstanceData?.config?.useCase ??
             initialInstanceData?.config?.use_case
         );
+        const hintedServiceId = readHintedServiceId(params);
+
+        const applyBootstrap = (instance: any, serviceOptionsInput: BootstrapServiceOption[], source: "initial" | "widget") => {
+          if (abortController.signal.aborted) return;
+
+          const serviceOptions = Array.isArray(serviceOptionsInput) ? serviceOptionsInput : [];
+          setInstanceData(instance);
+          try {
+            if (serviceOptions.length > 0) {
+              saveServiceCatalog(
+                sessionId,
+                serviceOptions
+                  .map((o: any) => ({
+                    serviceId: String(o?.value || ""),
+                    serviceName: typeof o?.serviceName === "string" ? o.serviceName : typeof o?.label === "string" ? o.label : null,
+                    industryId: typeof o?.industryId === "string" ? o.industryId : null,
+                    industryName: typeof o?.industryName === "string" ? o.industryName : null,
+                    serviceSummary: typeof o?.serviceSummary === "string" ? o.serviceSummary : null,
+                    subcategoryComponents: Array.isArray(o?.subcategoryComponents)
+                      ? o.subcategoryComponents
+                      : Array.isArray(o?.subcategory_components)
+                        ? o.subcategory_components
+                        : undefined,
+                    styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
+                    styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
+                  }))
+                  .filter((x: any) => Boolean(x.serviceId)),
+              );
+            } else {
+              saveServiceCatalog(sessionId, null);
+            }
+          } catch {}
+
+          try {
+            const serviceSummary =
+              typeof (instance as any)?.company_summary === "string"
+                ? String((instance as any).company_summary).trim()
+                : typeof (instance as any)?.service_summary === "string"
+                  ? String((instance as any).service_summary).trim()
+                  : null;
+            const businessContext =
+              typeof (instance as any)?.business_context === "string"
+                ? String((instance as any).business_context).trim()
+                : typeof (instance as any)?.config?.businessContext === "string"
+                  ? String((instance as any).config.businessContext).trim()
+                  : typeof (instance as any)?.config?.aiFormConfig?.businessContext === "string"
+                    ? String((instance as any).config.aiFormConfig.businessContext).trim()
+                    : typeof (instance as any)?.name === "string"
+                      ? String((instance as any).name).trim()
+                      : null;
+            const patch: any = {};
+            if (serviceSummary) patch.serviceSummary = serviceSummary;
+            if (businessContext) patch.businessContext = businessContext;
+            if (Object.keys(patch).length > 0) upsertFormStateContext(sessionId, patch);
+          } catch {}
+
+          let baseDesign: any = defaultDesignSettings;
+          baseDesign =
+            (instance?.config as any) ||
+            instance?.designSettings ||
+            instance?.designConfig ||
+            instance?.design_settings ||
+            instance?.config?.designSettings ||
+            instance?.config?.design ||
+            instance?.design ||
+            defaultDesignSettings;
+
+          let normalizedBaseDesign: DesignSettings = {
+            ...defaultDesignSettings,
+            ...(baseDesign as any),
+          } as any;
+          if (useWidgetDefaults) {
+            normalizedBaseDesign = withWidgetDesignDefaults(normalizedBaseDesign as any, (instance as any)?.name);
+          }
+
+          setRawDesignConfig(normalizedBaseDesign);
+
+          let nextDesign: DesignSettings = normalizedBaseDesign;
+          if (isDemoRoute) {
+            const demoCfg: any =
+              (instance as any)?.active_demo?.subcategory?.demo_template_config ||
+              (instance as any)?.active_demo?.prospect?.demo_template_config ||
+              null;
+            const storedThemeKey =
+              demoCfg && typeof demoCfg.theme_key === "string" && demoCfg.theme_key.trim()
+                ? String(demoCfg.theme_key).toLowerCase()
+                : typeof (instance as any)?.active_demo?.prospect?.demo_theme_key === "string" &&
+                    (instance as any).active_demo.prospect.demo_theme_key.trim()
+                  ? String((instance as any).active_demo.prospect.demo_theme_key).toLowerCase()
+                  : null;
+
+            if (storedThemeKey && !themeKey) {
+              setThemeKey(storedThemeKey);
+            }
+
+            const effectiveKey = themeKey || storedThemeKey;
+            if (effectiveKey) {
+              const preset = getPresetByKey(effectiveKey);
+              const safePreset: any = { ...(preset as any) };
+              delete safePreset.logo_url;
+              delete safePreset.brand_name;
+              delete safePreset.title_text;
+              nextDesign = { ...(normalizedBaseDesign as any), ...(safePreset as any) } as any;
+            } else {
+              const inferred = themeForSlugOrName(
+                (instance as any)?.active_demo?.subcategory?.subcategory ||
+                  (instance as any)?.active_demo?.prospect?.company_name ||
+                  demoSlug ||
+                  ""
+              );
+              nextDesign = applyThemeToConfig(inferred as any, normalizedBaseDesign as any) as any;
+            }
+            (nextDesign as any).demo_enabled = true;
+          }
+
+          if (queryThemeKey) {
+            if (!themeKey) setThemeKey(queryThemeKey);
+            const preset = getPresetByKey(queryThemeKey);
+            const safePreset: any = { ...(preset as any) };
+            delete safePreset.logo_url;
+            delete safePreset.brand_name;
+            delete safePreset.title_text;
+            nextDesign = { ...(normalizedBaseDesign as any), ...(safePreset as any) } as any;
+            (nextDesign as any).demo_enabled = true;
+          }
+
+          baseDesignRef.current = nextDesign;
+          const injected = injectedDesignRef.current;
+          const mergedNext =
+            isPlayground && injected ? ({ ...(nextDesign as any), ...(injected as any) } as DesignSettings) : nextDesign;
+          setDesignConfig(useWidgetDefaults ? withWidgetDesignDefaults(mergedNext as any, (instance as any)?.name) : mergedNext);
+
+          setFormConfig(extractAIFormConfig((instance as any)?.config));
+
+          const hasCatalogServiceOptions = serviceOptions.length > 0;
+          const hasSingleCatalogService = serviceOptions.length === 1;
+
+          const serviceParam = hintedServiceId || "";
+          const serviceParamLower = serviceParam.toLowerCase();
+          const selectedFromParam =
+            serviceParam && serviceOptions.length > 0
+              ? serviceOptions.find((o: any) => {
+                  const value = String(o?.value || "").trim();
+                  const label = String(o?.label || o?.serviceName || "").trim().toLowerCase();
+                  return value === serviceParam || (label && label === serviceParamLower);
+                })
+              : null;
+          const singleCatalogServiceValue =
+            hasSingleCatalogService && serviceOptions[0]?.value
+              ? String(serviceOptions[0].value)
+              : null;
+          const prefillService =
+            selectedFromParam && selectedFromParam.value
+              ? String(selectedFromParam.value)
+              : singleCatalogServiceValue || serviceParam || null;
+          const steps = buildLocalSkeletonFlow({
+            serviceOptions,
+            selectedServiceId: prefillService,
+          });
+
+          try {
+            if (prefillService) {
+              const existing = loadStepState(instanceId);
+              const hasExistingForSession = Boolean(existing && existing.sessionId === sessionId);
+              const alreadyAnswered =
+                hasExistingForSession && (existing as any)?.stepData && (existing as any).stepData["step-service-primary"] !== undefined;
+              if (!alreadyAnswered) {
+                if (serviceOptions.length === 0) {
+                  saveServiceCatalog(sessionId, [
+                    {
+                      serviceId: prefillService,
+                      serviceName: prefillService,
+                      industryId: null,
+                      industryName: null,
+                    },
+                  ]);
+                }
+                const seeded: StepState = {
+                  currentStepIndex: 0,
+                  steps,
+                  completedSteps: new Set<string>(),
+                  stepData: {
+                    "step-service-primary": prefillService,
+                    service_primary: prefillService,
+                  },
+                  sessionId,
+                  skeletonVersion: LOCAL_SKELETON_VERSION,
+                };
+                saveStepState(instanceId, seeded);
+              }
+            }
+          } catch {}
+
+          setFlowPlan({
+            sessionId,
+            maxSteps: (steps?.length || 0) + 20,
+            steps,
+            mode: LOCAL_SKELETON_FLOW_MODE,
+            skeletonVersion: LOCAL_SKELETON_VERSION,
+          } as FlowPlan);
+
+          console.log("[AIFormPageRenderer] Bootstrap complete", {
+            source,
+            sessionId,
+            initialUseCase,
+            deterministicSteps: steps.map((s: any) => s?.id),
+            serviceOptionsCount: serviceOptions.length,
+          });
+        };
+
+        if (initialInstanceData) {
+          const initialServiceOptions = inferBootstrapServiceOptions({
+            instance: initialInstanceData,
+            sessionId,
+            hintedServiceId,
+          });
+          if (initialServiceOptions.length > 0) {
+            applyBootstrap(initialInstanceData, initialServiceOptions, "initial");
+          }
+        }
 
         const instanceUrl =
           isDemoRoute && demoType && demoSlug
@@ -384,8 +718,6 @@ export function AdventureFormExperience({
         // (prevents the form from falling back to a raw UUID text input in demo/autostart flows).
         let instanceUrlWithHint = instanceUrl;
         try {
-          const hintedServiceId =
-            params.get("serviceId") || params.get("service_id") || params.get("service") || null;
           if (hintedServiceId) {
             const u = new URL(instanceUrl, window.location.origin);
             u.searchParams.set("serviceId", hintedServiceId);
@@ -429,256 +761,7 @@ export function AdventureFormExperience({
 
         if (abortController.signal.aborted) return;
 
-        setInstanceData(instance);
-        try {
-          if (serviceOptions.length > 0) {
-            saveServiceCatalog(
-              sessionId,
-              serviceOptions
-                .map((o: any) => ({
-                  serviceId: String(o?.value || ""),
-                  serviceName: typeof o?.serviceName === "string" ? o.serviceName : typeof o?.label === "string" ? o.label : null,
-                  industryId: typeof o?.industryId === "string" ? o.industryId : null,
-                  industryName: typeof o?.industryName === "string" ? o.industryName : null,
-                  serviceSummary: typeof o?.serviceSummary === "string" ? o.serviceSummary : typeof o?.service_summary === "string" ? o.service_summary : null,
-                  subcategoryComponents: Array.isArray(o?.subcategoryComponents)
-                    ? o.subcategoryComponents
-                    : Array.isArray(o?.subcategory_components)
-                      ? o.subcategory_components
-                      : undefined,
-                  styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
-                  styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
-                }))
-                .filter((x: any) => Boolean(x.serviceId)),
-            );
-          } else {
-            saveServiceCatalog(sessionId, null);
-          }
-        } catch {}
-
-        // Seed formState with DB-backed service summary so all subsequent API calls can reuse it.
-        // (This intentionally lives in formState so callers like image preview can read it later.)
-        try {
-          const serviceSummary =
-            typeof (instance as any)?.company_summary === "string"
-              ? String((instance as any).company_summary).trim()
-              : typeof (instance as any)?.service_summary === "string"
-                ? String((instance as any).service_summary).trim()
-                : null;
-	          const businessContext =
-	            typeof (instance as any)?.business_context === "string"
-	              ? String((instance as any).business_context).trim()
-	              : typeof (instance as any)?.config?.businessContext === "string"
-	                ? String((instance as any).config.businessContext).trim()
-	                : typeof (instance as any)?.config?.aiFormConfig?.businessContext === "string"
-	                  ? String((instance as any).config.aiFormConfig.businessContext).trim()
-	                : typeof (instance as any)?.name === "string"
-	                  ? String((instance as any).name).trim()
-	                  : null;
-	          const patch: any = {};
-          if (serviceSummary) patch.serviceSummary = serviceSummary;
-          if (businessContext) patch.businessContext = businessContext;
-          if (Object.keys(patch).length > 0) upsertFormStateContext(sessionId, patch);
-        } catch {}
-
-        // Extract base design config (consolidated instance.config).
-        let baseDesign: any = defaultDesignSettings;
-        baseDesign =
-          (instance?.config as any) ||
-          instance?.designSettings ||
-          instance?.designConfig ||
-          instance?.design_settings ||
-          instance?.config?.designSettings ||
-          instance?.config?.design ||
-          instance?.design ||
-          defaultDesignSettings;
-
-        let normalizedBaseDesign: DesignSettings = {
-          ...defaultDesignSettings,
-          ...(baseDesign as any),
-        } as any;
-        if (useWidgetDefaults) {
-          normalizedBaseDesign = withWidgetDesignDefaults(normalizedBaseDesign as any, (instance as any)?.name);
-        }
-
-        setRawDesignConfig(normalizedBaseDesign);
-
-        let nextDesign: DesignSettings = normalizedBaseDesign;
-        if (isDemoRoute) {
-          const demoCfg: any =
-            (instance as any)?.active_demo?.subcategory?.demo_template_config ||
-            (instance as any)?.active_demo?.prospect?.demo_template_config ||
-            null;
-          const storedThemeKey =
-            demoCfg && typeof demoCfg.theme_key === "string" && demoCfg.theme_key.trim()
-              ? String(demoCfg.theme_key).toLowerCase()
-              : typeof (instance as any)?.active_demo?.prospect?.demo_theme_key === "string" &&
-                (instance as any).active_demo.prospect.demo_theme_key.trim()
-                ? String((instance as any).active_demo.prospect.demo_theme_key).toLowerCase()
-                : null;
-
-          if (storedThemeKey && !themeKey) {
-            setThemeKey(storedThemeKey);
-          }
-
-	          const effectiveKey = themeKey || storedThemeKey;
-	          if (effectiveKey) {
-	            const preset = getPresetByKey(effectiveKey);
-	            const safePreset: any = { ...(preset as any) };
-	            delete safePreset.logo_url;
-	            delete safePreset.brand_name;
-	            delete safePreset.title_text;
-	            nextDesign = { ...(normalizedBaseDesign as any), ...(safePreset as any) } as any;
-	          } else {
-	            const inferred = themeForSlugOrName(
-	              (instance as any)?.active_demo?.subcategory?.subcategory ||
-	                (instance as any)?.active_demo?.prospect?.company_name ||
-	                demoSlug ||
-	                ""
-	            );
-	            nextDesign = applyThemeToConfig(inferred as any, normalizedBaseDesign as any) as any;
-	          }
-          (nextDesign as any).demo_enabled = true;
-        }
-
-        // Playground override for first paint (query param wins in playground mode).
-	        if (queryThemeKey) {
-	          if (!themeKey) setThemeKey(queryThemeKey);
-	          const preset = getPresetByKey(queryThemeKey);
-	          const safePreset: any = { ...(preset as any) };
-	          delete safePreset.logo_url;
-	          delete safePreset.brand_name;
-	          delete safePreset.title_text;
-	          nextDesign = { ...(normalizedBaseDesign as any), ...(safePreset as any) } as any;
-	          (nextDesign as any).demo_enabled = true;
-	        }
-
-        baseDesignRef.current = nextDesign;
-        const injected = injectedDesignRef.current;
-        const mergedNext =
-          isPlayground && injected ? ({ ...(nextDesign as any), ...(injected as any) } as DesignSettings) : nextDesign;
-        setDesignConfig(useWidgetDefaults ? withWidgetDesignDefaults(mergedNext as any, (instance as any)?.name) : mergedNext);
-
-        // Extract consolidated form config (root keys preferred; legacy aiFormConfig fallback)
-        setFormConfig(extractAIFormConfig((instance as any)?.config));
-
-        // Deterministic bootstrap steps (frontend-owned).
-        // NOTE: We intentionally do NOT show the old yes/no "pricing accuracy consent" gate.
-        const steps: Array<StepDefinition | UIStep> = [];
-
-        const hasCatalogServiceOptions = serviceOptions.length > 0;
-        const hasSingleCatalogService = serviceOptions.length === 1;
-        const shouldShowServiceSelectionStep = serviceOptions.length > 1;
-
-        if (shouldShowServiceSelectionStep) {
-          steps.push({
-            id: "step-service-primary",
-            type: "multiple_choice",
-            question:
-              "Wait — to help us give you accurate pricing, mind answering a few quick questions?",
-            humanism: "What service are you interested in? Select one to start.",
-            options: serviceOptions.slice(0, 40).map((o: any) => ({
-              label: String(o?.label || "Service"),
-              value: String(o?.value || ""),
-            })),
-            multi_select: false,
-            variant: "cards",
-            columns: 2,
-            blueprint: { presentation: { auto_advance: true, continue_label: "Continue" } },
-          } as any);
-        } else if (!hasCatalogServiceOptions) {
-          // If the instance doesn't have a DB-backed service catalog, we still need a deterministic
-          // step 1 so the user can tell us what they're looking for.
-          steps.push({
-            id: "step-service-primary",
-            type: "text_input",
-            question:
-              "Wait — to help us give you accurate pricing, mind answering a few quick questions?",
-            humanism: "What service are you interested in? Type it to start.",
-            placeholder: "e.g., bathroom remodel, landscaping, roof repair…",
-            required: true,
-            blueprint: { presentation: { continue_label: "Continue" } },
-          } as any);
-        }
-
-        const serviceParamRaw =
-          params.get("serviceId") ||
-          params.get("service_id") ||
-          params.get("service") ||
-          null;
-        const serviceParam = typeof serviceParamRaw === "string" ? serviceParamRaw.trim() : "";
-        const serviceParamLower = serviceParam.toLowerCase();
-        const selectedFromParam =
-          serviceParam && serviceOptions.length > 0
-            ? serviceOptions.find((o: any) => {
-                const value = String(o?.value || "").trim();
-                const label = String(o?.label || o?.serviceName || "").trim().toLowerCase();
-                return value === serviceParam || (label && label === serviceParamLower);
-              })
-            : null;
-        const singleCatalogServiceValue =
-          hasSingleCatalogService && serviceOptions[0]?.value
-            ? String(serviceOptions[0].value)
-            : null;
-        const prefillService =
-          selectedFromParam && selectedFromParam.value
-            ? String(selectedFromParam.value)
-            : singleCatalogServiceValue || serviceParam || null;
-        const prefillServiceOption =
-          prefillService && serviceOptions.length > 0
-            ? serviceOptions.find((o: any) => String(o?.value || "") === prefillService) || null
-            : null;
-        const prefillStyleStep = prefillServiceOption ? buildDeterministicStyleStep(prefillServiceOption) : null;
-        if (prefillStyleStep && !disableLegacyBudgetUploadSteps) {
-          steps.push(prefillStyleStep);
-        }
-
-        // If a service is already known (single option / query param), seed it into step state so
-        // StepEngine can immediately call `/generate-steps` and advance.
-        try {
-          if (prefillService) {
-            const existing = loadStepState(instanceId);
-            const hasExistingForSession = Boolean(existing && existing.sessionId === sessionId);
-            const alreadyAnswered =
-              hasExistingForSession && (existing as any)?.stepData && (existing as any).stepData["step-service-primary"] !== undefined;
-            if (!alreadyAnswered) {
-              if (serviceOptions.length === 0) {
-                saveServiceCatalog(sessionId, [
-                  {
-                    serviceId: prefillService,
-                    serviceName: prefillService,
-                    industryId: null,
-                    industryName: null,
-                  },
-                ]);
-              }
-              const seeded: StepState = {
-                currentStepIndex: 0,
-                steps,
-                completedSteps: new Set<string>(),
-                stepData: {
-                  "step-service-primary": prefillService,
-                  service_primary: prefillService,
-                },
-                sessionId,
-              };
-              saveStepState(instanceId, seeded);
-            }
-          }
-        } catch {}
-
-        setFlowPlan({
-          sessionId,
-          maxSteps: (steps?.length || 0) + 20,
-          steps,
-        } as FlowPlan);
-
-        console.log('[AIFormPageRenderer] Bootstrap complete', {
-          sessionId,
-          initialUseCase,
-          deterministicSteps: steps.map((s: any) => s?.id),
-          serviceOptionsCount: serviceOptions.length,
-        });
+        applyBootstrap(instance, serviceOptions as BootstrapServiceOption[], "widget");
         // Legacy initial SSE bootstrap removed: StepEngine is the only `/generate-steps` caller.
         return;
         /*

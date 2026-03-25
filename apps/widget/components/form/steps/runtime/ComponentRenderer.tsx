@@ -12,6 +12,7 @@ import { MultipleChoiceStep } from "../step-screens/MultipleChoiceStep";
 import { SliderStep } from "../step-screens/SliderStep";
 import { FileUploadStep } from "../step-screens/FileUploadStep";
 import { GalleryStep } from "../image-preview-experience/gallery/GalleryStep";
+import { LeadCaptureStep } from "../step-screens/LeadCaptureStep";
 
 // Choice-like UISteps are rendered via `MultipleChoiceStep`/`ChoiceControl` for
 // better UX (multi-select, “Other + text”, rounded cards/chips).
@@ -117,6 +118,8 @@ export function ComponentRenderer(props: ComponentRendererProps) {
             config={props.config}
           />
         );
+      case "lead_capture":
+        return <LeadCaptureStep {...common} />;
       case "image_choice_grid":
         return <ImageChoiceGridStep {...common} />;
       default:
@@ -170,6 +173,8 @@ export function ComponentRenderer(props: ComponentRendererProps) {
       return <FileUploadStep {...common} />;
     case "image_choice_grid":
       return <ImageChoiceGridStep {...common} />;
+    case "lead_capture":
+      return <LeadCaptureStep {...common} />;
     default:
       return (
         <div className="p-6 text-sm opacity-70">

@@ -23,19 +23,13 @@ interface PhaseConfig {
 
 const PHASE_CONFIGS: Record<AdventureLoaderPhase, PhaseConfig> = {
   initial: {
-    primary: [
-      "Preparing your quote…",
-      "Calculating pricing for you…",
-      "Generating your initial design…",
-      "Building your first questions…",
-    ],
+    primary: "Getting tailored pricing for you…",
     subMessages: [
-      "Loading your service setup…",
-      "Fetching project context…",
-      "Tailoring questions to your project…",
+      "Preparing your estimate…",
+      "Loading the questions we need for accurate pricing…",
     ],
-    subMessageSuffixAfterSec: { after: 8, suffix: " This can take about 10s on first load." },
-    rotateIntervalMs: 2200,
+    subMessageSuffixAfterSec: { after: 6, suffix: " This is taking longer than expected." },
+    rotateIntervalMs: 2400,
   },
   batch_pricing: {
     primary: "Getting you accurate pricing…",
@@ -50,17 +44,17 @@ const PHASE_CONFIGS: Record<AdventureLoaderPhase, PhaseConfig> = {
     rotateIntervalMs: 2000,
   },
   preview_generating: {
-    primary: "Generating your design + pricing for you…",
+    primary: "Finding similar projects…",
     subMessages: [], // Pill overlay stays compact
     rotateIntervalMs: 2400,
   },
   preview_refining: {
-    primary: "Fine-tuning your design + pricing…",
+    primary: "Fine-tuning your preview…",
     subMessages: [], // Pill overlay stays compact
     rotateIntervalMs: 2600,
   },
   preview_refreshing: {
-    primary: "Refreshing your design + pricing…",
+    primary: "Refreshing your preview…",
     subMessages: [], // Pill overlay stays compact
     rotateIntervalMs: 2600,
   },

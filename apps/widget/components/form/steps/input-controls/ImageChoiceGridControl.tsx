@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { animate, motion, useMotionValue, useTransform } from "framer-motion";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLayoutDensity } from "../ui-layout/layout-density";
+import { formatCurrency } from "@/lib/ai-form/utils/currency";
 
 type ImageChoiceVariant = "swipe" | "selectors";
 type PriceTier = "$" | "$$" | "$$$" | "$$$$";
@@ -16,7 +17,15 @@ interface ImageChoiceGridProps {
   value?: string | string[];
   onChange: (value: string | string[]) => void;
   onSwipeComplete?: (value: string | string[]) => void;
-  options: Array<{ label: string; value?: string; imageUrl?: string; description?: string; priceTier?: PriceTier }>;
+  options: Array<{
+    label: string;
+    value?: string;
+    imageUrl?: string;
+    description?: string;
+    priceTier?: PriceTier;
+    priceRange?: { low: number; high: number; currency?: string };
+    disabled?: boolean;
+  }>;
   multiple?: boolean;
   maxSelections?: number;
   variant?: ImageChoiceVariant;
@@ -24,6 +33,20 @@ interface ImageChoiceGridProps {
   className?: string;
   thumbnailMode?: boolean;
   compactScroller?: boolean;
+  hideOptionText?: boolean;
+  displayMode?: "default" | "priced_examples";
+}
+
+function formatPriceRangeLabel(
+  range: { low: number; high: number; currency?: string } | undefined,
+  locale?: string
+): string | null {
+  if (!range) return null;
+  const low = Number(range.low);
+  const high = Number(range.high);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  const currency = typeof range.currency === "string" && range.currency.trim() ? range.currency.trim().toUpperCase() : "USD";
+  return `${formatCurrency(Math.min(low, high), { locale, currency })} - ${formatCurrency(Math.max(low, high), { locale, currency })}`;
 }
 
 function clampColumns(raw: unknown): number | undefined {
@@ -72,6 +95,8 @@ export function ImageChoiceGrid({
   className,
   thumbnailMode = false,
   compactScroller = false,
+  hideOptionText = false,
+  displayMode = "default",
 }: ImageChoiceGridProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
@@ -127,6 +152,8 @@ export function ImageChoiceGrid({
   }, [updateScrollAffordances]);
 
   const toggle = (val: string) => {
+    const matched = options.find((opt) => (opt.value || opt.label) === val);
+    if (matched?.disabled) return;
     if (multiple) {
       if (selectedArray.includes(val)) {
         onChange(selectedArray.filter((v) => v !== val));
@@ -153,6 +180,10 @@ export function ImageChoiceGrid({
   const nopeOverlayOpacity = useTransform(swipeX, [-130, -45, 0], [1, 0.35, 0]);
   const active = options[activeIndex];
   const activeKey = active ? active.value || active.label : "";
+  const pricingLocale =
+    typeof navigator !== "undefined"
+      ? ((navigator.languages && navigator.languages[0]) || navigator.language || undefined)
+      : undefined;
 
   const cardRadius = `${theme.borderRadius * 1.5}px`;
 
@@ -309,10 +340,12 @@ export function ImageChoiceGrid({
               <div className="absolute inset-x-0 bottom-0 p-3">
                 <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
                 <div className="relative z-10">
-                  <div className={cn(isCompact ? "text-[13px]" : "text-sm", "font-bold text-white")}>{active.label}</div>
-                  {active.description && (
+                  {!hideOptionText ? (
+                    <div className={cn(isCompact ? "text-[13px]" : "text-sm", "font-bold text-white")}>{active.label}</div>
+                  ) : null}
+                  {!hideOptionText && active.description ? (
                     <div className={cn(isCompact ? "text-[11px]" : "text-xs", "text-white/85")}>{active.description}</div>
-                  )}
+                  ) : null}
                 </div>
               </div>
               <div
@@ -481,12 +514,14 @@ export function ImageChoiceGrid({
                     ) : (
                       <div className="h-full w-full animate-pulse bg-muted/40" />
                     )}
-                  <div className="absolute inset-x-0 bottom-0 p-1">
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
-                    <div className="relative z-10 line-clamp-2 text-[clamp(8px,1.1vh,10px)] font-semibold leading-tight text-white">
-                      {opt.label}
+                  {!hideOptionText ? (
+                    <div className="absolute inset-x-0 bottom-0 p-1">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
+                      <div className="relative z-10 line-clamp-2 text-[clamp(8px,1.1vh,10px)] font-semibold leading-tight text-white">
+                        {opt.label}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                   </div>
                   {picked ? (
                     <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-white shadow">
@@ -519,9 +554,11 @@ export function ImageChoiceGrid({
                       className="h-full w-full object-cover"
                     />
                   </div>
-                  <div className="px-2 py-1.5 text-[11px] font-medium leading-tight">
-                    {hoveredCompactOption.label}
-                  </div>
+                  {!hideOptionText ? (
+                    <div className="px-2 py-1.5 text-[11px] font-medium leading-tight">
+                      {hoveredCompactOption.label}
+                    </div>
+                  ) : null}
                 </div>
               </div>,
               document.body
@@ -533,6 +570,7 @@ export function ImageChoiceGrid({
 
   const requestedColumns = clampColumns(columns);
   const optionCount = Math.max(1, options.length);
+  const isPricedExamples = displayMode === "priced_examples";
   const safeRequestedColumns = requestedColumns ? Math.min(requestedColumns, optionCount) : undefined;
   const mobileColumns = thumbnailMode
     ? (safeRequestedColumns ? Math.min(3, Math.max(1, safeRequestedColumns)) : (optionCount <= 2 ? 2 : 3))
@@ -590,26 +628,34 @@ export function ImageChoiceGrid({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              disabled={disabled}
+              disabled={disabled || Boolean(opt.disabled)}
               onClick={() => toggle(key)}
-              aria-disabled={disabled}
+              aria-disabled={disabled || Boolean(opt.disabled)}
               className={cn(
                 "group relative flex h-full min-h-0 min-w-0 flex-col transition-all",
                 thumbnailMode ? "overflow-hidden rounded-lg border" : "overflow-hidden rounded-2xl border-4",
-                desktopThumbnailMode ? "transform-gpu hover:scale-[1.06] hover:-translate-y-0.5 hover:z-10 hover:shadow-xl" : null,
-                disabled ? "cursor-not-allowed opacity-45" : null,
+                isPricedExamples
+                  ? "transform-gpu shadow-sm hover:shadow-xl active:scale-[0.985] md:hover:scale-[1.03] md:hover:-translate-y-0.5"
+                  : desktopThumbnailMode
+                    ? "transform-gpu hover:scale-[1.06] hover:-translate-y-0.5 hover:z-10 hover:shadow-xl"
+                    : null,
+                disabled || opt.disabled ? "cursor-not-allowed opacity-45" : null,
                 thumbnailMode
                   ? (picked ? "border-primary bg-transparent" : "border-black/10 bg-transparent hover:border-black/25")
-                  : (picked ? "border-primary" : "border-transparent bg-muted/20")
+                  : isPricedExamples
+                    ? (picked ? "border-primary bg-black/[0.02]" : "border-black/10 bg-black/[0.02] hover:border-black/20")
+                    : (picked ? "border-primary" : "border-transparent bg-muted/20")
               )}
               style={{ borderRadius: cardRadius }}
             >
               <div
                 className={cn(
-                  "w-full overflow-hidden bg-muted/30 min-h-0",
+                  "relative w-full overflow-hidden bg-muted/30 min-h-0",
                   thumbnailMode
                     ? (isNarrowViewport ? "aspect-square min-w-0" : "aspect-[2/1] min-w-0")
-                    : isNarrowViewport
+                    : isPricedExamples
+                      ? "aspect-[4/3] flex-1"
+                      : isNarrowViewport
                       ? "aspect-[4/3] flex-1"
                       : "aspect-[16/10] flex-1"
                 )}
@@ -620,22 +666,37 @@ export function ImageChoiceGrid({
                     alt={opt.label}
                     loading={thumbnailMode ? "eager" : "lazy"}
                     decoding="async"
-                    className={cn("h-full w-full object-cover transition-transform", thumbnailMode ? "group-hover:scale-[1.02]" : "group-hover:scale-105")}
+                    className={cn(
+                      "h-full w-full object-cover transition-transform",
+                      isPricedExamples ? "group-hover:scale-[1.03]" : thumbnailMode ? "group-hover:scale-[1.02]" : "group-hover:scale-105"
+                    )}
                   />
                 ) : (
                   <div className="h-full w-full animate-pulse bg-muted/40" />
                 )}
+                {isPricedExamples ? (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-left">
+                    <div className="absolute inset-x-2 bottom-2 top-auto h-[4.25rem] rounded-2xl bg-black/35 backdrop-blur-sm" />
+                    <div className="relative z-10">
+                      <div className="text-sm font-semibold text-white drop-shadow-sm">
+                        {formatPriceRangeLabel(opt.priceRange, pricingLocale) || "$••• - $•••"}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              <div className={cn(thumbnailMode ? "shrink-0 p-1" : isCompact ? "p-2.5" : "p-3", "text-left")}>
-              <div className={cn(thumbnailMode ? "text-[9px] sm:text-[10px]" : isCompact ? "text-[13px] sm:text-sm" : null, "font-bold leading-tight line-clamp-1")}>
-                  {opt.label}
-                </div>
-              {!thumbnailMode && opt.description && (
+              {!hideOptionText && !isPricedExamples ? (
+                <div className={cn(thumbnailMode ? "shrink-0 p-1" : isCompact ? "p-2.5" : "p-3", "text-left")}>
+                  <div className={cn(thumbnailMode ? "text-[9px] sm:text-[10px]" : isCompact ? "text-[13px] sm:text-sm" : null, "font-bold leading-tight line-clamp-1")}>
+                    {opt.label}
+                  </div>
+                  {!thumbnailMode && opt.description ? (
                   <div className={cn(thumbnailMode ? "text-[10px]" : isCompact ? "text-[11px]" : "text-xs", "text-muted-foreground")}>
                     {opt.description}
                   </div>
-                )}
-              </div>
+                  ) : null}
+                </div>
+              ) : null}
               {picked && (
               <div className={cn("absolute bg-primary text-white rounded-full", thumbnailMode ? "top-1 right-1 p-0.5" : "top-2 right-2 p-1 shadow-lg")}>
                 <Check className={cn(thumbnailMode ? "w-3 h-3" : "w-4 h-4")} strokeWidth={3} />

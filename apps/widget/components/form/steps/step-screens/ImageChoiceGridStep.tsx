@@ -23,7 +23,15 @@ interface ImageChoiceGridStepProps {
 }
 
 type PriceTier = "$" | "$$" | "$$$" | "$$$$";
-type Opt = { label: string; value?: string; description?: string; imageUrl?: string; priceTier?: PriceTier };
+type Opt = {
+  label: string;
+  value?: string;
+  description?: string;
+  imageUrl?: string;
+  priceTier?: PriceTier;
+  priceRange?: { low: number; high: number; currency?: string };
+  disabled?: boolean;
+};
 
 type ImageChoiceVariant = "swipe" | "selectors";
 
@@ -49,6 +57,15 @@ function normalizeOptions(raw: any[]): Opt[] {
       description: typeof o?.description === "string" ? o.description : undefined,
       imageUrl,
       priceTier: normalizePriceTier(o?.price_tier ?? o?.priceTier),
+      priceRange:
+        o?.priceRange && typeof o.priceRange === "object"
+          ? {
+              low: Number((o as any).priceRange.low),
+              high: Number((o as any).priceRange.high),
+              currency: typeof (o as any).priceRange.currency === "string" ? (o as any).priceRange.currency : undefined,
+            }
+          : undefined,
+      disabled: Boolean(o?.disabled),
     };
   });
 }
@@ -86,6 +103,11 @@ function isStyleDirectionStep(step: StepDefinition | MultipleChoiceUI): boolean 
   return rawId === "style_direction" || rawId === "step-style-direction";
 }
 
+function isPricedImageGridStep(step: StepDefinition | MultipleChoiceUI): boolean {
+  const rawId = String((step as any)?.id || (step as any)?.key || "").trim().toLowerCase();
+  return rawId === "step-priced-image-grid";
+}
+
 export function ImageChoiceGridStep({
   step,
   stepData,
@@ -106,6 +128,7 @@ export function ImageChoiceGridStep({
   const options = normalizeOptions(optionsRaw as any[]).filter((option) => !isOtherOption(option));
   const multiple = isUIStep ? Boolean((step as MultipleChoiceUI).multi_select) : Boolean((step as StepDefinition).data?.multiple);
   const isStyleStep = isStyleDirectionStep(step);
+  const isPricedGridStep = isPricedImageGridStep(step);
   const minSelections =
     isUIStep && multiple && Number.isFinite(Number((step as any)?.min_selections))
       ? Math.max(1, Math.floor(Number((step as any).min_selections)))
@@ -137,13 +160,26 @@ export function ImageChoiceGridStep({
   const columns = isUIStep ? (step as any)?.columns : (step as any)?.data?.columns;
   const normalizedColumns = Number.isFinite(Number(columns)) ? Math.max(1, Math.min(6, Math.floor(Number(columns)))) : undefined;
   const effectiveColumns =
-    !guidedThumbnailMode && !compactInPreview && isNarrowViewport
+    !isPricedGridStep && !guidedThumbnailMode && !compactInPreview && isNarrowViewport
       ? 1
       : normalizedColumns;
 
   const selectedArray = Array.isArray(value) ? value : value ? [value] : [];
   const canContinue = multiple ? selectedArray.length >= minSelections : Boolean(value);
   const maxReached = Boolean(multiple && Number.isFinite(Number(maxSelections)) && selectedArray.length >= Number(maxSelections));
+  const autoContinueOnSelect = isPricedGridStep
+    ? !multiple
+    : isStyleStep && !multiple;
+  const handleValueChange = React.useCallback(
+    (nextValue: string | string[]) => {
+      setValue(nextValue);
+      if (!autoContinueOnSelect || isLoading) return;
+      const resolvedValue = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+      if (!resolvedValue) return;
+      onComplete(resolvedValue);
+    },
+    [autoContinueOnSelect, isLoading, onComplete]
+  );
   const selectionCounter = multiple && Number.isFinite(Number(maxSelections))
     ? (
         <span
@@ -199,6 +235,10 @@ export function ImageChoiceGridStep({
         </div>
       )
     : undefined;
+  const trustLine =
+    isPricedGridStep
+      ? String((step as any)?.blueprint?.validation?.trust_line || "").trim() || "Based on real projects similar to yours"
+      : "";
 
   return (
     <StepLayout
@@ -210,14 +250,15 @@ export function ImageChoiceGridStep({
       canContinue={canContinue}
       headerInlineControl={resolvedHeaderInlineControl}
       actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
-      compactInPreview={compactInPreview}
-      preferWideLayout={!compactInPreview}
+      hideContinueAction={isPricedGridStep}
+      compactInPreview={isPricedGridStep ? false : compactInPreview}
+      preferWideLayout={isPricedGridStep || !compactInPreview}
       layoutDebugEnabled={layoutDebugEnabled}
     >
       <div
         className={layoutDebugClassName(
           layoutDebugEnabled,
-          compactInPreview
+          !isPricedGridStep && compactInPreview
             ? "mx-auto flex h-full min-h-0 w-full max-w-none min-w-0 flex-1 flex-col"
             : "flex min-h-0 w-full min-w-0 flex-col"
         )}
@@ -227,9 +268,12 @@ export function ImageChoiceGridStep({
           className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex-1 flex flex-col")}
           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}
         >
+          {isPricedGridStep ? (
+            <div className="pb-2 text-center text-xs text-muted-foreground">{trustLine}</div>
+          ) : null}
           <ImageChoiceGrid
             value={value}
-            onChange={setValue}
+            onChange={handleValueChange}
             onSwipeComplete={(finalValue) => {
               if (isLoading) return;
               onComplete(finalValue);
@@ -239,9 +283,11 @@ export function ImageChoiceGridStep({
             maxSelections={maxSelections}
             variant={effectiveVariant}
             columns={effectiveColumns}
-            thumbnailMode={Boolean(guidedThumbnailMode || compactInPreview)}
-            compactScroller={Boolean(compactInPreview)}
-            className={compactInPreview ? "h-full min-h-0 flex-1" : undefined}
+            thumbnailMode={isPricedGridStep ? false : Boolean(guidedThumbnailMode || compactInPreview)}
+            compactScroller={isPricedGridStep ? false : Boolean(compactInPreview)}
+            hideOptionText={isStyleStep || isPricedGridStep}
+            displayMode={isPricedGridStep ? "priced_examples" : "default"}
+            className={!isPricedGridStep && compactInPreview ? "h-full min-h-0 flex-1" : undefined}
           />
         </div>
       </div>

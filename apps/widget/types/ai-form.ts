@@ -346,6 +346,8 @@ export interface FlowPlan {
   leadCaptureStepIndex?: number;
   maxSteps: number;
   sessionId: string;
+  mode?: "hybrid" | "local_skeleton";
+  skeletonVersion?: string | null;
   /** Structural steps (upload/designer/lead/pricing/confirmation) to append only after Prompt Confidence is 100%. */
   structuralSteps?: StepDefinition[];
   /** Optional: look-ahead batch from backend (perf optimization). */
@@ -359,6 +361,7 @@ export interface StepState {
   completedSteps: Set<string>;
   stepData: Record<string, any>;
   sessionId: string;
+  skeletonVersion?: string | null;
 }
 
 export interface Step {

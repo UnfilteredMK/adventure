@@ -1,8 +1,11 @@
+import { LOCAL_SCOPE_STEP_ID } from "./utils/build-local-skeleton";
+
 export const DETERMINISTIC_CONSENT_ID = "step-pricing-accuracy-consent";
 export const DETERMINISTIC_SERVICE_ID = "step-service-primary";
 export const DETERMINISTIC_STYLE_ID = "step-style-direction";
 /** Planner scope keys rendered as `step-<key>` before style in adventure flow. */
 export const PRE_CONCEPT_SCOPE_STEP_IDS: ReadonlySet<string> = new Set([
+  LOCAL_SCOPE_STEP_ID,
   "step-project-type",
   "step-project-parts",
   "step-update-areas",

@@ -25,6 +25,8 @@ interface PreviewSectionProps {
   setPreviewVisible: (visible: boolean) => void;
   showQuestionPaneUnderPreview: boolean;
   stateStepData?: Record<string, any>;
+  toolingEnabled?: boolean;
+  disableConceptPicker?: boolean;
   useDesktopPreviewLayout: boolean;
   useMobilePreviewLayout: boolean;
   usePreviewDominantLayout: boolean;
@@ -50,6 +52,8 @@ export function PreviewSection({
   setPreviewVisible,
   showQuestionPaneUnderPreview: _showQuestionPaneUnderPreview,
   stateStepData,
+  toolingEnabled = true,
+  disableConceptPicker = false,
   useDesktopPreviewLayout,
   useMobilePreviewLayout,
   usePreviewDominantLayout,
@@ -117,6 +121,8 @@ export function PreviewSection({
             previewChromePx={8}
             suppressUploadOverlay={isRefinementUploadStep}
             hideBudgetInOverlay={usePreviewDominantLayout}
+            toolingEnabled={toolingEnabled}
+            disableConceptPicker={disableConceptPicker}
           />
         </div>
       </div>

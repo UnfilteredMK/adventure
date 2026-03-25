@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Slider as SliderPrimitive } from "@/components/ui/slider";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
-import { EaseFeedbackPrompt, ReflectionFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
+import { EaseFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
 import { ArrowLeft, ArrowUp, ImagePlus } from "lucide-react";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 import { layoutDebugClassName, withLayoutDebugStyle } from "../debug-layout";
@@ -17,6 +17,7 @@ interface FormQuestionSectionProps {
   config?: any;
   effectiveCurrentStep: any;
   flowCompleted: boolean;
+  forceExpandedStepLayout?: boolean;
   handleBack: () => void;
   handleEaseFeedback: (vote: "up" | "down") => void;
   handleReflectionFeedback: (rating: number, comment: string) => void;
@@ -72,6 +73,7 @@ export function FormQuestionSection({
   config,
   effectiveCurrentStep,
   flowCompleted,
+  forceExpandedStepLayout = false,
   handleBack,
   handleEaseFeedback,
   handleReflectionFeedback,
@@ -120,7 +122,9 @@ export function FormQuestionSection({
   const showPromptControls = Boolean(
     previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI
   );
-  const usePreviewPaneLayout = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
+  const usePreviewPaneLayout = Boolean(
+    usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage && !forceExpandedStepLayout
+  );
   const useBottomDockLayout = Boolean(usePreviewPaneLayout && isMobileViewport);
   const useCompactNav = useBottomDockLayout;
   const compactPreviewActive = Boolean(usePreviewPaneLayout);
@@ -882,11 +886,6 @@ export function FormQuestionSection({
                 </AnimatePresence>
               </div>
           </div>
-          {flowCompleted && !reflectionFeedbackSent ? (
-            <div className="shrink-0">
-              <ReflectionFeedbackPrompt visible={true} onSubmit={handleReflectionFeedback} />
-            </div>
-          ) : null}
         </motion.div>
       ) : null}
     </AnimatePresence>

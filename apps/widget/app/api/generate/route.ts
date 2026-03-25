@@ -367,18 +367,18 @@ export async function POST(request: NextRequest) {
 		// Credit handling
 		const creditService = new CreditService();
 		const creditPrice = (instance as any).credit_price;
-		const requiredCredits = numOutputs * creditPrice;
+		const reservedCredits = numOutputs * creditPrice;
 		const operation = `widget_image_generation_${body.instanceId}_${useCase}`;
 
-		const creditCheck = await creditService.checkCredits(accountId, requiredCredits);
+		const creditCheck = await creditService.checkCredits(accountId, reservedCredits);
 		if (!creditCheck.hasEnough) {
-			const ensureForRequired = await creditService.ensureCredits(accountId, requiredCredits);
+			const ensureForRequired = await creditService.ensureCredits(accountId, reservedCredits);
 			if (!ensureForRequired.hasEnough) {
 				return NextResponse.json(
 					{
 						error: 'Insufficient credits',
 						currentBalance: ensureForRequired.currentBalance,
-						requiredCredits,
+						requiredCredits: reservedCredits,
 						shortfall: ensureForRequired.shortfall,
 						autoTopUpAttempted: ensureForRequired.toppedUp,
 						autoTopUpAmount: ensureForRequired.topUpAmount,
@@ -387,10 +387,10 @@ export async function POST(request: NextRequest) {
 				);
 			}
 		} else {
-			const predictedPost = (creditCheck.currentBalance || 0) - requiredCredits;
+			const predictedPost = (creditCheck.currentBalance || 0) - reservedCredits;
 			if (predictedPost <= 0) {
 				try {
-					await creditService.ensureCredits(accountId, requiredCredits + 1);
+					await creditService.ensureCredits(accountId, reservedCredits + 1);
 				} catch {}
 			}
 		}
@@ -498,6 +498,19 @@ export async function POST(request: NextRequest) {
 		const filteredImages = upstreamImages.filter((img: string) =>
 			imageRefSignatures(img).every((sig) => !inputSignatures.has(sig))
 		);
+		const deliveredImages = hasInputImage ? filteredImages : upstreamImages;
+
+		if (upstreamImages.length < numOutputs) {
+			logger.warn("[GENERATE] Upstream returned fewer images than requested", {
+				instanceId: body.instanceId,
+				useCase,
+				requestedNumOutputs,
+				effectiveNumOutputs: numOutputs,
+				deliveredImageCount: upstreamImages.length,
+				modelId: upstream?.modelId || defaults.modelId,
+				predictionId: upstream?.predictionId || upstream?.id || null,
+			});
+		}
 
 		if (upstreamImages.length === 0) {
 			logger.error("[GENERATE] Upstream returned no images", {
@@ -538,7 +551,8 @@ export async function POST(request: NextRequest) {
 			});
 		}
 
-		const creditResult = await creditService.deductCredits(accountId, requiredCredits, operation, body.instanceId);
+		const actualCredits = deliveredImages.length * creditPrice;
+		const creditResult = await creditService.deductCredits(accountId, actualCredits, operation, body.instanceId);
 		if (!creditResult.success) {
 			return NextResponse.json(
 				{ error: 'Generation succeeded but credit deduction failed. Please contact support.' },
@@ -548,13 +562,13 @@ export async function POST(request: NextRequest) {
 
 		return NextResponse.json({
 			success: true,
-			images: hasInputImage ? filteredImages : upstreamImages,
+			images: deliveredImages,
 			predictionId: upstream?.predictionId || upstream?.id,
 			status: upstream?.status,
 			provider: "replicate",
 			modelId: upstream?.modelId || defaults.modelId,
 			instanceId: body.instanceId,
-			creditsDeducted: requiredCredits,
+			creditsDeducted: actualCredits,
 			newBalance: creditResult.newBalance,
 			useCase,
 		});

@@ -35,6 +35,7 @@ export interface ImagePreviewExperienceProps {
   suppressUploadOverlay?: boolean;
   /** When true, hides the budget slider overlay (e.g. when preview is in dominant/large mode). */
   hideBudgetInOverlay?: boolean;
+  toolingEnabled?: boolean;
   highConversionBuyerUI?: boolean;
 }
 

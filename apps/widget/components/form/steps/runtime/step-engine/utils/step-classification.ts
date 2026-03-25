@@ -1,6 +1,8 @@
 import { DETERMINISTIC_CONSENT_ID, DETERMINISTIC_SERVICE_ID, DETERMINISTIC_STYLE_ID } from "../constants";
 import { isFunctionCallStep } from "./function-calls";
 
+const DETERMINISTIC_PRICED_IMAGE_GRID_ID = "step-priced-image-grid";
+
 export function isStructuralStep(step: any): boolean {
   const structuralTypes = ["upload", "gallery", "lead_capture", "pricing", "confirmation"];
   const stepType = "type" in step ? step.type : undefined;
@@ -37,6 +39,7 @@ export function isPreviewGateQuestionStep(step: any): boolean {
   if (stepId.startsWith(DETERMINISTIC_SERVICE_ID)) return false;
   if (stepId === DETERMINISTIC_CONSENT_ID) return false;
   if (stepId === DETERMINISTIC_STYLE_ID) return false;
+  if (stepId === DETERMINISTIC_PRICED_IMAGE_GRID_ID) return false;
   return true;
 }
 
@@ -52,4 +55,9 @@ export function countPreviewGateQuestions(steps: any[]): number {
     if (isPreviewGateQuestionStep(step)) count += 1;
   }
   return count;
+}
+
+export function isBootstrapStepIdValue(stepId: string | null | undefined): boolean {
+  const id = String(stepId || "");
+  return id.startsWith(DETERMINISTIC_SERVICE_ID) || id === DETERMINISTIC_CONSENT_ID || id === DETERMINISTIC_STYLE_ID;
 }

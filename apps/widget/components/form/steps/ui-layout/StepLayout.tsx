@@ -19,6 +19,7 @@ interface StepLayoutProps {
   continueLabel?: string;
   className?: string;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
+  hideContinueAction?: boolean;
   feedbackPrompt?: React.ReactNode;
   headerInlineControl?: React.ReactNode;
   compactInPreview?: boolean;
@@ -56,6 +57,7 @@ export function StepLayout({
   continueLabel,
   className,
   actionsVariant = "default",
+  hideContinueAction = false,
   feedbackPrompt,
   headerInlineControl,
   compactInPreview = false,
@@ -287,22 +289,30 @@ export function StepLayout({
             </div>
           </div>
 
-          <Button
-            type="button"
-            onClick={onComplete}
-            disabled={disableContinue}
-            variant="outline"
-            className={cn(iconButtonClass, sideNavButtonClass, "shrink-0 self-center")}
-            style={{
-              ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
-              borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.14))",
-              color: theme.textColor,
-              fontFamily: theme.fontFamily,
-            }}
-            aria-label={isLoading ? "Loading" : resolvedContinueLabel}
-          >
-            <ArrowRight className={cn(useCompactPane ? "h-4 w-4" : "h-3.5 w-3.5")} />
-          </Button>
+          {!hideContinueAction ? (
+            <Button
+              type="button"
+              onClick={onComplete}
+              disabled={disableContinue}
+              variant="outline"
+              className={cn(iconButtonClass, sideNavButtonClass, "shrink-0 self-center")}
+              style={{
+                ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
+                borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.14))",
+                color: theme.textColor,
+                fontFamily: theme.fontFamily,
+              }}
+              aria-label={isLoading ? "Loading" : resolvedContinueLabel}
+            >
+              <ArrowRight className={cn(useCompactPane ? "h-4 w-4" : "h-3.5 w-3.5")} />
+            </Button>
+          ) : (
+            <div
+              className={cn(sideNavButtonClass, "shrink-0 self-center")}
+              style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
+              aria-hidden="true"
+            />
+          )}
         </div>
       ) : (
         <div
@@ -470,21 +480,23 @@ export function StepLayout({
                 Back
               </Button>
             ) : null}
-            <Button
-              type="button"
-              onClick={onComplete}
-              disabled={disableContinue}
-              className={cn(actionButtonClass, useCompactPane ? compactActionButtonClass : null)}
-              style={{
-                ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
-                backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor,
-                color: theme.buttonStyle?.textColor || "#ffffff",
-                fontFamily: theme.fontFamily,
-                borderRadius: `${theme.borderRadius}px`,
-              }}
-            >
-              {isLoading ? "Loading..." : resolvedContinueLabel}
-            </Button>
+            {!hideContinueAction ? (
+              <Button
+                type="button"
+                onClick={onComplete}
+                disabled={disableContinue}
+                className={cn(actionButtonClass, useCompactPane ? compactActionButtonClass : null)}
+                style={{
+                  ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
+                  backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor,
+                  color: theme.buttonStyle?.textColor || "#ffffff",
+                  fontFamily: theme.fontFamily,
+                  borderRadius: `${theme.borderRadius}px`,
+                }}
+              >
+                {isLoading ? "Loading..." : resolvedContinueLabel}
+              </Button>
+            ) : null}
           </div>
         </div>
       )}
