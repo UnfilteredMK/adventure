@@ -96,6 +96,9 @@ export function useStepNavigation(args: {
   const handleNavigateToStep = useCallback(
     (stepIndex: number) => {
       if (!state) return;
+      if (stepIndex < state.currentStepIndex) {
+        setAdventureInputMode("questions");
+      }
       if (sessionId && stepIndex < state.currentStepIndex) {
         const fromStep = state.steps[state.currentStepIndex];
         const toStep = state.steps[stepIndex];
@@ -131,7 +134,7 @@ export function useStepNavigation(args: {
       }
       goToStep(stepIndex);
     },
-    [formBatchIndex, goToStep, instanceId, isBootstrapStepIdValue, isStructuralStep, sessionId, state, stepMetaRef]
+    [formBatchIndex, goToStep, instanceId, isBootstrapStepIdValue, isStructuralStep, sessionId, setAdventureInputMode, state, stepMetaRef]
   );
 
   return { handleBack, handleNavigateToStep };

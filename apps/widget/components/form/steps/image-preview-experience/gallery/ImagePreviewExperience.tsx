@@ -178,6 +178,8 @@ type PreviewCacheV3 = {
   generatedForContextSignature?: string | null;
   // Answer-count gating for auto-regeneration.
   lastGeneratedAnsweredCount?: number | null;
+  // User preference for expanded pricing panel in single-image revealed mode.
+  overlayPricingCollapsed?: boolean;
 };
 
 type NavigationTransition = {
@@ -602,6 +604,7 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
           typeof base.lastGeneratedAnsweredCount === "number" && Number.isFinite(base.lastGeneratedAnsweredCount)
             ? base.lastGeneratedAnsweredCount
             : normalizedRuns.at(-1)?.answeredQuestionCount ?? null,
+        overlayPricingCollapsed: Boolean((base as any).overlayPricingCollapsed),
       };
       return next;
     }
@@ -640,6 +643,7 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
         generatedForContextSignature:
           typeof v2.generatedForContextSignature === "string" ? v2.generatedForContextSignature : null,
         lastGeneratedAnsweredCount: null,
+        overlayPricingCollapsed: false,
       };
     }
 
@@ -662,6 +666,7 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
         lastContextSignature: null,
         generatedForContextSignature: null,
         lastGeneratedAnsweredCount: null,
+        overlayPricingCollapsed: false,
       };
     }
     return null;
@@ -854,6 +859,7 @@ export function ImagePreviewExperience(props: {
     return formatPhoneInput(prefillPhone).display;
   });
   const [centeredPricingError, setCenteredPricingError] = useState<string | null>(null);
+  const [pendingExactPricingReveal, setPendingExactPricingReveal] = useState(false);
   const { submitForm: submitCenteredPricingLead, isSubmitting: isSubmittingCenteredPricingLead } = useFormSubmission({
     instanceId,
     sessionId,
@@ -912,6 +918,7 @@ export function ImagePreviewExperience(props: {
     setCenteredPricingStep("email");
     setCenteredPricingError(null);
     setShowCenteredPricingForm(false);
+    setPendingExactPricingReveal(false);
   }, [sessionId]);
 
   useEffect(() => {
@@ -958,6 +965,10 @@ export function ImagePreviewExperience(props: {
     window.addEventListener("sif_form_state_updated", handler as any);
     return () => window.removeEventListener("sif_form_state_updated", handler as any);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!leadCaptured) setPendingExactPricingReveal(false);
+  }, [leadCaptured]);
 
   useEffect(() => {
     const next = extractBudgetValue(stepDataSoFar || {});
@@ -1027,6 +1038,7 @@ export function ImagePreviewExperience(props: {
       leadCapturedAt: Date.now(),
     });
     upsertLeadGate(sessionId, "design_and_estimate", { completedAt: Date.now() });
+    setPendingExactPricingReveal(true);
     setAccuratePricingStatus("running");
     setLeadCaptured(true);
     setShowCenteredPricingForm(false);
@@ -2201,14 +2213,42 @@ export function ImagePreviewExperience(props: {
     GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
 
   const [overlayPricingExpanded, setOverlayPricingExpanded] = useState(false);
+  const [overlayPricingCollapsedLocal, setOverlayPricingCollapsedLocal] = useState<boolean>(
+    Boolean(initialCache?.overlayPricingCollapsed)
+  );
+  const overlayPricingCollapsedByUser = overlayPricingCollapsedLocal;
   useEffect(() => {
-    // Default expanded once pricing is revealed; collapse when leaving single-image revealed mode.
+    if (!cache) return;
+    const fromCache = Boolean(cache.overlayPricingCollapsed);
+    setOverlayPricingCollapsedLocal((prev) => (prev === fromCache ? prev : fromCache));
+  }, [cache?.overlayPricingCollapsed]);
+  const setOverlayPricingCollapsedPreference = useCallback(
+    (collapsed: boolean) => {
+      setOverlayPricingCollapsedLocal(collapsed);
+      setCache((prev) => {
+        const base = prev ?? loadCache(instanceId, sessionId);
+        if (!base) return prev;
+        if (Boolean(base.overlayPricingCollapsed) === collapsed) return prev;
+        const next: PreviewCacheV3 = {
+          ...base,
+          overlayPricingCollapsed: collapsed,
+          updatedAt: Date.now(),
+        };
+        saveCache(instanceId, sessionId, next);
+        return next;
+      });
+    },
+    [instanceId, sessionId]
+  );
+  useEffect(() => {
+    // Default expanded once pricing is revealed, unless user explicitly collapsed it.
+    // Always collapse when leaving single-image revealed mode.
     if (revenuePanelActive) {
-      setOverlayPricingExpanded(true);
+      setOverlayPricingExpanded(!overlayPricingCollapsedByUser);
       return;
     }
     setOverlayPricingExpanded(false);
-  }, [revenuePanelActive]);
+  }, [overlayPricingCollapsedByUser, revenuePanelActive]);
 
   useEffect(() => {
     if (!showProgressiveGalleryLoader) {
@@ -2481,6 +2521,8 @@ export function ImagePreviewExperience(props: {
       }
     } catch {
       if (currentHeroRef.current === heroAtFetchStart) setAccuratePricingStatus("error");
+    } finally {
+      setPendingExactPricingReveal(false);
     }
   }, [
     accuratePricingStatus,
@@ -2595,7 +2637,6 @@ export function ImagePreviewExperience(props: {
       pendingActionRef.current = "refresh";
       pendingGenerateModeRef.current = "manual";
       gateContextRef.current = "regenerate_manual";
-      setShowGenerateGate(true);
       return;
     }
     requestManualGenerate();
@@ -2605,7 +2646,6 @@ export function ImagePreviewExperience(props: {
     if (leadGateActive) {
       gateContextRef.current = "upload_reference";
       pendingActionRef.current = "upload";
-      setShowUploadGate(true);
       return;
     }
     uploadInputRef.current?.click();
@@ -2616,7 +2656,6 @@ export function ImagePreviewExperience(props: {
     if (leadGateActive) {
       gateContextRef.current = "download";
       pendingActionRef.current = "download";
-      setShowDownloadGate(true);
       return;
     }
     void downloadActiveImage();
@@ -2981,7 +3020,17 @@ export function ImagePreviewExperience(props: {
     return { driverLabels, driversTooltipText };
   }, [accuratePricing, leadCaptured, leadGateEnabled]);
 
-  const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
+  const waitingForExactPricing = Boolean(
+    leadGateEnabled &&
+    leadCaptured &&
+    pendingExactPricingReveal &&
+    accuratePricingStatus !== "error"
+  );
+  const pillLabel = waitingForExactPricing
+    ? "CALCULATING PRICE"
+    : leadGateEnabled
+      ? (leadCaptured ? "EST. PRICING" : "Show pricing")
+      : "EST. PRICING";
   const lockedPillPrice =
     formattedAccuratePricingRange ||
     formattedCachedHeroPricingRange ||
@@ -2993,7 +3042,7 @@ export function ImagePreviewExperience(props: {
   const pillPrice =
     formattedAccuratePricingRange ||
     (accuratePricingStatus === "error" ? lockedPillPrice : leadGateEnabled && leadCaptured ? lockedPillPrice : lockedPillPrice);
-  const pillLoading = Boolean(leadGateEnabled && leadCaptured && accuratePricingStatus === "running");
+  const pillLoading = waitingForExactPricing;
   const shouldShowBottomPricingPill = Boolean(shouldShowPricingPill && lockedPillPrice);
   const shouldShowCenteredPricingFormOverlay = Boolean(
     leadGateEnabled && !leadCaptured && showCenteredPricingForm
@@ -3042,7 +3091,10 @@ export function ImagePreviewExperience(props: {
                 setShowCenteredPricingForm(true);
                 upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
               }
-            : () => setOverlayPricingExpanded((prev) => !prev)
+            : () => {
+                setOverlayPricingCollapsedPreference(false);
+                setOverlayPricingExpanded(true);
+              }
         }
         instanceId={leadGateEnabled && leadCaptured ? instanceId : undefined}
         sessionId={leadGateEnabled && leadCaptured ? sessionId : undefined}
@@ -3052,7 +3104,9 @@ export function ImagePreviewExperience(props: {
         helperText={pricingDetailSummary.driversTooltipText || undefined}
         onRevealed={() => {
           setLeadCaptured(true);
-          // Pricing fetch triggered by useEffect when leadCaptured becomes true — avoids duplicate requests.
+          setPendingExactPricingReveal(true);
+          setAccuratePricingStatus("running");
+          void fetchAccuratePricingRef.current?.();
         }}
         accentColor={singleModePricingPillBg}
         style={{ fontFamily: theme.fontFamily, backgroundColor: singleModePricingPillBg, ...pricingPillVars }}
@@ -3123,9 +3177,25 @@ export function ImagePreviewExperience(props: {
 
   if (!enabled) return null;
 
-  /** Left-rail control sits outside the image frame; ancestors must not clip it. */
+  /** Show "Back to gallery" only when a single hero is active and a gallery view exists. */
   const showGalleryBackControl =
     !showConceptPicker && Boolean(hero) && (selectedConceptIndex !== null || hasMultiImageRun);
+  const handleBackToGallery = () => {
+    setCache((prev) => {
+      const base = prev ?? loadCache(instanceId, sessionId);
+      if (!base) return prev;
+      const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
+      const next: PreviewCacheV3 = {
+        ...base,
+        viewMode: "gallery",
+        activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
+        selectedConceptIndex: null,
+        updatedAt: Date.now(),
+      };
+      saveCache(instanceId, sessionId, next);
+      return next;
+    });
+  };
 
   const useResponsiveConceptGalleryShell = showConceptPicker;
   const previewFrameStyle = useResponsiveConceptGalleryShell
@@ -3259,40 +3329,6 @@ export function ImagePreviewExperience(props: {
 				                })}
 				              </AnimatePresence>
 
-              {/* Left rail: sibling of the clipped image shell so negative translate is not cut off. */}
-              {showGalleryBackControl ? (
-                <div className="absolute left-3 top-3 z-40 pointer-events-none flex sm:left-4 sm:top-4">
-                  <div className="pointer-events-auto">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCache((prev) => {
-                          const base = prev ?? loadCache(instanceId, sessionId);
-                          if (!base) return prev;
-                          const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
-                          const next: PreviewCacheV3 = {
-                            ...base,
-                            viewMode: "gallery",
-                            activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
-                            selectedConceptIndex: null,
-                            updatedAt: Date.now(),
-                          };
-                          saveCache(instanceId, sessionId, next);
-                          return next;
-                        });
-                      }}
-                      aria-label="Back to gallery"
-                      title="Back to gallery"
-                      className={overlayButtonClass}
-                      style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
-                    >
-                      <ArrowLeft className="h-3.5 w-3.5" />
-                      <span className="font-medium">Back to gallery</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
 				              <div
 				                className={cn(
 				                  useResponsiveConceptGalleryShell
@@ -3331,11 +3367,34 @@ export function ImagePreviewExperience(props: {
               {toolingEnabled && !showConceptPicker && hero ? (
                 <div className="absolute inset-x-2 top-2 z-10 flex items-start justify-between pointer-events-none">
                   <div className="pointer-events-auto flex items-center gap-1.5">
+                    {showGalleryBackControl ? (
+                      <button
+                        type="button"
+                        onClick={handleBackToGallery}
+                        aria-label="Back to gallery"
+                        title="Back to gallery"
+                        className={cn(
+                          overlayButtonClass,
+                          "h-7 rounded-full px-2.5 text-[11px] font-medium gap-1.5"
+                        )}
+                        style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        <span>Back</span>
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div
+                    className="pointer-events-auto flex items-center gap-1.5 text-white"
+                    style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+                  >
                     {hero && !busy ? (
                       leadGateEnabled && !leadCaptured ? (
                         <LeadGenPopover
                           open={showGenerateGate}
                           onOpenChange={(open) => {
+                            if (open === showGenerateGate) return;
                             if (!open) {
                               pendingActionRef.current = null;
                               pendingGenerateModeRef.current = "manual";
@@ -3353,7 +3412,7 @@ export function ImagePreviewExperience(props: {
                           submitOnEmail={false}
                           submissionData={{ surface: "preview_generate" }}
                           side="bottom"
-                          align="start"
+                          align="end"
                           sideOffset={6}
                           onSubmitted={() => {
                             setLeadCaptured(true);
@@ -3402,12 +3461,6 @@ export function ImagePreviewExperience(props: {
                         </button>
                       )
                     ) : null}
-                  </div>
-
-                  <div
-                    className="pointer-events-auto flex items-center gap-1.5 text-white"
-                    style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
-                  >
                     {/* Download and expand only in single view — not meaningful in gallery picker mode */}
                     {!showConceptPicker ? (
                       <>
@@ -3415,10 +3468,12 @@ export function ImagePreviewExperience(props: {
                           <LeadGenPopover
                         open={showDownloadGate}
                         onOpenChange={(v) => {
+                          if (v && !leadGateActive) return;
+                          if (v === showDownloadGate) return;
                           if (!v) {
                             pendingActionRef.current = null;
-                            setShowDownloadGate(false);
                           }
+                          setShowDownloadGate(v);
                         }}
                         instanceId={instanceId}
                         sessionId={sessionId}
@@ -3670,10 +3725,12 @@ export function ImagePreviewExperience(props: {
                     <LeadGenPopover
                       open={showUploadGate}
                       onOpenChange={(v) => {
+                        if (v && !leadGateActive) return;
+                        if (v === showUploadGate) return;
                         if (!v) {
                           pendingActionRef.current = null;
-                          setShowUploadGate(false);
                         }
+                        setShowUploadGate(v);
                       }}
                       instanceId={instanceId}
                       sessionId={sessionId}
@@ -3724,10 +3781,12 @@ export function ImagePreviewExperience(props: {
                   <LeadGenPopover
                     open={showUploadGate}
                     onOpenChange={(v) => {
+                      if (v && !leadGateActive) return;
+                      if (v === showUploadGate) return;
                       if (!v) {
                         pendingActionRef.current = null;
-                        setShowUploadGate(false);
                       }
+                      setShowUploadGate(v);
                     }}
                     instanceId={instanceId}
                     sessionId={sessionId}
@@ -4138,7 +4197,10 @@ export function ImagePreviewExperience(props: {
                           <button
                             type="button"
                             className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-white/85 hover:bg-white/10"
-                            onClick={() => setOverlayPricingExpanded(false)}
+                            onClick={() => {
+                              setOverlayPricingCollapsedPreference(true);
+                              setOverlayPricingExpanded(false);
+                            }}
                             aria-label="Collapse pricing"
                             title="Collapse"
                           >

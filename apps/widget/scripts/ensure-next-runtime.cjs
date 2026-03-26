@@ -20,6 +20,8 @@ const cwd = process.cwd();
 const nextDir = path.join(cwd, ".next");
 const runtimePath = path.join(nextDir, "server", "webpack-runtime.js");
 const chunksDir = path.join(nextDir, "server", "chunks");
+const vendorChunksDir = path.join(nextDir, "server", "chunks", "vendor-chunks");
+const serverVendorChunksDir = path.join(nextDir, "server", "vendor-chunks");
 const cacheDir = path.join(cwd, "node_modules", ".cache");
 
 if (!exists(runtimePath) || !exists(chunksDir)) {
@@ -98,6 +100,36 @@ for (const file of numericChunks) {
   }
 }
 
+let vendorChunkFiles = [];
+try {
+  vendorChunkFiles = fs.readdirSync(vendorChunksDir);
+} catch {
+  vendorChunkFiles = [];
+}
+
+if (vendorChunkFiles.length > 0) {
+  try {
+    fs.mkdirSync(serverVendorChunksDir, { recursive: true });
+  } catch {}
+  for (const file of vendorChunkFiles) {
+    if (!file.endsWith(".js")) continue;
+    const shimPath = path.join(serverVendorChunksDir, file);
+    const targetRel = `../chunks/vendor-chunks/${file}`;
+    const shim = `module.exports = require(${JSON.stringify(targetRel)});\n`;
+
+    let current = null;
+    try {
+      current = fs.readFileSync(shimPath, "utf8");
+    } catch {}
+
+    if (current !== shim) {
+      try {
+        fs.writeFileSync(shimPath, shim, "utf8");
+      } catch {}
+    }
+  }
+}
+
 console.warn(
-  `[widget] Next.js server runtime expects root chunk requires; created ${numericChunks.length} shims in .next/server/`
+  `[widget] Next.js server runtime expects root chunk requires; created ${numericChunks.length} numeric shims and ${vendorChunkFiles.length} vendor shims in .next/server/`
 );

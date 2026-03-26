@@ -9,7 +9,7 @@ export function StepEngineHeaderSection(args: {
   metricProgress: number | null | undefined;
   progressPercentage: number | null | undefined;
   stepJoggerVisible: boolean;
-  stepJoggerSteps: Array<{ step: any; index: number }>;
+  stepJoggerSteps: Array<{ step: { id?: string | null } & Record<string, unknown>; index: number }>;
   currentStepIndex: number;
   maxVisitedIndex: number;
   onNavigateToStep: (index: number) => void;
@@ -32,6 +32,8 @@ export function StepEngineHeaderSection(args: {
     onSetAdventureInputModeQuestions,
     theme,
   } = args;
+
+  const currentVisiblePosition = stepJoggerSteps.findIndex(({ index }) => index === currentStepIndex);
 
   return (
     <div className={cn("z-50 shrink-0 backdrop-blur")} style={{ backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.85))" }}>
@@ -57,9 +59,11 @@ export function StepEngineHeaderSection(args: {
       {stepJoggerVisible ? (
         <div className="px-4 pb-2">
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
-            {stepJoggerSteps.map(({ step, index }) => {
+            {stepJoggerSteps.map(({ step, index }, visiblePosition) => {
               const isCurrent = index === currentStepIndex;
-              const canNavigate = index <= maxVisitedIndex && !isCurrent;
+              const isEarlierVisibleStep =
+                currentVisiblePosition >= 0 ? visiblePosition < currentVisiblePosition : index < currentStepIndex;
+              const canNavigate = !isCurrent && (index <= maxVisitedIndex || isEarlierVisibleStep);
               const label = getStepJoggerLabel(step, index);
               return (
                 <button

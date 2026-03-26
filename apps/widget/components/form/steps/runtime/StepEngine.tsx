@@ -195,7 +195,9 @@ export function StepEngine({
   /** When true, we just completed a scene upload step and are fetching the next batch; prefer preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders. */
   const sceneUploadJustCompletedRef = useRef(false);
   const [adventureInputMode, setAdventureInputMode] = useState<"questions" | "prompt" | "budget" | "uploads">("questions");
-  const [designControlsRevealed, setDesignControlsRevealed] = useState<boolean>(() => !leadCapturedForUI);
+  const [designControlsRevealed, setDesignControlsRevealed] = useState(false);
+  const [questionPaneRevealedByUser, setQuestionPaneRevealedByUser] = useState(false);
+  const previewPaneAutoCollapsedRef = useRef(false);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptSubmitCount, setPromptSubmitCount] = useState(0);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
@@ -239,13 +241,22 @@ export function StepEngine({
       if (localSkeletonMode) {
         if (instanceId && sessionId) {
           updatePreviewCacheSnapshot(instanceId, sessionId, (cache) => {
+            const activeRun = getActivePreviewRunSnapshot(cache);
+            if (!cache || !activeRun || !Array.isArray(activeRun.images) || activeRun.images.length === 0) {
+              return cache;
+            }
+            const maxIndex = Math.max(0, activeRun.images.length - 1);
+            const rawSelectedIndex =
+              typeof cache.selectedConceptIndex === "number" && Number.isFinite(cache.selectedConceptIndex)
+                ? Math.floor(cache.selectedConceptIndex)
+                : 0;
+            const nextSelectedIndex = Math.max(0, Math.min(maxIndex, rawSelectedIndex));
             return {
-              ...(cache ?? {}),
-              runs: [],
-              activeRunId: null,
-              selectedConceptIndex: null,
-              viewMode: "gallery",
-              status: "idle",
+              ...cache,
+              activeRunId: activeRun.id,
+              selectedConceptIndex: nextSelectedIndex,
+              viewMode: "single",
+              status: cache.status === "running" ? "complete" : cache.status,
               message: null,
               error: null,
               updatedAt: Date.now(),
@@ -636,16 +647,72 @@ export function StepEngine({
       updateStepData(DETERMINISTIC_PRICED_IMAGE_GRID_ID, null);
       updateStepData("__selectedPreviewImage", null);
     }
+    if (!hasMeaningfulAnswer(pricedAnswer)) {
+      const rawIndex =
+        typeof previewCacheSnapshot?.selectedConceptIndex === "number" && Number.isFinite(previewCacheSnapshot.selectedConceptIndex)
+          ? Math.floor(previewCacheSnapshot.selectedConceptIndex)
+          : previewCacheSnapshot?.viewMode === "single"
+            ? 0
+            : null;
+      if (rawIndex !== null && Array.isArray(activePreviewRun.images) && activePreviewRun.images.length > 0) {
+        const previewIndex = Math.max(0, Math.min(activePreviewRun.images.length - 1, rawIndex));
+        const imageUrl = typeof activePreviewRun.images[previewIndex] === "string" ? activePreviewRun.images[previewIndex] : null;
+        if (imageUrl) {
+          const selectedPricing = Array.isArray((activePreviewRun as any).imagePricing)
+            ? (activePreviewRun as any).imagePricing?.[previewIndex]
+            : null;
+          const lowRaw = Number((selectedPricing as any)?.totalMin);
+          const highRaw = Number((selectedPricing as any)?.totalMax);
+          const normalizedPriceRange =
+            Number.isFinite(lowRaw) && Number.isFinite(highRaw)
+              ? {
+                  low: Math.max(0, Math.min(lowRaw, highRaw)),
+                  high: Math.max(0, Math.max(lowRaw, highRaw)),
+                  currency:
+                    typeof (selectedPricing as any)?.currency === "string" && String((selectedPricing as any).currency).trim()
+                      ? String((selectedPricing as any).currency).trim().toUpperCase()
+                      : "USD",
+                }
+              : null;
+          updateStepData(DETERMINISTIC_PRICED_IMAGE_GRID_ID, {
+            value: imageUrl,
+            label: `Similar project ${previewIndex + 1}`,
+            imageUrl,
+            priceRange: normalizedPriceRange,
+            previewIndex,
+            previewRunId: activePreviewRun.id,
+          });
+          updateStepData("__selectedPreviewImage", {
+            imageUrl,
+            priceRange: normalizedPriceRange,
+            selectedAt: Date.now(),
+          });
+          return;
+        }
+      }
+    }
+    if (leadCapturedForUI) return;
+    if (!questionPaneRevealedByUser && !designControlsRevealed) return;
     const pricedIndex = state.steps.findIndex((step: any) => String((step as any)?.id || "") === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
     if (pricedIndex < 0) return;
+    const currentIndex = state.currentStepIndex ?? 0;
+    // Respect explicit backtracking. If the user navigates to a step before the priced grid,
+    // do not immediately force them back into the gallery selection step.
+    if (currentIndex < pricedIndex) return;
     if (currentStep?.id === DETERMINISTIC_PRICED_IMAGE_GRID_ID || currentStep?.id === "step-lead-capture") return;
-    if (pricedGridPresentedRunIdRef.current === activePreviewRun.id && (state.currentStepIndex ?? 0) === pricedIndex) return;
+    if (pricedGridPresentedRunIdRef.current === activePreviewRun.id && currentIndex === pricedIndex) return;
     pricedGridPresentedRunIdRef.current = activePreviewRun.id;
     goToStep(pricedIndex);
   }, [
+    activePreviewRun,
     activePreviewRun?.id,
     currentStep?.id,
     goToStep,
+    leadCapturedForUI,
+    designControlsRevealed,
+    previewCacheSnapshot?.selectedConceptIndex,
+    previewCacheSnapshot?.viewMode,
+    questionPaneRevealedByUser,
     updateStepData,
     state?.currentStepIndex,
     state?.stepData,
@@ -704,17 +771,18 @@ export function StepEngine({
     removeStepsByIds(leadCaptureStepIds);
   }, [effectiveLeadCompleteForPreviewFlow, leadCaptureStepIds, removeStepsByIds, state?.steps]);
 
-  // When lead is captured: switch to Guided tab so user sees next questions immediately.
+  // When lead is captured from the preview, keep the hero in its presentation state
+  // until the user explicitly asks to continue designing.
   useEffect(() => {
     if (!leadCapturedForUI) return;
-    setAdventureInputMode("questions");
-    // Hide refinement controls until user explicitly opts in via "Keep designing".
+    // Keep the preview visually stable until the user explicitly opts in via "Keep designing".
     setDesignControlsRevealed(false);
   }, [leadCapturedForUI]);
 
   useEffect(() => {
     if (!effectiveLeadCompleteForPreviewFlow) return;
     if (!previewHasImage) return;
+    if (!questionPaneRevealedByUser && !designControlsRevealed) return;
     if (!currentStep || !state?.steps?.length) return;
     const currentStepId = String(currentStep.id || "");
     if (!belowPreviewControlStepIds.has(currentStepId)) return;
@@ -742,8 +810,10 @@ export function StepEngine({
     belowPreviewControlStepIds,
     currentStep,
     goToStep,
+    designControlsRevealed,
     effectiveLeadCompleteForPreviewFlow,
     previewHasImage,
+    questionPaneRevealedByUser,
     state?.currentStepIndex,
     state?.steps,
   ]);
@@ -751,6 +821,7 @@ export function StepEngine({
   // If we blocked an auto-advance due to the preview gate, resume once lead is captured.
   useEffect(() => {
     if (!effectiveLeadCompleteForPreviewFlow) return;
+    if (!questionPaneRevealedByUser && !designControlsRevealed) return;
     const pending = pendingPreviewAdvanceRef.current;
     if (pending) {
       if (!currentStep || currentStep.id !== pending.stepId) {
@@ -787,8 +858,10 @@ export function StepEngine({
     currentStep,
     goToNextStep,
     goToStep,
+    designControlsRevealed,
     effectiveLeadCompleteForPreviewFlow,
     previewHasImage,
+    questionPaneRevealedByUser,
     state?.currentStepIndex,
     state?.stepData,
     state?.steps,
@@ -1014,6 +1087,8 @@ export function StepEngine({
     setReflectionFeedbackSent(false);
     setPreviewVisible(false);
     setPreviewEverEnabled(false);
+    setQuestionPaneRevealedByUser(false);
+    previewPaneAutoCollapsedRef.current = false;
     setInitialQuestionCountSnapshot(null);
     setHasReceivedQuestionsFromGenerateSteps(false);
     stepMetaRef.current.clear();
@@ -1593,6 +1668,13 @@ export function StepEngine({
     goToStep,
     setAdventureInputMode,
   });
+  const handleStepJoggerNavigate = useCallback(
+    (stepIndex: number) => {
+      setQuestionPaneRevealedByUser(true);
+      handleNavigateToStep(stepIndex);
+    },
+    [handleNavigateToStep]
+  );
 
   const completedQuestionCount = useMemo(() => {
     if (!state?.steps || !state?.stepData) return 0;
@@ -1870,6 +1952,15 @@ export function StepEngine({
     if (!showPreviewSection) setPreviewVisible(false);
     else if (showPreviewGeneratingEarly) setPreviewVisible(true);
   }, [showPreviewSection, showPreviewGeneratingEarly]);
+  useEffect(() => {
+    if (!previewHasImage) {
+      previewPaneAutoCollapsedRef.current = false;
+      return;
+    }
+    if (previewPaneAutoCollapsedRef.current) return;
+    previewPaneAutoCollapsedRef.current = true;
+    setQuestionPaneRevealedByUser(false);
+  }, [previewHasImage]);
 
   const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
   const pricedGridStepActive = Boolean(currentStep?.id === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
@@ -2000,30 +2091,42 @@ export function StepEngine({
     }
   }, [hasRefinementQuestions, previewAutoGenerationPending, previewHasImage]);
   const isAutoPreviewRefreshLocked = Boolean(previewHasImage && previewAutoGenerationBusy);
+  const galleryPreviewActive = Boolean(showPreviewSection && previewHasImage);
+  const currentStepSupportsQuestionPane = Boolean(
+    currentStep &&
+      !isStructuralStep(currentStep) &&
+      !flowCompleted
+  );
+  const forceQuestionPaneVisibleForBacktracking = Boolean(
+    isBacktrackingInForm && currentStepSupportsQuestionPane
+  );
   const showQuestionPaneUnderPreview =
-    !isPreviewGenerationStage &&
-    previewQuestionRevealReady &&
-    (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
+    forceQuestionPaneVisibleForBacktracking ||
+    (
+      !isPreviewGenerationStage &&
+      previewQuestionRevealReady &&
+      (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm)
+    );
 
+  const isLeadPricingPresentationActive = Boolean(
+    previewHasImage && leadCapturedForUI && !designControlsRevealed && !isBacktrackingInForm
+  );
+  const shouldRevealCompactedQuestionPane = Boolean(
+    isBacktrackingInForm ||
+      forceQuestionPaneVisibleForBacktracking ||
+      designControlsRevealed ||
+      questionPaneRevealedByUser ||
+      !galleryPreviewActive
+  );
   const gatedQuestionPaneUnderPreview = Boolean(
-    showQuestionPaneUnderPreview && (designControlsRevealed || !leadCapturedForUI)
+    showQuestionPaneUnderPreview && shouldRevealCompactedQuestionPane
   );
 
   const handleKeepDesigning = useCallback(() => {
     setAdventureInputMode("questions");
     setDesignControlsRevealed(true);
-    if (!gatedQuestionPaneUnderPreview) return;
-    const el = questionViewportRef.current;
-    if (!el || typeof window === "undefined") return;
-    const run = () => {
-      try {
-        el.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" });
-      } catch {
-        el.scrollIntoView();
-      }
-    };
-    requestAnimationFrame(() => requestAnimationFrame(run));
-  }, [gatedQuestionPaneUnderPreview, questionViewportRef]);
+    setQuestionPaneRevealedByUser(true);
+  }, []);
   // Hide while advancing after lead capture (waiting for next step to load)
   const advancingStepId = leadCapturedAdvanceStepIdRef.current;
   const isAdvancingAfterLeadCapture = Boolean(
@@ -2064,7 +2167,7 @@ export function StepEngine({
       previewVisible: Boolean(previewVisible),
       previewHasImage: Boolean(previewHasImage),
       leadCaptured: Boolean(effectiveLeadCompleteForPreviewFlow),
-      showQuestionPane: Boolean(showQuestionPaneUnderPreview),
+      showQuestionPane: Boolean(gatedQuestionPaneUnderPreview),
       showEaseFeedback: Boolean(showEasePrompt),
       showReflectionFeedback: Boolean(flowCompleted && !reflectionFeedbackSent),
     }));
@@ -2076,13 +2179,13 @@ export function StepEngine({
     previewEnabled,
     previewHasImage,
     previewVisible,
+    gatedQuestionPaneUnderPreview,
     isPreviewGenerationStage,
     reflectionFeedbackSent,
     setFacts,
     showBrandingHeader,
     showEasePrompt,
     showProgressBar,
-    showQuestionPaneUnderPreview,
     showStepDescriptions,
     state?.steps,
   ]);
@@ -2158,7 +2261,7 @@ export function StepEngine({
           stepJoggerSteps={stepJoggerSteps}
           currentStepIndex={state?.currentStepIndex || 0}
           maxVisitedIndex={maxVisitedIndex}
-          onNavigateToStep={handleNavigateToStep}
+          onNavigateToStep={handleStepJoggerNavigate}
           onSetAdventureInputModeQuestions={() => setAdventureInputMode("questions")}
           theme={{ primaryColor: theme.primaryColor, textColor: theme.textColor, fontFamily: theme.fontFamily }}
         />
@@ -2172,6 +2275,7 @@ export function StepEngine({
           previewRailOpen={previewRailOpen}
           showPreviewSection={showPreviewSection}
           previewEnabled={previewEnabled}
+          leadPricingPresentationActive={isLeadPricingPresentationActive}
           previewViewportRef={previewViewportRef}
           pricedGridStepActive={pricedGridStepActive}
           allowConceptGallery={allowConceptGallery}

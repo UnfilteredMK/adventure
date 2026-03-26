@@ -22,6 +22,7 @@ interface PreviewSectionProps {
   setAutoGenerationBusy: (busy: boolean) => void;
   setPreviewHasImage: (hasImage: boolean) => void;
   setPreviewVisible: (visible: boolean) => void;
+  leadPricingPresentationActive?: boolean;
   showQuestionPaneUnderPreview: boolean;
   stateStepData?: Record<string, any>;
   toolingEnabled?: boolean;
@@ -50,6 +51,7 @@ export function PreviewSection({
   setAutoGenerationBusy,
   setPreviewHasImage,
   setPreviewVisible,
+  leadPricingPresentationActive = false,
   showQuestionPaneUnderPreview: _showQuestionPaneUnderPreview,
   stateStepData,
   toolingEnabled = true,
@@ -79,17 +81,21 @@ export function PreviewSection({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain",
+        "flex min-h-0 flex-col overflow-x-hidden",
+        leadPricingPresentationActive ? "overflow-hidden" : "overflow-y-auto overscroll-contain",
         usePreviewDominantLayout
           ? hasPreviewSubsections
             ? "flex-1"
-            : "flex-1 flex items-start justify-center"
+            : leadPricingPresentationActive
+              ? "flex-1"
+              : "flex-1 flex items-start justify-center"
           : "flex-1 shrink-0"
       )}
     >
       <div
         className={cn(
           "mx-auto flex w-full min-h-0 flex-col",
+          leadPricingPresentationActive ? "h-full flex-1" : null,
           useMobilePreviewLayout
             ? "px-2 max-w-none"
             : useDesktopPreviewLayout
@@ -100,7 +106,7 @@ export function PreviewSection({
           usePreviewDominantLayout ? "py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
-        <div className="flex w-full min-h-0 flex-col">
+        <div className={cn("flex w-full min-h-0 flex-col", leadPricingPresentationActive ? "h-full flex-1" : null)}>
           <ImagePreviewExperience
             key="image-preview"
             enabled={true}

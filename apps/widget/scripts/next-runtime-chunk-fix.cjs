@@ -20,6 +20,13 @@ function toChunkShimRequest(request) {
   return `./chunks/${m[1]}.js`;
 }
 
+function toVendorChunkShimRequest(request) {
+  if (typeof request !== "string") return null;
+  const m = request.match(/^\.\/vendor-chunks\/(.+)\.js$/);
+  if (!m) return null;
+  return `./chunks/vendor-chunks/${m[1]}.js`;
+}
+
 function installResolvePatch() {
   const current = Module._resolveFilename;
   if (current && current.__widgetNextRuntimeChunkFixInstalled) return;
@@ -32,17 +39,23 @@ function installResolvePatch() {
       const parentFilename = parent && parent.filename;
       if (!isWebpackRuntime(parentFilename)) throw err;
 
-      const alt = toChunkShimRequest(request);
-      if (!alt) throw err;
+      const altCandidates = [toChunkShimRequest(request), toVendorChunkShimRequest(request)].filter(Boolean);
+      if (altCandidates.length === 0) throw err;
 
-      const key = `${request}=>${alt}`;
-      if (!logged.has(key)) {
-        logged.add(key);
-        // eslint-disable-next-line no-console
-        console.warn(`[widget] Remapping ${request} to ${alt} for Next server runtime chunks.`);
+      for (const alt of altCandidates) {
+        const key = `${request}=>${alt}`;
+        if (!logged.has(key)) {
+          logged.add(key);
+          // eslint-disable-next-line no-console
+          console.warn(`[widget] Remapping ${request} to ${alt} for Next server runtime chunks.`);
+        }
+        try {
+          return current.call(this, alt, parent, isMain, options);
+        } catch (altErr) {
+          if (!altErr || altErr.code !== "MODULE_NOT_FOUND") throw altErr;
+        }
       }
-
-      return current.call(this, alt, parent, isMain, options);
+      throw err;
     }
   }
 

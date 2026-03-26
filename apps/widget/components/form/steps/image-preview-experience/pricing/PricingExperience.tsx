@@ -306,7 +306,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
           >
             {revealed ? (
               loading ? (
-                <span className="text-white/90 min-w-0">Calculating…</span>
+                <span className="text-white/90 min-w-0">Calculating exact price…</span>
               ) : (
                 <span className="min-w-0">{price}</span>
               )

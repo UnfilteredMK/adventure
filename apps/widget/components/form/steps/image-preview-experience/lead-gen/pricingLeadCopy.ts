@@ -7,7 +7,7 @@ export const PRICING_LEAD_COPY = {
   finePrint: "Instant reveal",
   ctaLabel: "Show my price",
   emailPlaceholder: "Enter your email",
-  nameTitle: "Almost there",
+  nameTitle: "Almost done!",
   nameDescription: "What should we call you?",
   namePlaceholder: "Full name is best",
   nameCtaLabel: "Continue",

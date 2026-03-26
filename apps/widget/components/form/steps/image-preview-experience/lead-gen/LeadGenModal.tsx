@@ -350,7 +350,7 @@ export function LeadGenModal({
     <Dialog open={open} onOpenChange={(v) => (v ? null : close())}>
       <DialogContent
         className={[
-          "sm:max-w-md p-0 border-0 bg-transparent shadow-none overflow-visible",
+          "!w-[88vw] sm:!w-[22rem] max-w-none p-0 border-0 bg-transparent shadow-none overflow-visible",
           // Theme the default Radix close button injected by DialogContent (direct child).
           "[&>button]:rounded-full [&>button]:opacity-90 hover:[&>button]:opacity-100 [&>button]:ring-offset-0",
           "[&>button]:bg-[var(--sif-lead-close-bg)] hover:[&>button]:bg-[var(--sif-lead-close-hover-bg)]",
