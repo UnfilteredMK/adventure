@@ -70,6 +70,9 @@ export function StepLayout({
   const useCompactPane = compactInPreview;
   const useCompactHeaderControlRow = Boolean(useCompactPane && headerInlineControl);
   const stepType = String(step?.type || step?.componentType || "").toLowerCase();
+  const isImageChoiceGridStep = stepType === "image_choice_grid";
+  const isGalleryStep = stepType === "gallery";
+  const isScrollOwnedStep = isImageChoiceGridStep || isGalleryStep;
   const isVisualAnswerStep = stepType === "image_choice_grid" || stepType === "gallery";
   const isSliderStep = stepType === "slider";
   const isUploadStep = stepType === "file_upload" || stepType === "upload" || stepType === "file_picker";
@@ -114,7 +117,7 @@ export function StepLayout({
   const standardInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const contentViewportClassName = cn(
     "flex-1 min-h-0 w-full min-w-0",
-    useCompactPane && isVisualAnswerStep
+    useCompactPane && isVisualAnswerStep && !isScrollOwnedStep
       ? "overflow-hidden"
       : useCompactPane && isChoiceStep
         ? "overflow-y-auto overflow-x-hidden"
@@ -129,16 +132,20 @@ export function StepLayout({
       : null
   );
   const compactAnswerInnerClass = cn(
-    "flex h-full min-h-0 min-w-0 flex-col",
+    isScrollOwnedStep ? "flex min-h-0 min-w-0 flex-col" : "flex h-full min-h-0 min-w-0 flex-col",
     useCompactPane
       ? isVisualAnswerStep
-        ? "mx-auto w-full max-w-none justify-start overflow-hidden"
+        ? isScrollOwnedStep
+          ? "mx-auto w-full max-w-none justify-start overflow-visible"
+          : "mx-auto w-full max-w-none justify-start overflow-hidden"
         : isSliderStep
           ? "mx-auto w-full max-w-none justify-start overflow-visible"
         : isChoiceStep
           ? "w-full max-w-none justify-start overflow-visible"
           : "mx-auto w-full max-w-none justify-center overflow-hidden"
-      : "justify-start overflow-hidden"
+      : isScrollOwnedStep
+        ? "w-full justify-start overflow-visible"
+        : "justify-start overflow-hidden"
   );
 
   return (

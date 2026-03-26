@@ -38,7 +38,7 @@ function normalizeExplicitPrice(price: PreviewPriceSnapshot | undefined | null):
 }
 
 function deriveVariantPriceRange(baseRange: PriceRange, imageUrl: string, index: number): PriceRange {
-  const orderedOffsets = [0, 0.08, -0.04, 0.05, -0.02, 0.1, -0.01, 0.06];
+  const orderedOffsets = [0, 0.08, -0.04, 0.05, -0.02, 0.1, -0.01, 0.06, 0.14];
   const width = Math.max(1000, baseRange.high - baseRange.low);
   const hashOffset = ((stableHash(`${imageUrl}:${index}`) % 7) - 3) * 0.01;
   const offset = (orderedOffsets[index % orderedOffsets.length] ?? 0) + hashOffset;
@@ -66,7 +66,7 @@ function resolveTargetCount(run: PreviewRunSnapshot): number {
     typeof run.expectedImageCount === "number" && Number.isFinite(run.expectedImageCount)
       ? Math.floor(run.expectedImageCount)
       : run.images.length;
-  return Math.max(6, Math.min(8, Math.max(expected, run.images.length, 6)));
+  return Math.max(6, Math.min(9, Math.max(expected, run.images.length, 6)));
 }
 
 export function buildDeterministicPricedImageGridStep(params: {
@@ -100,11 +100,11 @@ export function buildDeterministicPricedImageGridStep(params: {
   return {
     id: DETERMINISTIC_PRICED_IMAGE_GRID_ID,
     type: "image_choice_grid",
-    question: "Here are similar projects and their price ranges",
+    question: "Here are similar examples and price ranges",
     humanism: "Tap one to see your exact pricing",
     options: options as any,
     multi_select: false,
-    columns: 4,
+    columns: 3,
     metricGain: 0.04,
     blueprint: {
       presentation: {
@@ -112,7 +112,7 @@ export function buildDeterministicPricedImageGridStep(params: {
       },
       validation: {
         grid_mode: "priced_examples",
-        trust_line: "Based on real projects similar to yours",
+        trust_line: "Based on real examples similar to yours",
       },
     },
   } as UIStep;

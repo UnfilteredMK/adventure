@@ -607,6 +607,12 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
     - Return `{ images: string[], predictionId }` for widget compatibility
     """
     request_id = f"image_{int(time.time() * 1000)}"
+    variation_mode = str(payload.get("variationMode") or payload.get("variation_mode") or "").strip().lower()
+
+    if variation_mode == "price_ladder_9":
+        from programs.price_ladder_gallery.orchestrator import generate_price_ladder_gallery
+
+        return generate_price_ladder_gallery(payload)
 
     _log_verbose("payload_received", payload)
 

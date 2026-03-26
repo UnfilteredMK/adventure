@@ -624,7 +624,7 @@ def generate_images(
     scene_image: Optional[str] = None,
     product_image: Optional[str] = None,
 ) -> Dict[str, Any]:
-    n = max(1, min(8, int(num_outputs or 1)))
+    n = max(1, min(9, int(num_outputs or 1)))
     prompt = str(prompt or "").strip()
 
     model = str(model_id or "").strip() or _replicate_default_model_id(use_case=use_case)

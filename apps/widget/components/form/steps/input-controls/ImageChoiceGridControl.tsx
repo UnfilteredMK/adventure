@@ -602,15 +602,18 @@ export function ImageChoiceGrid({
   return (
     <div
       className={cn(
-        thumbnailMode
+        isPricedExamples
+          ? "w-full min-w-0 overflow-visible"
+          : thumbnailMode
           ? "flex h-full min-h-0 w-full flex-col overflow-y-auto overflow-x-hidden pr-1"
           : "w-full h-full min-h-0 overflow-y-auto overflow-x-hidden pr-1"
       )}
+      style={isPricedExamples ? ({ touchAction: "pan-y", WebkitOverflowScrolling: "touch" } as React.CSSProperties) : undefined}
     >
       <div
         className={cn(
           "grid w-full min-w-0 content-start",
-          thumbnailMode ? "gap-1.5 py-0 content-start" : isCompact ? "gap-3" : "gap-4",
+          thumbnailMode ? "gap-1.5 py-0 content-start" : isCompact ? "gap-3 pb-4" : "gap-4 pb-4",
           className
         )}
         style={{

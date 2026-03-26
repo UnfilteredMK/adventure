@@ -771,6 +771,11 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
 
         pred = _generate_with_optional_optimized_request(adapted)
+        if (
+            isinstance(pred, dict)
+            and str(adapted.get("variationMode") or adapted.get("variation_mode") or "").strip().lower() == "price_ladder_9"
+        ):
+            return pred
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
         return {
             "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),

@@ -75,8 +75,12 @@ export function MultiColumnGallery({
     padding: 0,
     width: '100%',
     height: '100%',
+    minHeight: 0,
     maxHeight: '100%',
     overflowY: 'auto' as const,
+    overflowX: 'hidden' as const,
+    WebkitOverflowScrolling: 'touch' as const,
+    overscrollBehavior: 'contain' as const,
     display: 'flex',
     flexDirection: 'column' as const,
     alignItems: 'center',
@@ -173,7 +177,7 @@ export function MultiColumnGallery({
   const topBottomGapPercent = 0.75; // subtle 0.75% of image size
 
   return (
-    <div ref={rootRef} className="relative" style={containerStyles}>
+    <div ref={rootRef} className="relative h-full min-h-0 w-full" style={containerStyles}>
       {rows.map((rowSlots, rowIndex) => (
         <div key={`row-${rowIndex}`} style={{
           ...rowStyles,

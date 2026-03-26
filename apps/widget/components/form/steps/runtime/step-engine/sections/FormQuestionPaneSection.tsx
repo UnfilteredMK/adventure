@@ -130,6 +130,8 @@ export function FormQuestionSection({
   const compactPreviewActive = Boolean(usePreviewPaneLayout);
   const useIconOnlyActions = Boolean(useCompactNav || usePreviewPaneLayout);
   const useWideQuestionContent = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
+  const rendererStepType = String((stepForRenderer as any)?.type || (stepForRenderer as any)?.componentType || "").toLowerCase();
+  const rendererAllowsInternalScroll = rendererStepType === "image_choice_grid";
   const promptText = promptDraft.trim();
   const canGoBack = (state?.currentStepIndex || 0) > 0;
   const primary = theme.primaryColor || "#3b82f6";
@@ -850,7 +852,10 @@ export function FormQuestionSection({
                         <div
                           className={layoutDebugClassName(
                             layoutDebugEnabled,
-                            cn("flex-1 min-h-0 overflow-hidden")
+                            cn(
+                              "flex-1 min-h-0",
+                              rendererAllowsInternalScroll ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
+                            )
                           )}
                           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}
                         >

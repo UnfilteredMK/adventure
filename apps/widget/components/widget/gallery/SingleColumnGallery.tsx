@@ -128,9 +128,12 @@ export function SingleColumnGallery({
     padding: 0,
     width: '100%',
     height: '100%', // Fill parent height
+    minHeight: 0,
     maxHeight: '100%', // Constrain to parent
     overflowY: 'auto' as const,
     overflowX: 'hidden' as const, // Prevent horizontal overflow
+    WebkitOverflowScrolling: 'touch' as const,
+    overscrollBehavior: 'contain' as const,
     display: 'flex',
     flexDirection: 'column' as const,
     alignItems: 'stretch',
@@ -204,7 +207,7 @@ export function SingleColumnGallery({
     // Optional vignette toggle from config (default off)
     const heroVignetteEnabled = Boolean((config as any)?.hero_vignette_enabled);
     return (
-      <div ref={rootRef} style={heroContainerStyles}>
+      <div ref={rootRef} className="h-full min-h-0 w-full" style={heroContainerStyles}>
         <div
           className="relative"
           style={{
@@ -311,7 +314,7 @@ export function SingleColumnGallery({
   }
 
   return (
-    <div ref={rootRef} style={containerStyles}>
+    <div ref={rootRef} className="h-full min-h-0 w-full" style={containerStyles}>
       {imageSlots.map((slot, idx) => (
         <div
           key={slot.id}

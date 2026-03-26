@@ -129,7 +129,9 @@ export function StepEngineBodySection(props: any) {
           {!hideQuestionPane ? (
             <div
               className={cn(
-                compactQuestionHost
+                pricedGridStepActive
+                  ? "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain"
+                  : compactQuestionHost
                   ? isMobileViewport
                     ? cn(
                         "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden",
@@ -141,6 +143,7 @@ export function StepEngineBodySection(props: any) {
                       )
                   : "flex flex-col flex-1 min-h-0"
               )}
+              style={pricedGridStepActive ? ({ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties) : undefined}
             >
               <FormQuestionSection
                 config={config}

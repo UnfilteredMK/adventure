@@ -637,7 +637,7 @@ export function GalleryStep({
       className="max-w-6xl"
       layoutDebugEnabled={layoutDebugEnabled}
     >
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
+      <div className="grid min-h-0 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
         {/* Left: uploads + simple controls */}
         <div className="lg:col-span-3">
           <Card className="bg-[var(--form-surface-color)] border-[color:var(--form-surface-border-color)]">
@@ -676,8 +676,8 @@ export function GalleryStep({
         </div>
 
         {/* Center: gallery + drilldown */}
-        <div className="lg:col-span-6">
-          <Card className="bg-[var(--form-surface-color)] border-[color:var(--form-surface-border-color)] relative">
+        <div className="min-h-0 lg:col-span-6">
+          <Card className="relative flex min-h-0 flex-col bg-[var(--form-surface-color)] border-[color:var(--form-surface-border-color)]">
             <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3">
               <CardTitle className="text-sm">Design ideas</CardTitle>
               <Button
@@ -689,14 +689,26 @@ export function GalleryStep({
                 {isGenerating ? "Generating…" : "Generate"}
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex min-h-0 flex-1 flex-col">
               {generationError && (
                 <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                   {generationError}
                 </div>
               )}
-              <div className="relative" style={{ height: galleryHeight }}>
-                <div className={cn("h-full", blurGateActive && "blur-sm pointer-events-none select-none")}>
+              <div className="relative min-h-0 flex-1" style={{ height: galleryHeight }}>
+                <div
+                  className={cn("h-full", blurGateActive && "blur-sm select-none")}
+                  style={blurGateActive ? ({ touchAction: "pan-y" } as React.CSSProperties) : undefined}
+                  onClickCapture={
+                    blurGateActive
+                      ? (event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openLeadModal("photos", "blur_image");
+                        }
+                      : undefined
+                  }
+                >
                   <ImageGallery
                     images={generatedImages}
                     isLoading={Boolean(isLoading)}

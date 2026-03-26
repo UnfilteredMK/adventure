@@ -5,6 +5,7 @@ import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useFormTheme } from "../../../demo/FormThemeProvider";
 import { cn } from "@/lib/utils";
 import { buildAnsweredQAFromSteps, shouldExcludeStepFromAnsweredQA } from "@/lib/ai-form/answered-qa";
@@ -74,8 +75,6 @@ function formatPhoneInput(value: string): { display: string; digits: string } {
   return { display: `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`, digits };
 }
 
-const IMAGE_GENERATION_ESTIMATED_SECONDS = 15;
-
 type PreviewCacheV2 = {
   schemaVersion: 2;
   status: "idle" | "running" | "complete" | "error";
@@ -136,8 +135,20 @@ type PreviewRun = {
   imagePricing?: (CachedPricing | undefined)[];
 };
 
-const CONCEPT_GALLERY_COUNT = 8;
-const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 8;
+const CONCEPT_GALLERY_COUNT = 9;
+const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 9;
+const GALLERY_LOADING_TITLE = "Finding similar designs…";
+const GALLERY_LOADING_SUBTITLE = "Pulling together examples and price ranges…";
+const GALLERY_LOADING_MESSAGES = [
+  GALLERY_LOADING_TITLE,
+  "Checking pricing from similar examples…",
+  GALLERY_LOADING_SUBTITLE,
+  "Matching your request to similar past work…",
+  "Looking for examples with a similar scope…",
+  "Reviewing comparable work and price ranges…",
+  "Pulling similar looks and pricing history…",
+  "Almost there…",
+] as const;
 
 /** "gallery" = show concept grid; "single" = show chosen hero with option to go back */
 type PreviewViewMode = "gallery" | "single";
@@ -774,7 +785,7 @@ export function ImagePreviewExperience(props: {
   const [showUploadGate, setShowUploadGate] = useState(false);
   const [showDownloadGate, setShowDownloadGate] = useState(false);
   const [showGenerateGate, setShowGenerateGate] = useState(false);
-  const [loaderElapsedSec, setLoaderElapsedSec] = useState(0);
+  const [galleryLoadingMessageIndex, setGalleryLoadingMessageIndex] = useState(0);
   const pendingActionRef = useRef<null | "refresh" | "upload" | "download">(null);
   const pendingGenerateModeRef = useRef<"manual" | "auto">("manual");
   const gateContextRef = useRef<string>("design_and_estimate");
@@ -1505,10 +1516,9 @@ export function ImagePreviewExperience(props: {
 		          );
 		        const numOutputs = shouldGenerateConceptGallery ? conceptGalleryTargetCount : 1;
             const initialBatchSize = shouldGenerateConceptGallery ? Math.min(2, numOutputs) : numOutputs;
-            const remainingBatchSize = Math.max(0, numOutputs - initialBatchSize);
             const generationMessage =
               !hasExistingPreview || shouldGenerateConceptGallery
-                ? "Finding similar projects…"
+                ? GALLERY_LOADING_TITLE
                 : isBudgetTierShift
                   ? "Reworking your design for the new budget tier…"
                   : "Refreshing your design…";
@@ -1573,6 +1583,7 @@ export function ImagePreviewExperience(props: {
               appendImages?: boolean;
               message?: string | null;
               imagePricing?: (CachedPricing | undefined)[];
+              imagePricingOffset?: number;
               generated?: boolean;
             }) => {
               setCache((prev) => {
@@ -1600,8 +1611,12 @@ export function ImagePreviewExperience(props: {
                     : existingRun.images;
                 const mergedPricing = Array.isArray(existingRun.imagePricing) ? [...existingRun.imagePricing] : [];
                 if (Array.isArray(params.imagePricing)) {
+                  const pricingOffset = Math.max(
+                    0,
+                    Number.isFinite(Number(params.imagePricingOffset)) ? Math.floor(Number(params.imagePricingOffset)) : 0
+                  );
                   params.imagePricing.forEach((value, index) => {
-                    if (value) mergedPricing[index] = value;
+                    if (value) mergedPricing[pricingOffset + index] = value;
                   });
                 }
                 const nextRun: PreviewRun = {
@@ -1640,13 +1655,19 @@ export function ImagePreviewExperience(props: {
               });
             };
 
-            const fetchImageBatch = async (requestedOutputs: number, generationOffset: number) => {
-              if (requestedOutputs <= 0) return { images: [] as string[], message: generationMessage };
+            const fetchImageBatch = async (requestedOutputs: number, variantStartIndex: number, attemptIndex = 0) => {
+              if (requestedOutputs <= 0) {
+                return { images: [] as string[], message: generationMessage, imagePricing: [] as (CachedPricing | undefined)[] };
+              }
               const requestBody: any = {
                 ...requestBodyBase,
                 numOutputs: requestedOutputs,
               };
-              if (generationIndex !== undefined) requestBody.generationIndex = generationIndex + generationOffset;
+              if (shouldGenerateConceptGallery) {
+                requestBody.variationMode = "price_ladder_9";
+                requestBody.variantStartIndex = variantStartIndex;
+              }
+              if (generationIndex !== undefined) requestBody.generationIndex = generationIndex + attemptIndex;
               const res = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1685,6 +1706,39 @@ export function ImagePreviewExperience(props: {
               if (normalizedImages.length === 0) {
                 throw new Error("Preview generated, but only a placeholder image was returned.");
               }
+              const rawVariants = Array.isArray((json as any)?.variants) ? ((json as any).variants as any[]) : [];
+              const pricingByImage = new Map<string, CachedPricing>();
+              rawVariants.forEach((variant: any) => {
+                const imageUrl = typeof variant?.imageUrl === "string" ? variant.imageUrl : null;
+                const priceRange = normalizeNumericRange((variant as any)?.priceRange ?? (variant as any)?.price_range);
+                if (!imageUrl || !priceRange || !isValidUrlLikeImage(imageUrl)) return;
+                const currency =
+                  typeof variant?.priceRange?.currency === "string"
+                    ? String(variant.priceRange.currency).trim().toUpperCase()
+                    : typeof variant?.price_range?.currency === "string"
+                      ? String(variant.price_range.currency).trim().toUpperCase()
+                      : "USD";
+                const budgetTier =
+                  typeof variant?.budgetTier === "string" ? String(variant.budgetTier).trim().toLowerCase() : undefined;
+                const budgetTierRangesRaw = variant?.budgetTierRanges ?? variant?.budget_tier_ranges;
+                const budgetTierRanges =
+                  budgetTierRangesRaw && typeof budgetTierRangesRaw === "object"
+                    ? Object.fromEntries(
+                        Object.entries(budgetTierRangesRaw)
+                          .map(([key, value]) => [key, normalizeNumericRange(value)])
+                          .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[1]))
+                      )
+                    : undefined;
+                pricingByImage.set(imageUrl, {
+                  totalMin: priceRange.low,
+                  totalMax: priceRange.high,
+                  currency,
+                  imagePriceRange: { low: priceRange.low, high: priceRange.high },
+                  ...(budgetTier ? { budgetTier } : {}),
+                  ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
+                  ...(typeof variant?.calibrationKey === "string" ? { calibrationKey: String(variant.calibrationKey) } : {}),
+                });
+              });
               return {
                 images: normalizedImages,
                 message:
@@ -1693,25 +1747,33 @@ export function ImagePreviewExperience(props: {
                     : typeof (json as any)?.message === "string"
                       ? String((json as any).message)
                       : generationMessage,
+                imagePricing: normalizedImages.map((src: string) => pricingByImage.get(src)),
               };
             };
 
-            const fetchImageBatchUntilFilled = async (requestedOutputs: number, generationOffset: number) => {
-              if (requestedOutputs <= 0) return { images: [] as string[], message: generationMessage };
+            const fetchImageBatchUntilFilled = async (requestedOutputs: number, variantStartIndex: number) => {
+              if (requestedOutputs <= 0) {
+                return { images: [] as string[], message: generationMessage, imagePricing: [] as (CachedPricing | undefined)[] };
+              }
               let collected: string[] = [];
               let message = generationMessage;
-              let offset = generationOffset;
               let attempts = 0;
+              let nextVariantStartIndex = variantStartIndex;
+              const pricingByImage = new Map<string, CachedPricing>();
 
               while (collected.length < requestedOutputs && attempts < 4) {
                 const remaining = requestedOutputs - collected.length;
-                const batch = await fetchImageBatch(remaining, offset);
+                const batch = await fetchImageBatch(remaining, nextVariantStartIndex, attempts);
                 message = batch.message;
+                batch.images.forEach((src: string, index: number) => {
+                  const pricing = batch.imagePricing?.[index];
+                  if (pricing && !pricingByImage.has(src)) pricingByImage.set(src, pricing);
+                });
                 const merged = mergeUniqueImageUrls(collected, batch.images);
                 const gained = merged.length - collected.length;
                 collected = merged;
                 attempts += 1;
-                offset += 1;
+                nextVariantStartIndex = variantStartIndex + collected.length;
 
                 if (gained <= 0) break;
               }
@@ -1723,19 +1785,26 @@ export function ImagePreviewExperience(props: {
                 });
               }
 
-              return { images: collected, message };
+              return {
+                images: collected,
+                message,
+                imagePricing: collected.map((src: string) => pricingByImage.get(src)),
+              };
             };
 
             setActiveGenerationReason(reason);
             writeRunState({ status: "running", message: generationMessage });
 
             const firstBatch = await fetchImageBatchUntilFilled(initialBatchSize, 0);
+            const remainingAfterFirstBatch = Math.max(0, numOutputs - firstBatch.images.length);
             writeRunState({
-              status: remainingBatchSize > 0 ? "running" : "complete",
+              status: remainingAfterFirstBatch > 0 ? "running" : "complete",
               images: firstBatch.images,
               appendImages: false,
               message: firstBatch.message,
-              generated: remainingBatchSize === 0,
+              imagePricing: firstBatch.imagePricing,
+              imagePricingOffset: 0,
+              generated: remainingAfterFirstBatch === 0,
             });
 
         let initialImagePricing: (CachedPricing | undefined)[] | undefined;
@@ -1766,21 +1835,24 @@ export function ImagePreviewExperience(props: {
 
         if (initialImagePricing) {
           writeRunState({
-            status: remainingBatchSize > 0 ? "running" : "complete",
+            status: remainingAfterFirstBatch > 0 ? "running" : "complete",
             message: firstBatch.message,
             imagePricing: initialImagePricing,
-            generated: remainingBatchSize === 0,
+            imagePricingOffset: 0,
+            generated: remainingAfterFirstBatch === 0,
           });
         }
 
-        if (remainingBatchSize > 0) {
+        if (remainingAfterFirstBatch > 0) {
           try {
-            const deferredBatch = await fetchImageBatchUntilFilled(remainingBatchSize, 1);
+            const deferredBatch = await fetchImageBatchUntilFilled(remainingAfterFirstBatch, firstBatch.images.length);
             writeRunState({
               status: "complete",
               images: deferredBatch.images,
               appendImages: true,
               message: deferredBatch.message,
+              imagePricing: deferredBatch.imagePricing,
+              imagePricingOffset: firstBatch.images.length,
               generated: true,
             });
           } catch (deferredError) {
@@ -2038,24 +2110,19 @@ export function ImagePreviewExperience(props: {
   const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
   const leadGateActive = leadGateEnabled && Boolean(hero) && !leadCaptured;
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
-  const formattedLoaderCountdown = useMemo(() => {
-    const safe = Math.max(0, Math.floor(IMAGE_GENERATION_ESTIMATED_SECONDS - loaderElapsedSec));
-    const minutes = String(Math.floor(safe / 60)).padStart(2, "0");
-    const seconds = String(safe % 60).padStart(2, "0");
-    return `${minutes}:${seconds}`;
-  }, [loaderElapsedSec]);
+  const galleryLoadingMessage =
+    GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
 
   useEffect(() => {
-    if (!busy) {
-      setLoaderElapsedSec(0);
+    if (!showProgressiveGalleryLoader) {
+      setGalleryLoadingMessageIndex(0);
       return;
     }
-    setLoaderElapsedSec(0);
     const timer = window.setInterval(() => {
-      setLoaderElapsedSec((prev) => prev + 1);
-    }, 1000);
+      setGalleryLoadingMessageIndex((prev) => (prev + 1) % GALLERY_LOADING_MESSAGES.length);
+    }, 2200);
     return () => window.clearInterval(timer);
-  }, [busy]);
+  }, [showProgressiveGalleryLoader]);
 
   useEffect(() => {
     onAutoGenerationBusyChange?.(autoRefreshBusy);
@@ -2841,33 +2908,65 @@ export function ImagePreviewExperience(props: {
 
   if (!enabled) return null;
 
+  const useResponsiveConceptGalleryShell = showConceptPicker;
+  const previewFrameStyle = useResponsiveConceptGalleryShell
+    ? {
+        width: "100%",
+        maxWidth: "100%",
+        height: "100%",
+        minHeight: 0,
+        containerType: "inline-size",
+      }
+    : {
+        width: effectivePreviewSize,
+        maxWidth: "100%",
+        aspectRatio: "1 / 1",
+        maxHeight: effectivePreviewSize,
+        containerType: "inline-size",
+        // Prevent "starts small then grows" when parent layout hasn't settled yet
+        ...((showLoader || busy) && { minWidth: 180, minHeight: 180 }),
+      };
+
   function renderPreview() {
     return (
       <LayoutGroup id={lightboxLayoutId}>
         <>
           {/* min-h-0 + overflow-hidden ensure the card never bleeds outside the flex layout; overflow-visible when stack shown */}
-          <div className={cn("w-full min-h-0", stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden")}>
+          <div
+            className={cn(
+              "w-full min-h-0",
+              useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null,
+              stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden"
+            )}
+          >
         <Card
 	          className={
 	            transparentChrome
-	              ? "bg-transparent border-0 shadow-none overflow-hidden"
-              : "bg-card/70 backdrop-blur supports-[backdrop-filter]:bg-card/60 border-border overflow-hidden"
+	              ? cn("bg-transparent border-0 shadow-none overflow-hidden", useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null)
+              : cn("bg-card/70 backdrop-blur supports-[backdrop-filter]:bg-card/60 border-border overflow-hidden", useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null)
           }
 	        >
-	          <CardContent className={cn(previewMaxPx ? "p-0" : transparentChrome ? "p-0" : "p-3", stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden")}>
+	          <CardContent
+              className={cn(
+                previewMaxPx ? "p-0" : transparentChrome ? "p-0" : "p-3",
+                useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-col" : null,
+                stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden"
+              )}
+            >
 	            {previewMaxPx && chromePx > 0 ? <div style={{ height: chromePx }} /> : null}
-            <div className={cn("flex justify-center", stackedPreviewLayers.length > 0 && "pl-14")}>
+            <div
+              className={cn(
+                "flex",
+                useResponsiveConceptGalleryShell ? "h-full min-h-0 justify-stretch" : "justify-center",
+                stackedPreviewLayers.length > 0 && !useResponsiveConceptGalleryShell && "pl-14"
+              )}
+            >
 	            <div
-				              className="relative mx-auto overflow-visible"
-				              style={{
-				                width: effectivePreviewSize,
-				                maxWidth: "100%",
-				                aspectRatio: "1 / 1",
-				                maxHeight: effectivePreviewSize,
-                        containerType: "inline-size",
-				                // Prevent "starts small then grows" when parent layout hasn't settled yet
-				                ...((showLoader || busy) && { minWidth: 180, minHeight: 180 }),
-				              }}
+				              className={cn(
+                        "relative mx-auto",
+                        useResponsiveConceptGalleryShell ? "flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden" : "overflow-visible"
+                      )}
+				              style={previewFrameStyle}
 			            >
 			              {/* Keep prior previews visually present, but only use the deck animation when browsing history. */}
 				              <AnimatePresence initial={false}>
@@ -2929,10 +3028,12 @@ export function ImagePreviewExperience(props: {
 				              </AnimatePresence>
 				              <div
 				                className={cn(
-				                  "absolute inset-0 z-20 overflow-hidden rounded-xl",
+				                  useResponsiveConceptGalleryShell
+                            ? "relative z-20 flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-xl bg-muted/30"
+                            : "absolute inset-0 z-20 overflow-hidden rounded-xl",
 				                  // Gallery mode: always solid so it never overlays/bleeds into single view.
 				                  // Single mode: transparent ok when chrome is transparent (stack shows to the left).
-				                  transparentChrome && !showConceptPicker ? "bg-transparent" : "bg-muted/30"
+				                  !useResponsiveConceptGalleryShell && (transparentChrome && !showConceptPicker ? "bg-transparent" : "bg-muted/30")
 				                )}
 				              >
 	            <input
@@ -3151,56 +3252,49 @@ export function ImagePreviewExperience(props: {
               ) : null}
 
 	            {/* Two distinct modes: gallery picker vs single hero image. Only one renders. */}
-	            <div className="h-full w-full" data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}>
+	            <div
+                className={cn(
+                  "flex h-full w-full min-h-0 flex-col",
+                  showConceptPicker ? "overflow-hidden" : null
+                )}
+                data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}
+              >
 	              {showConceptPicker ? (
 	                <div
-	                  className="h-full w-full flex flex-col min-h-0 isolate"
-	                  style={{
-	                    gap: (designConfig as any)?.gallery_spacing ?? 8,
-	                    padding: (designConfig as any)?.gallery_spacing ?? 8,
-	                  }}
+	                  className="relative flex h-full min-h-0 w-full flex-col gap-1.5 p-1.5 pr-1 isolate sm:p-2 sm:pr-1.5"
 	                >
-                  <div
-                    className={cn(
-                      "text-center",
-                      showProgressiveGalleryLoader ? "flex items-center justify-center pb-1 pt-0.5" : "space-y-0.5"
-                    )}
-                  >
-                    {showProgressiveGalleryLoader ? (
+                  {showProgressiveGalleryLoader ? (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4">
                       <div
                         className="inline-flex max-w-full items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[13px] font-semibold text-white shadow-sm backdrop-blur-md"
                         style={{ fontFamily: theme.fontFamily }}
                       >
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-white/80" />
-                        <span className="truncate">Finding similar projects…</span>
+                        <span className="truncate">{galleryLoadingMessage}</span>
                       </div>
-                    ) : (
-                      <>
-                        <p
-                          className="text-[13px] sm:text-sm font-semibold leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
-                          style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
-                        >
-                          Here are similar projects and their price ranges. Tap one to see your exact pricing.
-                        </p>
-                        <p
-                          className="text-[10px] sm:text-[11px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
-                          style={{ color: theme.textColor, fontFamily: theme.fontFamily, opacity: 0.75 }}
-                        >
-                          Based on real projects similar to yours
-                        </p>
-                      </>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
+                  {!showProgressiveGalleryLoader ? (
+                    <div className="space-y-0.5 text-center">
+                      <p
+                        className="text-[13px] sm:text-sm font-semibold leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                        style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+                      >
+                        Here are similar examples and price ranges. Tap one to see your exact pricing.
+                      </p>
+                      <p
+                        className="text-[10px] sm:text-[11px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                        style={{ color: theme.textColor, fontFamily: theme.fontFamily, opacity: 0.75 }}
+                      >
+                        Based on real examples similar to yours
+                      </p>
+                    </div>
+                  ) : null}
                   <div
-                    className="flex-1 min-h-0 overflow-y-auto"
+                    className="w-full min-w-0 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y"
+                    style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties}
                   >
-                    <div
-                      className="grid min-h-[360px] content-start"
-                      style={{
-                        gap: (designConfig as any)?.gallery_spacing ?? 6,
-                        gridTemplateColumns: "repeat(auto-fit, minmax(min(8.75rem, 100%), 1fr))",
-                      }}
-                    >
+                    <div className="grid w-full min-w-0 min-h-[360px] content-start grid-cols-1 gap-1.5 py-0 min-[420px]:grid-cols-2 md:grid-cols-3">
 	                    {Array.from({
                         length: Math.max(
                           1,
@@ -3214,18 +3308,14 @@ export function ImagePreviewExperience(props: {
                           return (
                             <div
                               key={idx}
-                              className="relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border border-white/12 bg-black/20"
+                              className="relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
                               style={{
                                 borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
                               }}
                               aria-hidden="true"
                             >
-                              <div className="absolute inset-0 bg-black/30" />
-                              <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_18%,rgba(255,255,255,0.24),transparent_36%),radial-gradient(circle_at_78%_22%,rgba(255,255,255,0.12),transparent_28%),linear-gradient(145deg,rgba(255,255,255,0.14),rgba(255,255,255,0.04),rgba(255,255,255,0.12))]" />
-                              <div className="absolute inset-x-[8%] top-[9%] bottom-[18%] rounded-[20px] border border-white/10 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" />
-                              <div className="absolute inset-x-[16%] top-[20%] h-[34%] rounded-[18px] bg-white/12 blur-2xl" />
-                              <div className="absolute inset-x-[8%] bottom-[11%] h-3.5 rounded-full bg-white/14" />
-                              <div className="absolute left-[8%] bottom-[6.5%] h-3 w-[42%] rounded-full bg-white/10" />
+                              <div className="absolute inset-0 bg-black/10" />
+                              <Skeleton className="absolute inset-0 h-full w-full rounded-none bg-white/[0.09]" />
                             </div>
                           );
                         }
@@ -3471,17 +3561,9 @@ export function ImagePreviewExperience(props: {
                   size="sm"
                   tone="overlay"
                   active={busy}
-                  messageOverride={cache?.message || (hero ? "Refreshing your design…" : "Finding similar projects…")}
+                  messageOverride={cache?.message || (hero ? "Refreshing your design…" : GALLERY_LOADING_TITLE)}
                   className="bg-slate-900/75"
                   style={{ ...overlayVars }}
-                  countdown={hero ? (
-                    <div
-                      className="rounded-full bg-white/15 px-2 py-0.5 text-[0.625rem] font-medium tracking-wide text-white/80 shrink-0 ring-1 ring-white/15"
-                      style={{ fontFamily: theme.fontFamily }}
-                    >
-                      {formattedLoaderCountdown} left
-                    </div>
-                  ) : undefined}
                 />
               </div>
             ) : null}

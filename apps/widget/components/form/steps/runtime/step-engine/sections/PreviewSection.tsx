@@ -89,7 +89,7 @@ export function PreviewSection({
     >
       <div
         className={cn(
-          "w-full mx-auto h-full",
+          "mx-auto flex h-full min-h-0 w-full flex-col",
           useMobilePreviewLayout
             ? "px-2 max-w-none"
             : useDesktopPreviewLayout
@@ -100,7 +100,7 @@ export function PreviewSection({
           usePreviewDominantLayout ? "py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
-        <div className="h-full min-h-0">
+        <div className="flex h-full min-h-0 flex-1 flex-col">
           <ImagePreviewExperience
             key="image-preview"
             enabled={true}

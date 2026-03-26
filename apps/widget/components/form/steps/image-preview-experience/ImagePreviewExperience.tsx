@@ -52,7 +52,7 @@ export function ImagePreviewExperience({
   );
 
   return (
-    <div className="w-full">
+    <div className="flex h-full min-h-0 w-full flex-col">
       <ImagePreviewCanvas
         {...canvasProps}
         enabled={enabled}

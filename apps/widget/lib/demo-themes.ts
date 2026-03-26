@@ -192,7 +192,7 @@ function buildPreset(primary: string, base: Partial<Record<string, any>> = {}): 
     title_font_family: "Inter",
     background_opacity: 1,
     brand_name_enabled: true,
-    gallery_max_images: 8,
+    gallery_max_images: 9,
     logo_border_radius: 8,
     mobile_layout_mode: "prompt-bottom",
     overlay_icon_color: "#ffffff",
@@ -478,4 +478,3 @@ export function applyThemeToConfig(theme: DemoTheme, config: Record<string, any>
     ...(theme.overrides || {})
   };
 }
-

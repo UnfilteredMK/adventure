@@ -11,7 +11,15 @@ type ReferenceMode = "guide_only" | "edit_target";
 function normalizeRequestedOutputs(raw: unknown): number {
 	const n = Number(raw);
 	if (!Number.isFinite(n)) return 1;
-	return Math.max(1, Math.min(8, Math.floor(n)));
+	return Math.max(1, Math.min(9, Math.floor(n)));
+}
+
+function normalizeVariationMode(raw: unknown): string {
+	return String(raw || "").trim().toLowerCase().replace(/-/g, "_");
+}
+
+function usesStructuredVariantProgram(body: any): boolean {
+	return normalizeVariationMode(body?.variationMode || body?.variation_mode) === "price_ladder_9";
 }
 
 function supportsMultiOutput(modelId: string): boolean {
@@ -312,6 +320,7 @@ export async function POST(request: NextRequest) {
 			referenceCount: Array.isArray(body.referenceImages) ? body.referenceImages.length : 0,
 			hasModelRecommendation: !!body.modelRecommendation,
 			generationIntent: body.generationIntent || body.generationMode || null,
+			variationMode: body.variationMode || body.variation_mode || null,
 		});
 
 		if (!body.instanceId) {
@@ -330,10 +339,22 @@ export async function POST(request: NextRequest) {
 		});
 		const totalInputImages = hasInputImage ? referenceImages.length + 1 : 0;
 		const generationIntent = resolveGenerationIntent(body, hasInputImage);
+		const structuredVariantProgram = usesStructuredVariantProgram(body);
 		const requestedNumOutputs = normalizeRequestedOutputs(body.numOutputs || body.gallery_max_images || (useCase === 'drilldown' ? 1 : 4));
-		const defaults = resolveModelDefaults(useCase, hasInputImage, totalInputImages, requestedNumOutputs, body, generationIntent);
-		const numOutputs = resolveEffectiveNumOutputs(requestedNumOutputs, defaults.modelId);
-		if (numOutputs !== requestedNumOutputs) {
+		const defaults = resolveModelDefaults(
+			useCase,
+			hasInputImage,
+			totalInputImages,
+			structuredVariantProgram ? 1 : requestedNumOutputs,
+			body,
+			generationIntent
+		);
+		const effectiveModelId = structuredVariantProgram ? 'black-forest-labs/flux-schnell' : defaults.modelId;
+		const effectiveGuidanceScale = structuredVariantProgram ? 3.5 : defaults.guidanceScale;
+		const effectiveNumInferenceSteps = structuredVariantProgram ? 4 : defaults.numInferenceSteps;
+		const effectiveOutputFormat = structuredVariantProgram ? 'webp' : defaults.outputFormat;
+		const numOutputs = structuredVariantProgram ? requestedNumOutputs : resolveEffectiveNumOutputs(requestedNumOutputs, defaults.modelId);
+		if (!structuredVariantProgram && numOutputs !== requestedNumOutputs) {
 			logger.info('[GENERATE] Clamped requested outputs to model capability', {
 				instanceId: body.instanceId,
 				useCase,
@@ -402,16 +423,17 @@ export async function POST(request: NextRequest) {
 				? Math.min(body.safetyTolerance, hasInputImage ? 2 : 6)
 				: undefined;
 
-		logger.info(`[GENERATE] Calling DSPY ${defaults.modelId}`, {
+		logger.info(`[GENERATE] Calling DSPY ${effectiveModelId}`, {
 			useCase,
 			generationIntent,
+			structuredVariantProgram,
 			isEdit: hasInputImage,
 			hasTargetImage: Boolean(targetImage),
 			referenceCount: referenceImages.length,
 			requestedNumOutputs,
 			effectiveNumOutputs: numOutputs,
-			guidanceScale: defaults.guidanceScale,
-			numInferenceSteps: defaults.numInferenceSteps,
+			guidanceScale: effectiveGuidanceScale,
+			numInferenceSteps: effectiveNumInferenceSteps,
 		});
 		const originalReferenceImage =
 			typeof body.originalReferenceImage === "string" ? body.originalReferenceImage.trim() || undefined : undefined;
@@ -428,12 +450,12 @@ export async function POST(request: NextRequest) {
 			...body,
 			instanceId: body.instanceId,
 			useCase,
-			modelId: defaults.modelId,
+			modelId: effectiveModelId,
 			numOutputs,
 			aspectRatio: computedAspect,
-			outputFormat: defaults.outputFormat,
-			guidanceScale: defaults.guidanceScale,
-			numInferenceSteps: defaults.numInferenceSteps,
+			outputFormat: effectiveOutputFormat,
+			guidanceScale: effectiveGuidanceScale,
+			numInferenceSteps: effectiveNumInferenceSteps,
 			safetyTolerance,
 			promptUpsampling: defaults.promptUpsampling,
 			referenceImages: hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : referenceImages,
@@ -485,6 +507,11 @@ export async function POST(request: NextRequest) {
 		const upstreamImages = Array.isArray(upstream?.images)
 			? upstream.images.filter((img: any) => typeof img === "string" && img.trim())
 			: [];
+		const upstreamVariants = Array.isArray(upstream?.variants)
+			? upstream.variants.filter(
+					(variant: any) => variant && typeof variant === "object" && typeof variant.imageUrl === "string" && variant.imageUrl.trim()
+			  )
+			: [];
 		logger.info("[GENERATE] Upstream response", {
 			instanceId: body.instanceId,
 			useCase,
@@ -499,6 +526,11 @@ export async function POST(request: NextRequest) {
 			imageRefSignatures(img).every((sig) => !inputSignatures.has(sig))
 		);
 		const deliveredImages = hasInputImage ? filteredImages : upstreamImages;
+		const deliveredVariants = hasInputImage
+			? upstreamVariants.filter((variant: any) =>
+					imageRefSignatures(String(variant.imageUrl || "")).every((sig) => !inputSignatures.has(sig))
+			  )
+			: upstreamVariants;
 
 		if (upstreamImages.length < numOutputs) {
 			logger.warn("[GENERATE] Upstream returned fewer images than requested", {
@@ -563,6 +595,8 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({
 			success: true,
 			images: deliveredImages,
+			variants: deliveredVariants,
+			message: typeof upstream?.message === "string" ? upstream.message : undefined,
 			predictionId: upstream?.predictionId || upstream?.id,
 			status: upstream?.status,
 			provider: "replicate",

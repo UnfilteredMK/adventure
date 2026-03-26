@@ -373,9 +373,10 @@ export function ImageGallery({
         <div 
           ref={rootRef}
           data-tour="gallery-area"
-          className="relative"
+          className="relative h-full min-h-0 w-full"
           style={{ 
             height: '100%', // Fill parent height - bounded by gallery section
+            minHeight: 0,
             width: '100%',
             maxHeight: '100%', // Don't overflow parent
             overflow: 'hidden', // Container doesn't scroll - children do
@@ -494,7 +495,7 @@ export function ImageGallery({
             ) : (
               <motion.div
                 key="gallery"
-                className="h-full w-full"
+                className="h-full min-h-0 w-full"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}

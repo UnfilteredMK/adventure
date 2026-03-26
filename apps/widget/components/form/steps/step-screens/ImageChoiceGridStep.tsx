@@ -237,7 +237,7 @@ export function ImageChoiceGridStep({
     : undefined;
   const trustLine =
     isPricedGridStep
-      ? String((step as any)?.blueprint?.validation?.trust_line || "").trim() || "Based on real projects similar to yours"
+      ? String((step as any)?.blueprint?.validation?.trust_line || "").trim() || "Based on real examples similar to yours"
       : "";
 
   return (
@@ -258,37 +258,55 @@ export function ImageChoiceGridStep({
       <div
         className={layoutDebugClassName(
           layoutDebugEnabled,
-          !isPricedGridStep && compactInPreview
-            ? "mx-auto flex h-full min-h-0 w-full max-w-none min-w-0 flex-1 flex-col"
-            : "flex min-h-0 w-full min-w-0 flex-col"
+          isPricedGridStep
+            ? "flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+            : !isPricedGridStep && compactInPreview
+              ? "mx-auto flex h-full min-h-0 w-full max-w-none min-w-0 flex-1 flex-col"
+              : "flex min-h-0 w-full min-w-0 flex-col"
         )}
-        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "emerald")}
+        style={isPricedGridStep ? undefined : withLayoutDebugStyle(undefined, layoutDebugEnabled, "emerald")}
       >
         <div
-          className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex-1 flex flex-col")}
-          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")}
+          className={layoutDebugClassName(
+            layoutDebugEnabled,
+            isPricedGridStep
+              ? "w-full min-w-0 flex min-h-0 flex-1 flex-col"
+              : "w-full min-h-0 flex-1 flex flex-col"
+          )}
+          style={
+            isPricedGridStep
+              ? undefined
+              : withLayoutDebugStyle(undefined, layoutDebugEnabled, "answerGreen")
+          }
         >
           {isPricedGridStep ? (
-            <div className="pb-2 text-center text-xs text-muted-foreground">{trustLine}</div>
+            <div className="shrink-0 pb-2 text-center text-xs text-muted-foreground">{trustLine}</div>
           ) : null}
-          <ImageChoiceGrid
-            value={value}
-            onChange={handleValueChange}
-            onSwipeComplete={(finalValue) => {
-              if (isLoading) return;
-              onComplete(finalValue);
-            }}
-            options={options}
-            multiple={multiple}
-            maxSelections={maxSelections}
-            variant={effectiveVariant}
-            columns={effectiveColumns}
-            thumbnailMode={isPricedGridStep ? false : Boolean(guidedThumbnailMode || compactInPreview)}
-            compactScroller={isPricedGridStep ? false : Boolean(compactInPreview)}
-            hideOptionText={isStyleStep || isPricedGridStep}
-            displayMode={isPricedGridStep ? "priced_examples" : "default"}
-            className={!isPricedGridStep && compactInPreview ? "h-full min-h-0 flex-1" : undefined}
-          />
+          <div
+            className={cn(
+              isPricedGridStep ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y" : null
+            )}
+            style={isPricedGridStep ? ({ WebkitOverflowScrolling: "touch" } as React.CSSProperties) : undefined}
+          >
+            <ImageChoiceGrid
+              value={value}
+              onChange={handleValueChange}
+              onSwipeComplete={(finalValue) => {
+                if (isLoading) return;
+                onComplete(finalValue);
+              }}
+              options={options}
+              multiple={multiple}
+              maxSelections={maxSelections}
+              variant={effectiveVariant}
+              columns={effectiveColumns}
+              thumbnailMode={isPricedGridStep ? false : Boolean(guidedThumbnailMode || compactInPreview)}
+              compactScroller={isPricedGridStep ? false : Boolean(compactInPreview)}
+              hideOptionText={isStyleStep || isPricedGridStep}
+              displayMode={isPricedGridStep ? "priced_examples" : "default"}
+              className={!isPricedGridStep && compactInPreview ? "h-full min-h-0 flex-1" : undefined}
+            />
+          </div>
         </div>
       </div>
     </StepLayout>
