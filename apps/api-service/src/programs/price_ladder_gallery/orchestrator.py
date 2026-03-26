@@ -20,6 +20,11 @@ from programs.pricing.service_calibration import (
 
 _CURRENCY_RE = re.compile(r"(?i)\b(usd|cad|aud|gbp|eur)\b")
 _MONEY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*k?\b", re.IGNORECASE)
+_REALISM_NEGATIVE_TERMS = (
+    "cgi, 3d render, rendering, synthetic, artificial, fake-looking, toy-like, dollhouse, plastic surfaces, "
+    "waxy finish, uncanny symmetry, exaggerated hdr, overprocessed, airbrushed, glossy fake reflections, "
+    "impossible geometry, warped lines, floating objects, duplicate fixtures, malformed architecture"
+)
 
 
 @dataclass(frozen=True)
@@ -192,6 +197,20 @@ def _coerce_bool(value: Any) -> Optional[bool]:
         if raw in {"0", "false", "no", "off"}:
             return False
     return None
+
+
+def _merge_negative_prompt(primary: Optional[str], fallback: str) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw in (primary or "", fallback):
+        for item in str(raw or "").split(","):
+            token = item.strip()
+            key = token.lower()
+            if not token or key in seen:
+                continue
+            seen.add(key)
+            parts.append(token)
+    return ", ".join(parts)
 
 
 def _extract_step_data(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -481,12 +500,18 @@ def _build_slot_prompt(
             f"Layout variation: {slot.layout_variation}.",
             f"Price signal: the final image should look credibly aligned with a {currency} {price_low:,}-{price_high:,} implementation for this service.",
             "Make this clearly distinct from sibling variants through layout emphasis, fixture mix, material package, and lighting mood, not by changing to a different style family.",
+            "Absolute priority: this must read as a real photographed finished result, not AI art, not a mood board, and not a 3D render.",
+            "Use believable camera optics, accurate scale, true-to-life proportions, natural shadow falloff, grounded objects, realistic reflections, and material textures with subtle real-world imperfections.",
+            "Favor documentary or high-end real-estate photography realism over stylization. Keep the scene buildable, physically plausible, and professionally executed.",
         ]
     )
 
     if retry_index > 0:
         lines.append(
             "Increase separation from the other variants. Change the dominant focal feature, mirror or focal geometry, fixture hierarchy, and spatial emphasis while staying realistic."
+        )
+        lines.append(
+            "Push even harder toward realism on retry: stronger material believability, less symmetry, less showroom polish, more convincing lived-in photographic authenticity."
         )
 
     return "\n".join(line for line in lines if line.strip()).strip()
@@ -611,7 +636,10 @@ def generate_price_ladder_gallery(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     base_spec = _build_base_prompt_spec(payload)
     base_prompt = str(base_spec.get("prompt") or "").strip()
-    negative_prompt = str(base_spec.get("negativePrompt") or "").strip() or None
+    negative_prompt = _merge_negative_prompt(
+        str(base_spec.get("negativePrompt") or "").strip() or None,
+        _REALISM_NEGATIVE_TERMS,
+    )
     if not base_prompt:
         return {
             "ok": False,
