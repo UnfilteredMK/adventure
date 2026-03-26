@@ -13,6 +13,7 @@ import { useFormTheme } from "../../../demo/FormThemeProvider";
 import { ImageGallery } from "@/components/widget/gallery/ImageGallery";
 import { LeadCaptureModal } from "@/components/widget/LeadCaptureModal";
 import { LeadGenPopover } from "../lead-gen/LeadGenPopover";
+import { PRICING_LEAD_COPY } from "../lead-gen/pricingLeadCopy";
 import { ReferenceImageUpload } from "@/components/widget/user-input-section/ReferenceImageUpload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -805,12 +806,7 @@ export function GalleryStep({
                         gateContext="pricing_details"
                         surface="overlay"
                         contentStyle={pricingGateStyle}
-                        title="Where should we send the pricing to?"
-                        description="Enter your email to reveal pricing."
-                        finePrint="Instant reveal after sending."
-                        ctaLabel="Send pricing"
-                        phoneTitle="Best phone number?"
-                        phoneDescription="We can text updates too."
+                        {...PRICING_LEAD_COPY}
                         requirePhone
                         submitOnEmail={false}
                         submissionData={{ surface: "preview_pricing" }}

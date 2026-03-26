@@ -7,9 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from programs.common.visual_text_safety import ANTI_COMPARISON_NEGATIVE_TERMS, ANTI_TEXT_OVERLAY_NEGATIVE_TERMS
 from programs.form_pipeline.context_builder import build_context
 from programs.image_generator.prompt_builder import build_image_prompt_text, extract_reference_images
 from programs.image_generator.providers.image_generation import generate_images
+from programs.pricing.orchestrator import estimate_pricing
 from programs.pricing.service_calibration import (
     PriceRange,
     calibration_response_payload,
@@ -21,6 +23,7 @@ from programs.pricing.service_calibration import (
 _CURRENCY_RE = re.compile(r"(?i)\b(usd|cad|aud|gbp|eur)\b")
 _MONEY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*k?\b", re.IGNORECASE)
 _REALISM_NEGATIVE_TERMS = (
+    f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, {ANTI_COMPARISON_NEGATIVE_TERMS}, "
     "cgi, 3d render, rendering, synthetic, artificial, fake-looking, toy-like, dollhouse, plastic surfaces, "
     "waxy finish, uncanny symmetry, exaggerated hdr, overprocessed, airbrushed, glossy fake reflections, "
     "impossible geometry, warped lines, floating objects, duplicate fixtures, malformed architecture"
@@ -380,6 +383,19 @@ def _build_gallery_envelope(
     return PriceRange(low=floor, high=ceiling).normalized()
 
 
+def _coerce_price_range_dict(raw: Any) -> Optional[PriceRange]:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        low = int(raw.get("low"))
+        high = int(raw.get("high"))
+    except Exception:
+        return None
+    if low <= 0 or high <= 0:
+        return None
+    return PriceRange(low=low, high=high).normalized()
+
+
 def _price_range_for_slot(slot: VariantSlot, envelope: PriceRange, service_range: PriceRange) -> PriceRange:
     span = max(4_000, envelope.high - envelope.low)
     center = envelope.low + int(round(span * slot.price_position))
@@ -393,25 +409,93 @@ def _price_range_for_slot(slot: VariantSlot, envelope: PriceRange, service_range
     return PriceRange(low=low, high=high).normalized()
 
 
+def _resolve_gallery_pricing_seed(
+    payload: Dict[str, Any],
+    *,
+    calibration: Any,
+) -> Dict[str, Any]:
+    fallback = calibration_response_payload(calibration)
+    fallback_service_range = calibration.normalized_service_range()
+    fallback_range = calibration.normalized_starter_baseline()
+
+    try:
+        seed_payload = dict(payload)
+        seed_payload.pop("previewImageUrl", None)
+        seed_payload.pop("preview_image_url", None)
+        seed_payload.pop("baselineImageUrl", None)
+        seed_payload.pop("baseline_image_url", None)
+        seed_payload.pop("baselinePriceRange", None)
+        seed_payload.pop("baseline_price_range", None)
+        seed_payload.pop("pricingScenario", None)
+        seed_payload.pop("pricing_scenario", None)
+        estimate = estimate_pricing(seed_payload)
+    except Exception:
+        estimate = None
+
+    if not isinstance(estimate, dict) or not estimate.get("ok"):
+        return {
+            "service_range": fallback_service_range,
+            "estimate_range": fallback_range,
+            "budget_tier_ranges": fallback["budgetTierRanges"],
+            "budget_tier": resolve_budget_tier(calibration, _extract_budget_value(payload)),
+            "calibration_key": calibration.key,
+            "median_price": fallback_service_range.midpoint(),
+        }
+
+    service_range = _coerce_price_range_dict(estimate.get("servicePriceRange")) or fallback_service_range
+    estimate_range = (
+        _coerce_price_range_dict(
+            {
+                "low": estimate.get("rangeLow"),
+                "high": estimate.get("rangeHigh"),
+            }
+        )
+        or _coerce_price_range_dict(estimate.get("imagePriceRange"))
+        or calibration.normalized_starter_baseline()
+    )
+    budget_tier_ranges = estimate.get("budgetTierRanges") if isinstance(estimate.get("budgetTierRanges"), dict) else fallback["budgetTierRanges"]
+    budget_tier = str(estimate.get("budgetTier") or "").strip().lower() or resolve_budget_tier(calibration, _extract_budget_value(payload))
+    calibration_key = str(estimate.get("calibrationKey") or calibration.key).strip() or calibration.key
+    return {
+        "service_range": service_range,
+        "estimate_range": estimate_range,
+        "budget_tier_ranges": budget_tier_ranges,
+        "budget_tier": budget_tier,
+        "calibration_key": calibration_key,
+        "median_price": service_range.midpoint(),
+    }
+
+
 def _resolve_slot_prices(payload: Dict[str, Any]) -> dict[str, Dict[str, Any]]:
     basis_text = _build_basis_text(payload)
     calibration = match_service_calibration(basis_text)
-    calibration_meta = calibration_response_payload(calibration)
     budget_value = _extract_budget_value(payload)
     scope_text = _collect_scope_text(payload)
-    service_range = calibration.normalized_service_range()
-    tier_ranges = calibration.normalized_tier_ranges()
+    pricing_seed = _resolve_gallery_pricing_seed(payload, calibration=calibration)
+    calibration_meta = calibration_response_payload(calibration)
+    service_range = pricing_seed["service_range"]
     envelope = _build_gallery_envelope(
         {
             "service_range": service_range,
             "visible_band": calibration.normalized_visible_band_clamp(),
             "starter_baseline": calibration.normalized_starter_baseline(),
-            "starter_tier": tier_ranges["starter"],
-            "premium_tier": tier_ranges["premium"],
+            "starter_tier": _coerce_price_range_dict(pricing_seed["budget_tier_ranges"].get("starter"))
+            or calibration.normalized_tier_ranges()["starter"],
+            "premium_tier": _coerce_price_range_dict(pricing_seed["budget_tier_ranges"].get("premium"))
+            or calibration.normalized_tier_ranges()["premium"],
         },
         budget_value=budget_value,
         scope_text=scope_text,
     )
+    seeded_estimate_range = pricing_seed["estimate_range"]
+    if seeded_estimate_range:
+        envelope_mid = envelope.midpoint()
+        estimate_mid = seeded_estimate_range.midpoint()
+        shift = int(round((estimate_mid - envelope_mid) * 0.45))
+        envelope = PriceRange(
+            low=max(service_range.low, envelope.low + shift),
+            high=min(service_range.high, envelope.high + shift),
+        ).normalized()
     currency = _detect_currency(payload)
 
     slot_prices: dict[str, Dict[str, Any]] = {}
@@ -420,8 +504,11 @@ def _resolve_slot_prices(payload: Dict[str, Any]) -> dict[str, Dict[str, Any]]:
         slot_prices[slot.slot_id] = {
             "priceRange": {**price_range.to_dict(), "currency": currency},
             "budgetTier": resolve_budget_tier(calibration, price_range.midpoint()),
-            "budgetTierRanges": calibration_meta["budgetTierRanges"],
-            "calibrationKey": calibration.key,
+            "budgetTierRanges": pricing_seed["budget_tier_ranges"] or calibration_meta["budgetTierRanges"],
+            "calibrationKey": pricing_seed["calibration_key"],
+            "servicePriceRange": service_range.to_dict(),
+            "medianPrice": pricing_seed["median_price"],
+            "seedBudgetTier": pricing_seed["budget_tier"],
         }
     return slot_prices
 
@@ -472,8 +559,10 @@ def _build_slot_prompt(
 
     lines = [
         base_prompt.strip(),
-        "This image is one slot in a fixed 9-image price-ladder concept gallery.",
+        "This request belongs to a fixed 9-image price-ladder concept set.",
+        "Generate one standalone finished image for this slot only.",
         "Same style family, different execution reality.",
+        "Never return a collage, contact sheet, storyboard, multi-panel composition, or any layout with visible text or numerals.",
     ]
 
     if style_ref_count > 0:
@@ -484,7 +573,7 @@ def _build_slot_prompt(
 
     if guide_only:
         lines.append(
-            "Generate a fresh single finished concept image, not a before-and-after, not a side-by-side, and not a near-duplicate of the reference."
+            "Generate one completed concept image that feels original and fully resolved. Do not show the source image, multiple stages, or any comparison treatment."
         )
     elif scene_anchor:
         lines.append(
@@ -501,6 +590,7 @@ def _build_slot_prompt(
             f"Price signal: the final image should look credibly aligned with a {currency} {price_low:,}-{price_high:,} implementation for this service.",
             "Make this clearly distinct from sibling variants through layout emphasis, fixture mix, material package, and lighting mood, not by changing to a different style family.",
             "Absolute priority: this must read as a real photographed finished result, not AI art, not a mood board, and not a 3D render.",
+            "Do not add text, letters, numbers, numerals, digits, captions, labels, logos, watermarks, signage, price tags, measurement marks, or callouts anywhere in the image.",
             "Use believable camera optics, accurate scale, true-to-life proportions, natural shadow falloff, grounded objects, realistic reflections, and material textures with subtle real-world imperfections.",
             "Favor documentary or high-end real-estate photography realism over stylization. Keep the scene buildable, physically plausible, and professionally executed.",
         ]
@@ -605,6 +695,9 @@ def _generate_slot_variant(
             "budgetTier": slot_price["budgetTier"],
             "budgetTierRanges": slot_price["budgetTierRanges"],
             "calibrationKey": slot_price["calibrationKey"],
+            "servicePriceRange": slot_price["servicePriceRange"],
+            "medianPrice": slot_price["medianPrice"],
+            "seedBudgetTier": slot_price["seedBudgetTier"],
             "predictionId": provider_response.get("id"),
             "prompt": prompt,
         }

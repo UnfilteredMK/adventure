@@ -22,17 +22,17 @@ class ScenePromptSignature(dspy.Signature):
       3) user_preferences/style details
     - Never include UUIDs, URLs, or technical identifiers in the prompt.
     - Never include text instructions like "no text" in the main prompt (use negative_prompt).
-    - Always describe a single finished image, never a before/after comparison, split screen, side-by-side layout,
+    - Always describe a single finished image, never a comparison layout, split screen, side-by-side layout,
       diptych, collage, storyboard, annotated mockup, or any design with visible text overlays.
-    - For edit mode (is_edit=true): The uploaded reference image is the BEFORE state.
-      Generate the fully-completed, professional AFTER state.
+    - For edit mode (is_edit=true): treat the uploaded reference image as source context for the existing space.
+      Generate one fully-completed, professional finished result.
       Use service_name and service_summary to understand exactly what this project entails —
       what elements would be replaced, upgraded, or transformed — and make ALL of those things
       look brand-new and professionally done. Nothing the service would have touched should look
       old, worn, or original. Preserve only the structural/contextual elements that would NOT
       be changed by this service (e.g. background environment, camera angle, unchanged parts of
       the subject). Replace or transform everything the service covers. Treat the upload as source context only,
-      not as one half of a comparison graphic.
+      not as one half of a comparison or multi-stage graphic.
     - When generation_intent=initial: This is the FIRST transformation. Demand a COMPLETE, DRAMATIC overhaul.
       Fully renovate, replace all finishes/fixtures, make every service-touched element look brand-new.
       De-emphasize preservation; preserve only layout, camera, structure. REPLACE everything else.

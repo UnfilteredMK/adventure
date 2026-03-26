@@ -74,6 +74,7 @@ export function StepEngineBodySection(props: any) {
     layoutDebugEnabled,
     effectiveCurrentStep,
     guidedThumbnailMode,
+    onKeepDesigning,
   } = props;
 
   return (
@@ -93,7 +94,7 @@ export function StepEngineBodySection(props: any) {
               className={cn(
                 ((!flowCompleted && styleStepActive) || (pricedGridStepActive && showQuestionPaneUnderPreview))
                   ? "pointer-events-none absolute h-0 w-0 overflow-hidden opacity-0"
-                  : "flex min-h-0 flex-col overflow-hidden",
+                  : "flex min-h-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
                 previewLayoutActive ? "flex-1 min-h-0" : "shrink-0"
               )}
             >
@@ -123,6 +124,7 @@ export function StepEngineBodySection(props: any) {
                 useDesktopPreviewLayout={useDesktopPreviewLayout}
                 useMobilePreviewLayout={useMobilePreviewLayout}
                 usePreviewDominantLayout={previewLayoutActive}
+                onKeepDesigning={onKeepDesigning}
               />
             </div>
           ) : null}

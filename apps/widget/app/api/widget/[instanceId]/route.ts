@@ -32,6 +32,21 @@ function coerceSubcategoryComponents(
   return items;
 }
 
+function coerceHeroCtaText(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  return t || null;
+}
+
+function coerceHeroCtaUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return t;
+  return null;
+}
+
 function buildCatalogStyleOptions(rows: any[]): {
   options: Array<{
     label: string;
@@ -239,6 +254,8 @@ export async function GET(
       industryName?: string | null;
       serviceName?: string | null;
       serviceSummary?: string | null;
+      heroCtaUrl?: string | null;
+      heroCtaText?: string | null;
       subcategoryComponents?: Array<{
         key: string;
         label: string;
@@ -272,7 +289,9 @@ export async function GET(
         if (ids.length > 0) {
           const { data: subcats, error: subcatsError } = await supabase
             .from("categories_subcategories")
-            .select("id, subcategory, category_id, service_summary, subcategory_components, categories(name)")
+            .select(
+              "id, subcategory, category_id, service_summary, subcategory_components, hero_cta_url, hero_cta_text, categories(name)",
+            )
             .in("id", ids)
             .limit(60);
           if (subcatsError) {
@@ -289,6 +308,8 @@ export async function GET(
               industryId: string | null;
               industryName: string | null;
               serviceSummary: string | null;
+              heroCtaUrl: string | null;
+              heroCtaText: string | null;
               subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
             }
           >(
@@ -296,13 +317,15 @@ export async function GET(
               const serviceName = String(s?.subcategory || "Service");
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary = typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
+              const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
+              const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { serviceName, industryId, industryName, serviceSummary, subcategoryComponents }];
+              return [String(s.id), { serviceName, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents }];
             })
           );
           serviceOptions = ids
@@ -312,6 +335,8 @@ export async function GET(
                 industryId: null,
                 industryName: null,
                 serviceSummary: null,
+                heroCtaUrl: null as string | null,
+                heroCtaText: null as string | null,
                 subcategoryComponents: [],
               };
               const rawLabel = meta.serviceName || "Service";
@@ -324,6 +349,8 @@ export async function GET(
                 industryId: meta.industryId,
                 industryName: meta.industryName,
                 serviceSummary: meta.serviceSummary,
+                ...(meta.heroCtaUrl != null ? { heroCtaUrl: meta.heroCtaUrl } : {}),
+                ...(meta.heroCtaText != null ? { heroCtaText: meta.heroCtaText } : {}),
                 ...(meta.subcategoryComponents.length > 0 ? { subcategoryComponents: meta.subcategoryComponents } : {}),
               };
             })
@@ -354,7 +381,9 @@ export async function GET(
         try {
           const { data: subcats, error: subcatsError } = await supabase
             .from("categories_subcategories")
-            .select("id, subcategory, category_id, service_summary, subcategory_components, categories(name)")
+            .select(
+              "id, subcategory, category_id, service_summary, subcategory_components, hero_cta_url, hero_cta_text, categories(name)",
+            )
             .in("id", candidateIds)
             .limit(60);
           if (subcatsError) {
@@ -372,6 +401,8 @@ export async function GET(
               industryId: string | null;
               industryName: string | null;
               serviceSummary: string | null;
+              heroCtaUrl: string | null;
+              heroCtaText: string | null;
               subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
             }
           >(
@@ -381,13 +412,15 @@ export async function GET(
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary =
                 typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
+              const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
+              const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary, subcategoryComponents }];
+              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents }];
             }),
           );
 
@@ -401,6 +434,8 @@ export async function GET(
               industryId: meta?.industryId ?? null,
               industryName: meta?.industryName ?? null,
               serviceSummary: meta?.serviceSummary ?? null,
+              ...(meta?.heroCtaUrl != null ? { heroCtaUrl: meta.heroCtaUrl } : {}),
+              ...(meta?.heroCtaText != null ? { heroCtaText: meta.heroCtaText } : {}),
               ...(meta?.subcategoryComponents?.length ? { subcategoryComponents: meta.subcategoryComponents } : {}),
             };
           });

@@ -123,6 +123,8 @@ function parsePricingEstimate(
   requestId?: string;
   servicePriceRange?: { low: number; high: number };
   imagePriceRange?: { low: number; high: number };
+  visibleBandClamp?: { low: number; high: number };
+  starterBaseline?: { low: number; high: number };
   baselinePriceRange?: { low: number; high: number };
   deltaPriceRange?: { low: number; high: number };
   deltaDirection?: string;
@@ -130,6 +132,7 @@ function parsePricingEstimate(
   budgetTierRanges?: Record<string, { low: number; high: number }>;
   priceDrivers?: Array<{ key: string; label: string }>;
   calibrationKey?: string;
+  medianPrice?: number;
 } | null {
   if (!json || typeof json !== "object") return null;
 
@@ -187,6 +190,8 @@ function parsePricingEstimate(
       low: totalMin,
       high: totalMax,
     };
+    const visibleBandClamp = parseRangeObject(root?.visibleBandClamp ?? root?.visible_band_clamp);
+    const starterBaseline = parseRangeObject(root?.starterBaseline ?? root?.starter_baseline);
     const baselinePriceRange = parseRangeObject(root?.baselinePriceRange ?? root?.baseline_price_range);
     const deltaPriceRange = parseRangeObject(root?.deltaPriceRange ?? root?.delta_price_range, { allowNegative: true });
     const budgetTierRangesRaw = root?.budgetTierRanges ?? root?.budget_tier_ranges;
@@ -213,6 +218,8 @@ function parsePricingEstimate(
       ...(confidence ? { confidence } : {}),
       ...(requestId ? { requestId } : {}),
       ...(servicePriceRange ? { servicePriceRange } : {}),
+      ...(visibleBandClamp ? { visibleBandClamp } : {}),
+      ...(starterBaseline ? { starterBaseline } : {}),
       ...(baselinePriceRange ? { baselinePriceRange } : {}),
       ...(deltaPriceRange ? { deltaPriceRange } : {}),
       ...(typeof root?.deltaDirection === "string" ? { deltaDirection: String(root.deltaDirection).trim().toLowerCase() } : {}),
@@ -220,6 +227,7 @@ function parsePricingEstimate(
       ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
       ...(priceDrivers.length > 0 ? { priceDrivers } : {}),
       ...(typeof root?.calibrationKey === "string" ? { calibrationKey: String(root.calibrationKey).trim() } : {}),
+      ...(Number.isFinite(n(root?.medianPrice ?? root?.median_price)) ? { medianPrice: Number(root?.medianPrice ?? root?.median_price) } : {}),
     };
   }
   return null;
@@ -793,6 +801,8 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
             ...(estimate.requestId ? { requestId: estimate.requestId } : {}),
             ...(serviceRange ? { servicePriceRange: serviceRange } : {}),
             ...(imageRange ? { imagePriceRange: imageRange } : {}),
+            ...(estimate.visibleBandClamp ? { visibleBandClamp: estimate.visibleBandClamp } : {}),
+            ...(estimate.starterBaseline ? { starterBaseline: estimate.starterBaseline } : {}),
             ...(baselineRange ? { baselinePriceRange: baselineRange } : {}),
             ...(deltaRange ? { deltaPriceRange: deltaRange } : {}),
             ...(estimate.deltaDirection ? { deltaDirection: estimate.deltaDirection } : {}),
@@ -800,6 +810,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
             ...(estimate.budgetTierRanges ? { budgetTierRanges: estimate.budgetTierRanges } : {}),
             ...(estimate.priceDrivers ? { priceDrivers: estimate.priceDrivers } : {}),
             ...(estimate.calibrationKey ? { calibrationKey: estimate.calibrationKey } : {}),
+            ...(typeof estimate.medianPrice === "number" ? { medianPrice: estimate.medianPrice } : {}),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } }

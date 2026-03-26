@@ -120,7 +120,7 @@ export function FormQuestionSection({
   const uploadsInputRef = useRef<HTMLInputElement>(null);
   // Only show prompt/budget/uploads bar AFTER lead capture (pricing opt-in) is completed.
   const showPromptControls = Boolean(
-    previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI
+    previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI && !hideQuestionPane
   );
   const usePreviewPaneLayout = Boolean(
     usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage && !forceExpandedStepLayout

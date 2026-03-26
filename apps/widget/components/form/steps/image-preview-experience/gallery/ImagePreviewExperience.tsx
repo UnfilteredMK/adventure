@@ -25,10 +25,13 @@ import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/cu
 import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
+import { PRICING_LEAD_COPY, PRICING_LEAD_MODAL } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
 import { useFormSubmission } from "@/hooks/use-form-submission";
 import { safeStableJsonForPricingContext } from "../../runtime/step-engine/utils/pricing-context";
+import { PRICING_ESTIMATE_KEY } from "../../runtime/step-engine/constants";
+import { normalizePricingEstimate } from "../../runtime/step-engine/utils/pricing-estimate";
 import { PREVIEW_CACHE_UPDATED_EVENT, notifyPreviewCacheUpdated } from "./preview-cache-bridge";
 
 function hexToRgba(hex: string, alpha: number): string | null {
@@ -275,6 +278,54 @@ function resolveBudgetTierFromRanges(
     if (budgetValue <= range.high) return key;
   }
   return "luxury";
+}
+
+function formatPricingRangeText(params: {
+  pricing?: CachedPricing | null;
+  locale?: string;
+  currency?: string;
+}): string | null {
+  const pricing = params.pricing;
+  if (!pricing) return null;
+  const low = pricing.imagePriceRange?.low ?? pricing.totalMin;
+  const high = pricing.imagePriceRange?.high ?? pricing.totalMax;
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  const currency = String(params.currency || pricing.currency || "USD").trim().toUpperCase() || "USD";
+  return `${formatCurrency(Math.min(low, high), { locale: params.locale, currency })}-${formatCurrency(
+    Math.max(low, high),
+    { locale: params.locale, currency }
+  )}`;
+}
+
+function pickHttpUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return t;
+  return null;
+}
+
+function readConfirmationScheduleUrlFromSteps(steps: any[] | undefined): string | null {
+  if (!Array.isArray(steps)) return null;
+  for (const step of steps) {
+    const id = String((step as any)?.id ?? (step as any)?.stepId ?? "").trim();
+    if (id !== "step-confirmation") continue;
+    const url = pickHttpUrl((step as any)?.data?.scheduleUrl);
+    if (url) return url;
+  }
+  return null;
+}
+
+function splitPricingMaskSegments(rangeText: string | null): {
+  prefix: string;
+  blur: string;
+} | null {
+  if (!rangeText) return null;
+  const raw = String(rangeText).trim();
+  const m = raw.match(/^(\D*\d)(.*)$/);
+  if (!m) return { prefix: raw, blur: "" };
+  return { prefix: m[1], blur: m[2] || "" };
 }
 
 function isPricingComparableUseCase(raw?: string | null): boolean {
@@ -650,12 +701,12 @@ export function ImagePreviewExperience(props: {
   previewChromePx?: number;
   /** When true, hides the "Upload your own image" overlay button on the preview image. */
   suppressUploadOverlay?: boolean;
-  /** When true, hides the budget slider overlay (e.g. when preview is in dominant/large mode). */
-  hideBudgetInOverlay?: boolean;
   /** When false, suppress preview tool controls for priced-grid mode. */
   toolingEnabled?: boolean;
   /** When true, disable concept gallery picker and keep hero in single-image mode. */
   disableConceptPicker?: boolean;
+  /** Optional hook to bring Guided controls into focus. */
+  onKeepDesigning?: () => void;
 }) {
   const { theme, config: designConfig } = useFormTheme();
   const {
@@ -678,9 +729,9 @@ export function ImagePreviewExperience(props: {
     previewMaxVw,
     previewChromePx,
     suppressUploadOverlay = false,
-    hideBudgetInOverlay = false,
     toolingEnabled = true,
     disableConceptPicker = false,
+    onKeepDesigning,
   } = props;
 
   const initialCache = useMemo(() => loadCache(instanceId, sessionId), [instanceId, sessionId]);
@@ -964,6 +1015,12 @@ export function ImagePreviewExperience(props: {
     }
     return base;
   }, [liveBudget, stepDataSoFar]);
+  // Shared service+scope pricing seed. This shapes the gallery/budget defaults before
+  // we ever run the exact hero-image pricing pass.
+  const pricingSeed = useMemo(
+    () => normalizePricingEstimate((stepDataSoFar as any)?.[PRICING_ESTIMATE_KEY]),
+    [stepDataSoFar]
+  );
 
   const requestAccuratePricing = useCallback(
     async ({
@@ -2110,8 +2167,20 @@ export function ImagePreviewExperience(props: {
   const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
   const leadGateActive = leadGateEnabled && Boolean(hero) && !leadCaptured;
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
+  /** Single-image mode with pricing unlocked (no gate, or lead captured). */
+  const revenuePanelActive = Boolean(hero && !showConceptPicker && (!leadGateEnabled || leadCaptured));
   const galleryLoadingMessage =
     GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
+
+  const [overlayPricingExpanded, setOverlayPricingExpanded] = useState(false);
+  useEffect(() => {
+    // Default expanded once pricing is revealed; collapse when leaving single-image revealed mode.
+    if (revenuePanelActive) {
+      setOverlayPricingExpanded(true);
+      return;
+    }
+    setOverlayPricingExpanded(false);
+  }, [revenuePanelActive]);
 
   useEffect(() => {
     if (!showProgressiveGalleryLoader) {
@@ -2254,12 +2323,18 @@ export function ImagePreviewExperience(props: {
   }, [cache?.status, enabled, runGenerate]);
 
   const budgetSliderBounds = useMemo(() => {
-    const previewPricingSeed = buildPreviewPricingFromConfig((config as any)?.previewPricing, sessionId);
+    const configPreviewPricingSeed = buildPreviewPricingFromConfig((config as any)?.previewPricing, sessionId);
+    const seededRange =
+      pricingSeed?.servicePriceRange ??
+      pricingSeed?.imagePriceRange ??
+      (typeof pricingSeed?.totalMin === "number" && typeof pricingSeed?.totalMax === "number"
+        ? { low: pricingSeed.totalMin, high: pricingSeed.totalMax }
+        : null);
     // Slider uses service price range (wider) only; never image range (totalMin/totalMax)
     const sourceMin =
-      accuratePricing?.servicePriceRange?.low ?? previewPricingSeed?.totalMin ?? 2000;
+      accuratePricing?.servicePriceRange?.low ?? seededRange?.low ?? configPreviewPricingSeed?.totalMin ?? 2000;
     const sourceMax =
-      accuratePricing?.servicePriceRange?.high ?? previewPricingSeed?.totalMax ?? 50000;
+      accuratePricing?.servicePriceRange?.high ?? seededRange?.high ?? configPreviewPricingSeed?.totalMax ?? 50000;
     const min = Math.max(500, Math.min(sourceMin, sourceMax));
     const max = Math.max(min + 500, Math.max(sourceMin, sourceMax));
     const span = Math.max(0, max - min);
@@ -2268,7 +2343,7 @@ export function ImagePreviewExperience(props: {
     const step =
       span <= 10000 ? 1000 : span <= 20000 ? 1500 : span <= 40000 ? 2000 : span <= 60000 ? 2500 : Math.max(1000, Math.round(span / 24));
     return { min, max, step };
-  }, [accuratePricing, config, sessionId]);
+  }, [accuratePricing, config, pricingSeed, sessionId]);
 
   const previewPricing = useMemo(() => {
     return buildPreviewPricingFromConfig((config as any)?.previewPricing, sessionId);
@@ -2288,15 +2363,8 @@ export function ImagePreviewExperience(props: {
       : undefined;
   const pricingCurrency = (previewPricing?.currency || detectCurrencyFromLocale(pricingLocale) || "USD").toUpperCase();
 
-  const budgetSliderLabels = useMemo(() => {
-    const { min, max } = budgetSliderBounds;
-    const currency = (accuratePricing?.currency || pricingCurrency || "USD").toUpperCase();
-    return [0, 0.5, 1].map((pct) => {
-      const val = pct === 0 ? min : pct === 1 ? max : Math.round(min + (max - min) * pct);
-      return formatCurrency(val, { locale: pricingLocale, currency, compact: true });
-    });
-  }, [accuratePricing?.currency, budgetSliderBounds, pricingCurrency, pricingLocale]);
-
+  // Exact pricing is only fetched for the currently selected hero image.
+  // The rest of the gallery keeps its original seeded ranges from the first pass.
   const fetchAccuratePricing = useCallback(async () => {
     if (!instanceId || !sessionId) return;
     if (accuratePricingStatus === "running") return;
@@ -2404,11 +2472,14 @@ export function ImagePreviewExperience(props: {
   useEffect(() => {
     if (liveBudget !== null) return;
     const { min, max, step } = budgetSliderBounds;
-    const at20Pct = min + (max - min) * 0.2;
-    const stepped = Math.round(at20Pct / step) * step;
+    const preferred =
+      typeof pricingSeed?.medianPrice === "number" && Number.isFinite(pricingSeed.medianPrice)
+        ? pricingSeed.medianPrice
+        : min + (max - min) * 0.2;
+    const stepped = Math.round(preferred / step) * step;
     const clamped = Math.max(min, Math.min(max, stepped));
     setLiveBudget(clamped);
-  }, [budgetSliderBounds, liveBudget]);
+  }, [budgetSliderBounds, liveBudget, pricingSeed?.medianPrice]);
 
   // If budget changes while pricing is revealed, refetch accurate pricing after the next regeneration.
   // This covers both the in-overlay slider and external budget changes (e.g. question-pane Budget mode).
@@ -2648,8 +2719,7 @@ export function ImagePreviewExperience(props: {
   const effectivePreviewSize = previewSize;
   // Neutral glass palette for all overlay controls (pills + lead popover).
   const primary = theme.primaryColor || "#3b82f6";
-  const pillBg = "rgba(51, 65, 85, 0.52)";
-  const overlayBg = pillBg;
+  const overlayBg = "rgba(51, 65, 85, 0.52)";
   const overlayHoverBg = "rgba(51, 65, 85, 0.64)";
   const overlayBorder = "rgba(255,255,255,0.24)";
   const galleryPlaceholderPillBg = "rgba(0, 0, 0, 0.60)";
@@ -2663,9 +2733,9 @@ export function ImagePreviewExperience(props: {
   const leadGenInputBg = "rgba(255,255,255,0.12)";
   const leadGenInputBorder = "rgba(255,255,255,0.20)";
   const leadGenPlaceholder = "rgba(255,255,255,0.58)";
-  const leadGenActionBg = "rgba(255,255,255,0.18)";
+  const leadGenActionBg = singleModePricingPillBg;
   const leadGenActionFg = "#ffffff";
-  const leadGenActionBorder = "rgba(255,255,255,0.26)";
+  const leadGenActionBorder = "rgba(255,255,255,0.22)";
   const leadGenRing = "rgba(255,255,255,0.38)";
   const overlayVars = {
     ["--sif-overlay-bg" as any]: overlayBg,
@@ -2708,7 +2778,7 @@ export function ImagePreviewExperience(props: {
     ["--sif-lead-gen-ring" as any]: leadGenRing,
   } as React.CSSProperties;
   const centeredPricingOverlayInset = "clamp(0.7rem, 3cqi, 1rem)";
-  const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(16.5rem, 52cqi, 24.5rem))";
+  const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(17rem, 54cqi, 27rem))";
   const centeredPricingPanelRadius = "clamp(1rem, 4cqi, 1.5rem)";
   const centeredPricingPanelPadding = "clamp(0.65rem, 2.5cqi, 0.95rem)";
   const centeredPricingPanelGap = "clamp(0.4rem, 1.45cqi, 0.62rem)";
@@ -2738,6 +2808,18 @@ export function ImagePreviewExperience(props: {
         currency: pricingCurrency,
       })
     : null;
+  const formattedSeedPricingRange = useMemo(() => {
+    const low = pricingSeed?.servicePriceRange?.low ?? pricingSeed?.imagePriceRange?.low ?? pricingSeed?.totalMin;
+    const high = pricingSeed?.servicePriceRange?.high ?? pricingSeed?.imagePriceRange?.high ?? pricingSeed?.totalMax;
+    const currency = (pricingSeed?.currency || pricingCurrency || "USD").toUpperCase();
+    if (typeof low !== "number" || typeof high !== "number" || !Number.isFinite(low) || !Number.isFinite(high)) {
+      return null;
+    }
+    return `${formatCurrency(Math.min(low, high), { locale: pricingLocale, currency })}-${formatCurrency(
+      Math.max(low, high),
+      { locale: pricingLocale, currency }
+    )}`;
+  }, [pricingCurrency, pricingLocale, pricingSeed]);
 
   const formattedAccuratePricingRange = useMemo(() => {
     if (!accuratePricing) return null;
@@ -2750,6 +2832,104 @@ export function ImagePreviewExperience(props: {
       currency: c,
     })}`;
   }, [accuratePricing, pricingCurrency, pricingLocale]);
+  const formattedCachedHeroPricingRange = useMemo(() => {
+    const heroIdx = hero ? activeRun?.images?.indexOf(hero) ?? -1 : -1;
+    const cachedHeroPricing = heroIdx >= 0 ? activeRun?.imagePricing?.[heroIdx] : undefined;
+    return formatPricingRangeText({
+      pricing: cachedHeroPricing,
+      locale: pricingLocale,
+      currency: pricingCurrency,
+    });
+  }, [activeRun, hero, pricingCurrency, pricingLocale]);
+
+  const selectedServiceIdForCta = useMemo(() => {
+    const raw =
+      (effectiveStepDataSoFar as any)?.["step-service-primary"] ??
+      (effectiveStepDataSoFar as any)?.["step-service"] ??
+      (effectiveStepDataSoFar as any)?.["step_service_primary"] ??
+      (effectiveStepDataSoFar as any)?.["step_service"];
+    const id = Array.isArray(raw) ? String(raw[0] || "").trim() : String(raw || "").trim();
+    return id;
+  }, [effectiveStepDataSoFar]);
+
+  const previewBookingCta = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        primaryUrl: null as string | null,
+        primaryLabel: "Get exact quote & timeline",
+        missingUrl: true,
+      };
+    }
+    const cat = loadServiceCatalog(sessionId);
+    const meta = selectedServiceIdForCta ? cat?.byServiceId?.[selectedServiceIdForCta] : null;
+    const heroUrl = meta && typeof (meta as any).heroCtaUrl === "string" ? pickHttpUrl((meta as any).heroCtaUrl) : null;
+    const heroText =
+      meta && typeof (meta as any).heroCtaText === "string" && String((meta as any).heroCtaText).trim()
+        ? String((meta as any).heroCtaText).trim()
+        : null;
+    const steps = loadStepState(instanceId)?.steps ?? [];
+    const scheduleUrl = readConfirmationScheduleUrlFromSteps(steps);
+    const primaryUrl = heroUrl || scheduleUrl;
+    const primaryLabel = heroText && heroText.length > 0 ? heroText : "Get exact quote & timeline";
+    return { primaryUrl, primaryLabel, missingUrl: !primaryUrl };
+  }, [instanceId, sessionId, selectedServiceIdForCta]);
+
+  const overlayPricingRange = useMemo(() => {
+    const currency = (accuratePricing?.currency || pricingSeed?.currency || pricingCurrency || "USD").toUpperCase();
+    const heroIdx = hero ? activeRun?.images?.indexOf(hero) ?? -1 : -1;
+    const cachedHero = heroIdx >= 0 ? activeRun?.imagePricing?.[heroIdx] : undefined;
+
+    if (accuratePricing) {
+      const low = accuratePricing.imagePriceRange?.low ?? accuratePricing.totalMin;
+      const high = accuratePricing.imagePriceRange?.high ?? accuratePricing.totalMax;
+      if (typeof low === "number" && typeof high === "number" && Number.isFinite(low) && Number.isFinite(high)) {
+        return { low: Math.min(low, high), high: Math.max(low, high), currency };
+      }
+    }
+    if (cachedHero) {
+      const low = cachedHero.imagePriceRange?.low ?? cachedHero.totalMin;
+      const high = cachedHero.imagePriceRange?.high ?? cachedHero.totalMax;
+      if (typeof low === "number" && typeof high === "number" && Number.isFinite(low) && Number.isFinite(high)) {
+        return {
+          low: Math.min(low, high),
+          high: Math.max(low, high),
+          currency: String(cachedHero.currency || currency).trim().toUpperCase() || currency,
+        };
+      }
+    }
+    const seedLow = pricingSeed?.servicePriceRange?.low ?? pricingSeed?.imagePriceRange?.low ?? pricingSeed?.totalMin;
+    const seedHigh = pricingSeed?.servicePriceRange?.high ?? pricingSeed?.imagePriceRange?.high ?? pricingSeed?.totalMax;
+    if (typeof seedLow === "number" && typeof seedHigh === "number" && Number.isFinite(seedLow) && Number.isFinite(seedHigh)) {
+      return { low: Math.min(seedLow, seedHigh), high: Math.max(seedLow, seedHigh), currency };
+    }
+    if (previewPricing && Number.isFinite(previewPricing.totalMin) && Number.isFinite(previewPricing.totalMax)) {
+      return {
+        low: Math.min(previewPricing.totalMin, previewPricing.totalMax),
+        high: Math.max(previewPricing.totalMin, previewPricing.totalMax),
+        currency,
+      };
+    }
+    return null;
+  }, [accuratePricing, activeRun, hero, previewPricing, pricingCurrency, pricingSeed]);
+
+  const overlayPricingMidpointLabel = useMemo(() => {
+    if (!overlayPricingRange) return "—";
+    return formatCurrency(Math.round((overlayPricingRange.low + overlayPricingRange.high) / 2), {
+      locale: pricingLocale,
+      currency: overlayPricingRange.currency,
+    });
+  }, [overlayPricingRange, pricingLocale]);
+
+  const overlayPricingRangeLabel = useMemo(() => {
+    if (!overlayPricingRange) return "—";
+    return `${formatCurrency(overlayPricingRange.low, {
+      locale: pricingLocale,
+      currency: overlayPricingRange.currency,
+    })}–${formatCurrency(overlayPricingRange.high, {
+      locale: pricingLocale,
+      currency: overlayPricingRange.currency,
+    })}`;
+  }, [overlayPricingRange, pricingLocale]);
 
   const pricingDetailSummary = useMemo(() => {
     if (!accuratePricing) {
@@ -2774,38 +2954,36 @@ export function ImagePreviewExperience(props: {
   }, [accuratePricing, leadCaptured, leadGateEnabled]);
 
   const pillLabel = leadGateEnabled ? (leadCaptured ? "EST. PRICING" : "Show pricing") : "EST. PRICING";
-  // Price pill shows the image-specific price range from the API. Never show $200-$400 placeholder.
-  const pillPrice = formattedAccuratePricingRange
-    ? formattedAccuratePricingRange
-    : accuratePricingStatus === "error"
-      ? hasExplicitPricingConfig ? formattedPricingRange : "$•••-$•••"
-      : leadGateEnabled && leadCaptured
-        ? "$•••-$•••"
-        : hasExplicitPricingConfig ? formattedPricingRange : "$•••-$•••";
+  const lockedPillPrice =
+    formattedAccuratePricingRange ||
+    formattedCachedHeroPricingRange ||
+    formattedSeedPricingRange ||
+    formattedPricingRange ||
+    formattedSeedPricing ||
+    "$•••-$•••";
+  // Locked state shows the selected hero image's own range first, then falls back to the broader seeded/service range.
+  const pillPrice =
+    formattedAccuratePricingRange ||
+    (accuratePricingStatus === "error" ? lockedPillPrice : leadGateEnabled && leadCaptured ? lockedPillPrice : lockedPillPrice);
   const pillLoading = Boolean(leadGateEnabled && leadCaptured && accuratePricingStatus === "running");
-  const hasBudgetOverlayControl = Boolean(hero && canUseLiveBudgetSlider && !hideBudgetInOverlay);
-  const shouldShowBottomPricingPill = Boolean(
-    shouldShowPricingPill && formattedPricingRange
-  );
+  const shouldShowBottomPricingPill = Boolean(shouldShowPricingPill && lockedPillPrice);
   const shouldShowCenteredPricingFormOverlay = Boolean(
     toolingEnabled && leadGateEnabled && !leadCaptured && showCenteredPricingForm
   );
   const shouldShowBottomControlsRow = Boolean(
-    toolingEnabled &&
-    !shouldShowCenteredPricingFormOverlay &&
-      (hasBudgetOverlayControl || shouldShowBottomPricingPill)
+    toolingEnabled && !shouldShowCenteredPricingFormOverlay && shouldShowBottomPricingPill
   );
   const previewPricingPillMaxWidth =
     leadGateEnabled && !leadCaptured
-      ? 'clamp(31%, 44% - 2.8vw, 38%)'
-      : 'clamp(40%, 57% - 4vw, 49%)';
+      ? 'clamp(37%, 52% - 2vw, 46%)'
+      : 'clamp(48%, 64% - 3vw, 58%)';
   const previewPricingPill = shouldShowBottomPricingPill ? (
     <div
       data-pricing-pill
       className="@container ml-auto min-w-0 flex-1 flex flex-col rounded-xl overflow-hidden shadow-lg shadow-black/25 backdrop-blur-md min-w-[9rem] transition-[max-width,padding] duration-300 ease-out"
       style={{
         maxWidth: previewPricingPillMaxWidth,
-        minWidth: leadGateEnabled && !leadCaptured ? '11.75rem' : '14rem',
+        minWidth: leadGateEnabled && !leadCaptured ? '14rem' : '16.5rem',
         paddingTop: 'clamp(0.44rem, 1.8vw, 0.64rem)',
         paddingBottom: 'clamp(0.44rem, 1.8vw, 0.64rem)',
         paddingLeft: 'clamp(0.56rem, 2.1vw, 0.78rem)',
@@ -2822,9 +3000,9 @@ export function ImagePreviewExperience(props: {
         transparentBackground
         label={pillLabel}
         termsHref="/terms"
-        price={pillPrice || (formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••")}
+        price={pillPrice || lockedPillPrice}
         loading={pillLoading}
-        lockedPrice={formattedAccuratePricingRange || formattedPricingRange || formattedSeedPricing || "$•••"}
+        lockedPrice={lockedPillPrice}
         revealed={leadGateEnabled ? leadCaptured : true}
         allowToggle
         autoReveal
@@ -2836,7 +3014,7 @@ export function ImagePreviewExperience(props: {
                 setShowCenteredPricingForm(true);
                 upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
               }
-            : undefined
+            : () => setOverlayPricingExpanded((prev) => !prev)
         }
         instanceId={leadGateEnabled && leadCaptured ? instanceId : undefined}
         sessionId={leadGateEnabled && leadCaptured ? sessionId : undefined}
@@ -2906,7 +3084,20 @@ export function ImagePreviewExperience(props: {
     void fetchAccuratePricingRef.current?.();
   }, [accuratePricingStatus, formattedAccuratePricingRange, leadCaptured, leadGateEnabled]);
 
+  useEffect(() => {
+    if (!hero || !leadCaptured || !previewBookingCta.missingUrl) return;
+    if (!devMode) return;
+    console.warn("[ImagePreviewExperience] Missing booking CTA URL (configure hero_cta_url or step-confirmation scheduleUrl)", {
+      instanceId,
+      selectedServiceId: selectedServiceIdForCta || null,
+    });
+  }, [devMode, hero, instanceId, leadCaptured, previewBookingCta.missingUrl, selectedServiceIdForCta]);
+
   if (!enabled) return null;
+
+  /** Left-rail control sits outside the image frame; ancestors must not clip it. */
+  const showGalleryBackControl =
+    toolingEnabled && !showConceptPicker && Boolean(hero) && hasMultiImageRun;
 
   const useResponsiveConceptGalleryShell = showConceptPicker;
   const previewFrameStyle = useResponsiveConceptGalleryShell
@@ -2931,26 +3122,34 @@ export function ImagePreviewExperience(props: {
     return (
       <LayoutGroup id={lightboxLayoutId}>
         <>
-          {/* min-h-0 + overflow-hidden ensure the card never bleeds outside the flex layout; overflow-visible when stack shown */}
+          {/* min-h-0 + overflow-hidden ensure the card never bleeds outside the flex layout; overflow-visible when stack or left-rail control needs to paint outside */}
           <div
             className={cn(
               "w-full min-h-0",
               useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null,
-              stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden"
+              stackedPreviewLayers.length > 0 || showGalleryBackControl ? "overflow-visible" : "overflow-hidden"
             )}
           >
         <Card
 	          className={
 	            transparentChrome
-	              ? cn("bg-transparent border-0 shadow-none overflow-hidden", useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null)
-              : cn("bg-card/70 backdrop-blur supports-[backdrop-filter]:bg-card/60 border-border overflow-hidden", useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null)
+	              ? cn(
+                    "bg-transparent border-0 shadow-none",
+                    stackedPreviewLayers.length > 0 || showGalleryBackControl ? "overflow-visible" : "overflow-hidden",
+                    useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null
+                  )
+              : cn(
+                  "bg-card/70 backdrop-blur supports-[backdrop-filter]:bg-card/60 border-border",
+                  stackedPreviewLayers.length > 0 || showGalleryBackControl ? "overflow-visible" : "overflow-hidden",
+                  useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-1 flex-col" : null
+                )
           }
 	        >
 	          <CardContent
               className={cn(
                 previewMaxPx ? "p-0" : transparentChrome ? "p-0" : "p-3",
                 useResponsiveConceptGalleryShell ? "flex h-full min-h-0 flex-col" : null,
-                stackedPreviewLayers.length > 0 ? "overflow-visible" : "overflow-hidden"
+                stackedPreviewLayers.length > 0 || showGalleryBackControl ? "overflow-visible" : "overflow-hidden"
               )}
             >
 	            {previewMaxPx && chromePx > 0 ? <div style={{ height: chromePx }} /> : null}
@@ -2958,9 +3157,14 @@ export function ImagePreviewExperience(props: {
               className={cn(
                 "flex",
                 useResponsiveConceptGalleryShell ? "h-full min-h-0 justify-stretch" : "justify-center",
-                stackedPreviewLayers.length > 0 && !useResponsiveConceptGalleryShell && "pl-14"
               )}
             >
+              <div
+                className={cn(
+                  useResponsiveConceptGalleryShell ? "contents" : "flex w-full flex-col items-center gap-3",
+                  !useResponsiveConceptGalleryShell && stackedPreviewLayers.length > 0 && "pl-14",
+                )}
+              >
 	            <div
 				              className={cn(
                         "relative mx-auto",
@@ -3026,6 +3230,41 @@ export function ImagePreviewExperience(props: {
 				                  );
 				                })}
 				              </AnimatePresence>
+
+              {/* Left rail: sibling of the clipped image shell so negative translate is not cut off. */}
+              {showGalleryBackControl ? (
+                <div className="absolute left-0 top-1/2 z-30 -translate-x-[calc(100%+0.75rem)] -translate-y-1/2 pointer-events-none flex">
+                  <div className="pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCache((prev) => {
+                          const base = prev ?? loadCache(instanceId, sessionId);
+                          if (!base) return prev;
+                          const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
+                          const next: PreviewCacheV3 = {
+                            ...base,
+                            viewMode: "gallery",
+                            activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
+                            selectedConceptIndex: null,
+                            updatedAt: Date.now(),
+                          };
+                          saveCache(instanceId, sessionId, next);
+                          return next;
+                        });
+                      }}
+                      aria-label="Back to gallery"
+                      title="Back to gallery"
+                      className={overlayButtonClass}
+                      style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      <span className="font-medium">Back to gallery</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
 				              <div
 				                className={cn(
 				                  useResponsiveConceptGalleryShell
@@ -3064,36 +3303,8 @@ export function ImagePreviewExperience(props: {
               {toolingEnabled && !showConceptPicker && hero ? (
                 <div className="absolute inset-x-2 top-2 z-10 flex items-start justify-between pointer-events-none">
                   <div className="pointer-events-auto flex items-center gap-1.5">
-                    {hasMultiImageRun ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCache((prev) => {
-                            const base = prev ?? loadCache(instanceId, sessionId);
-                            if (!base) return prev;
-                            const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
-                            const next: PreviewCacheV3 = {
-                              ...base,
-                              viewMode: "gallery",
-                              activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
-                              selectedConceptIndex: null,
-                              updatedAt: Date.now(),
-                            };
-                            saveCache(instanceId, sessionId, next);
-                            return next;
-                          });
-                        }}
-                        aria-label="Back to gallery"
-                        title="Back to gallery"
-                        className={overlayButtonClass}
-                        style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
-                      >
-                        <ArrowLeft className="h-3.5 w-3.5" />
-                        <span className="font-medium">Back to gallery</span>
-                      </button>
-                    ) : null}
-                    {(hero || showConceptPicker) && !busy ? (
-                      leadGateEnabled ? (
+                    {hero && !busy ? (
+                      leadGateEnabled && !leadCaptured ? (
                         <LeadGenPopover
                           open={showGenerateGate}
                           onOpenChange={(open) => {
@@ -3109,12 +3320,7 @@ export function ImagePreviewExperience(props: {
                           gateContext={gateContextRef.current || "regenerate_manual"}
                           surface="overlay"
                           contentStyle={singleModeOverlayVars}
-                          title="Where should we send the pricing to?"
-                          description="Before regenerating this preview, we'll email you pricing."
-                          finePrint="Instant unlock after sending."
-                          ctaLabel="Send pricing"
-                          phoneTitle="Best phone number?"
-                          phoneDescription="We can text the updated preview too."
+                          {...PRICING_LEAD_COPY}
                           requirePhone
                           submitOnEmail={false}
                           submissionData={{ surface: "preview_generate" }}
@@ -3191,12 +3397,7 @@ export function ImagePreviewExperience(props: {
                         gateContext="download"
                         surface="overlay"
                         contentStyle={singleModeOverlayVars}
-                        title="Where should we send the pricing to?"
-                        description="Before downloading this preview, we’ll email you pricing and a copy of the file."
-                        finePrint="Instant download after sending."
-                        ctaLabel="Send pricing"
-                        phoneTitle="Best phone number?"
-                        phoneDescription="We can text the download link too."
+                        {...PRICING_LEAD_COPY}
                         side="top"
                         align="end"
                         sideOffset={4}
@@ -3304,6 +3505,14 @@ export function ImagePreviewExperience(props: {
                         ),
                       }).map((_, idx) => {
                         const src = activeRun?.images?.[idx] ?? null;
+                        const tilePricing = activeRun?.imagePricing?.[idx];
+                        const tilePriceText = formatPricingRangeText({
+                          pricing: tilePricing,
+                          locale: pricingLocale,
+                          currency: pricingCurrency,
+                        });
+                        const tilePriceMask = splitPricingMaskSegments(tilePriceText);
+                        const shouldBlurTilePrice = Boolean(leadGateEnabled && !leadCaptured);
                         if (!src) {
                           return (
                             <div
@@ -3355,13 +3564,21 @@ export function ImagePreviewExperience(props: {
                         />
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2.5">
                           <div
-                            className="flex h-9 w-28 items-center gap-1.5 rounded-full bg-black/60 px-3"
+                            className="flex h-9 min-w-[7rem] max-w-[calc(100%-0.5rem)] items-center justify-center rounded-full bg-black/60 px-3"
                             aria-hidden="true"
                           >
-                            <span className="select-none text-[13px] font-semibold text-white">$</span>
-                            <span className="select-none text-[13px] font-semibold tracking-[0.18em] text-white/70 blur-[4px]">
-                              XXXX
-                            </span>
+                            {shouldBlurTilePrice && tilePriceMask ? (
+                              <span className="select-none truncate text-[12px] font-semibold text-white/95">
+                                <span>{tilePriceMask.prefix}</span>
+                                <span className={cn("opacity-95", tilePriceMask.blur ? "blur-[0.28em]" : null)}>
+                                  {tilePriceMask.blur}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="select-none truncate text-[12px] font-semibold text-white/95">
+                                {tilePriceText || "$•••-$•••"}
+                              </span>
+                            )}
                           </div>
                         </div>
 	                      </button>
@@ -3433,12 +3650,7 @@ export function ImagePreviewExperience(props: {
                       gateContext="upload_reference"
                       surface="overlay"
                       contentStyle={overlayVars}
-                      title="Where should we send the pricing to?"
-                      description="Before changing your reference image, we'll email you pricing."
-                      finePrint="You can swap to a new image right after sending."
-                      ctaLabel="Send pricing"
-                      phoneTitle="Best phone number?"
-                      phoneDescription="We can text updates too."
+                      {...PRICING_LEAD_COPY}
                       side="top"
                       align="start"
                       sideOffset={8}
@@ -3492,12 +3704,7 @@ export function ImagePreviewExperience(props: {
                     gateContext="upload_reference"
                     surface="overlay"
                     contentStyle={overlayVars}
-                    title="Where should we send the pricing to?"
-                    description="Before uploading reference images, we'll email you pricing."
-                    finePrint="Upload multiple images after sending."
-                    ctaLabel="Send pricing"
-                    phoneTitle="Best phone number?"
-                    phoneDescription="We can text updates too."
+                    {...PRICING_LEAD_COPY}
                     side="top"
                     align="start"
                     sideOffset={8}
@@ -3605,9 +3812,10 @@ export function ImagePreviewExperience(props: {
                       width: centeredPricingPanelWidth,
                       maxWidth: "100%",
                       borderRadius: centeredPricingPanelRadius,
-                      backgroundColor: pillBg,
-                      WebkitBackdropFilter: "blur(14px)",
-                      backdropFilter: "blur(14px)",
+                      backgroundColor: singleModePricingPillBg,
+                      border: `1px solid ${overlayBorder}`,
+                      WebkitBackdropFilter: "blur(12px)",
+                      backdropFilter: "blur(12px)",
                       containerType: "inline-size",
                     }}
                   >
@@ -3651,12 +3859,35 @@ export function ImagePreviewExperience(props: {
                               style={{ fontSize: centeredPricingTitleSize }}
                             >
                               {centeredPricingStep === "email"
-                                ? "Where should we send the pricing to?"
+                                ? PRICING_LEAD_COPY.title
                                 : centeredPricingStep === "name"
-                                  ? "What's your name?"
-                                  : "Best phone number?"}
+                                  ? PRICING_LEAD_MODAL.nameTitle
+                                  : PRICING_LEAD_COPY.phoneTitle}
                             </div>
                           </div>
+
+                          {centeredPricingStep === "email" ? (
+                            <div
+                              className="text-[var(--sif-lead-gen-muted)]"
+                              style={{ fontSize: centeredPricingMetaSize, fontFamily: theme.fontFamily }}
+                            >
+                              {PRICING_LEAD_COPY.description}
+                            </div>
+                          ) : centeredPricingStep === "name" ? (
+                            <div
+                              className="text-[var(--sif-lead-gen-muted)]"
+                              style={{ fontSize: centeredPricingMetaSize, fontFamily: theme.fontFamily }}
+                            >
+                              {PRICING_LEAD_MODAL.nameDescription}
+                            </div>
+                          ) : (
+                            <div
+                              className="text-[var(--sif-lead-gen-muted)]"
+                              style={{ fontSize: centeredPricingMetaSize, fontFamily: theme.fontFamily }}
+                            >
+                              {PRICING_LEAD_COPY.phoneDescription}
+                            </div>
+                          )}
 
                           {centeredPricingStep === "email" ? (
                             <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
@@ -3669,7 +3900,7 @@ export function ImagePreviewExperience(props: {
                                   autoFocus
                                   value={centeredPricingEmail}
                                   onChange={(e) => setCenteredPricingEmail(e.target.value)}
-                                  placeholder="you@company.com"
+                                  placeholder={PRICING_LEAD_COPY.emailPlaceholder}
                                   inputMode="email"
                                   className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                   style={{
@@ -3699,7 +3930,7 @@ export function ImagePreviewExperience(props: {
                                   fontFamily: theme.fontFamily,
                                 }}
                               >
-                                Continue
+                                {PRICING_LEAD_COPY.ctaLabel}
                               </Button>
                             </div>
                           ) : centeredPricingStep === "name" ? (
@@ -3709,7 +3940,7 @@ export function ImagePreviewExperience(props: {
                                   autoFocus
                                   value={centeredPricingName}
                                   onChange={(e) => setCenteredPricingName(e.target.value)}
-                                  placeholder="Jane Appleseed"
+                                  placeholder={PRICING_LEAD_MODAL.namePlaceholder}
                                   autoComplete="name"
                                   className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                   style={{
@@ -3737,7 +3968,7 @@ export function ImagePreviewExperience(props: {
                                   fontFamily: theme.fontFamily,
                                 }}
                               >
-                                Continue
+                                {PRICING_LEAD_MODAL.nameCtaLabel}
                               </Button>
                             </div>
                           ) : (
@@ -3784,7 +4015,7 @@ export function ImagePreviewExperience(props: {
                                 {isSubmittingCenteredPricingLead ? (
                                   <Loader2 className="animate-spin" style={{ width: centeredPricingIconSize, height: centeredPricingIconSize }} />
                                 ) : (
-                                  "Show pricing"
+                                  PRICING_LEAD_COPY.phoneCtaLabel
                                 )}
                               </Button>
                             </div>
@@ -3801,10 +4032,10 @@ export function ImagePreviewExperience(props: {
                             >
                               <span>
                                 {centeredPricingStep === "email"
-                                  ? "Instant reveal after sending."
+                                  ? PRICING_LEAD_COPY.finePrint
                                   : centeredPricingStep === "name"
-                                    ? "We won't save this information."
-                                    : "We will never text you unless it's something worth it :)"}
+                                    ? PRICING_LEAD_MODAL.nameFinePrint
+                                    : PRICING_LEAD_MODAL.phoneFinePrint}
                               </span>
                               {centeredPricingStep === "phone" ? (
                                 <a
@@ -3826,67 +4057,122 @@ export function ImagePreviewExperience(props: {
               ) : null}
 	              </div>{/* end inner overflow-hidden container */}
 
-              {/* Bottom controls row — keeps pricing reveal + budget slider aligned side-by-side. Hidden when lightbox open. Budget hidden when preview is dominant/large. */}
+              {/* Bottom overlay: collapsible estimate bar (no budget slider). */}
               {!lightboxOpen && shouldShowBottomControlsRow ? (
                 <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-4 sm:right-4 sm:bottom-4">
-                  <div className="flex items-stretch gap-2 sm:gap-3">
-		                    {hasBudgetOverlayControl ? (
-		                      <div
-		                        className="min-w-0 flex-1 h-[3.5rem] flex flex-col justify-center rounded-2xl px-3.5 py-2 backdrop-blur-md shadow-lg shadow-black/20"
-		                        style={{
-		                          backgroundColor: pillBg,
-		                          backdropFilter: 'blur(12px)',
-		                          WebkitBackdropFilter: 'blur(12px)',
-		                        }}
-		                      >
-                        <style dangerouslySetInnerHTML={{ __html: `
-                          input[data-budget-slider]::-webkit-slider-thumb:hover,
-                          input[data-budget-slider]::-webkit-slider-thumb:active { background: white !important; filter: none !important; }
-                          input[data-budget-slider]::-webkit-slider-runnable-track:hover { filter: none !important; opacity: 1 !important; }
-                          input[data-budget-slider]::-moz-range-thumb:hover,
-                          input[data-budget-slider]::-moz-range-thumb:active { background: white !important; filter: none !important; }
-                          input[data-budget-slider]::-moz-range-track:hover { filter: none !important; opacity: 1 !important; }
-                          input[data-budget-slider]:hover { accent-color: var(--slider-accent) !important; }
-                        ` }} />
-	                        <div className="flex items-center justify-between text-[0.6875rem] font-medium text-white/95">
-	                          <span>Budget</span>
-	                          <span aria-live="polite">
-	                            {formatCurrency(liveBudget ?? budgetSliderBounds.min, {
-	                              locale: pricingLocale,
-	                              currency: (accuratePricing?.currency || pricingCurrency || "USD").toUpperCase(),
-	                              compact: true,
-	                            })}
-	                          </span>
-	                        </div>
-	                        <input
-                          type="range"
-                          data-budget-slider
-                          min={budgetSliderBounds.min}
-                          max={budgetSliderBounds.max}
-                          step={budgetSliderBounds.step}
-                          value={liveBudget ?? budgetSliderBounds.min}
-                          onChange={(e) => {
-                            const n = Number(e.target.value);
-                            if (!Number.isFinite(n)) return;
-                            setLiveBudget(n);
-                            setLiveBudgetDirty(true);
+                  {overlayPricingExpanded && (!leadGateEnabled || leadCaptured) && hero ? (
+                    <div
+                      className="w-full rounded-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-md"
+                      style={{
+                        // Keep glass color consistent with the pill.
+                        backgroundColor: singleModePricingPillBg,
+                        backdropFilter: "blur(12px)",
+                        WebkitBackdropFilter: "blur(12px)",
+                        fontFamily: theme.fontFamily,
+                      }}
+                      data-overlay-estimate-expanded
+                    >
+                      <div className="relative p-3 sm:p-4">
+                        {/* subtle inner sheen + vignette (keeps same base glass color) */}
+                        <div
+                          aria-hidden
+                          className="pointer-events-none absolute inset-0 rounded-2xl"
+                          style={{
+                            background:
+                              "linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 22%, rgba(0,0,0,0.00) 55%), radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 55%), radial-gradient(120% 140% at 100% 100%, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.00) 55%)",
                           }}
-	                          className="mt-1 w-full h-1 rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb:hover]:!bg-white [&::-webkit-slider-thumb:hover]:!shadow [&::-webkit-slider-thumb:active]:!bg-white [&::-webkit-slider-thumb:active]:!shadow [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb:hover]:!bg-white [&::-moz-range-thumb:active]:!bg-white [&:hover]:[accent-color:var(--slider-accent)]"
-	                          style={{
-	                            accentColor: primary,
-	                            ['--slider-accent' as string]: primary,
-	                          } as React.CSSProperties}
-	                          aria-label="Adjust budget and regenerate preview"
-	                        />
-	                        <div className="mt-1 flex items-center justify-between text-[0.6875rem] font-medium text-white/70">
-	                          {budgetSliderLabels.map((label, i) => (
-	                            <span key={i}>{label}</span>
-	                          ))}
-	                        </div>
-	                      </div>
-	                    ) : null}
-				                    {previewPricingPill}
-                  </div>
+                        />
+
+                        <div className="relative flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="inline-flex items-center gap-2">
+                              <div className="text-[10px] font-semibold tracking-[0.18em] text-white/65">ESTIMATE</div>
+                              <div className="h-[1px] w-10 bg-white/15" aria-hidden />
+                              <div className="text-[10px] font-medium text-white/55">Based on similar projects</div>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-end gap-x-3 gap-y-1">
+                              <div className="text-[32px] font-semibold tabular-nums leading-none tracking-tight text-white sm:text-[40px]">
+                                {overlayPricingMidpointLabel}
+                              </div>
+                              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/80">
+                                {overlayPricingRangeLabel}
+                              </div>
+                            </div>
+
+                            <div className="mt-1.5 text-[10px] leading-snug text-white/55 sm:text-[11px]">
+                              Final quotes can change with measurements, materials, and local availability.
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-white/85 hover:bg-white/10"
+                            onClick={() => setOverlayPricingExpanded(false)}
+                            aria-label="Collapse pricing"
+                            title="Collapse"
+                          >
+                            Collapse
+                          </button>
+                        </div>
+
+                        <div className="relative mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_16rem] sm:items-center sm:gap-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              "Based on real projects",
+                              "Materials + labor",
+                              "No obligation quote",
+                            ].map((label) => (
+                              <span
+                                key={label}
+                                className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
+                              >
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="flex flex-col gap-2">
+                            {previewBookingCta.primaryUrl ? (
+                              <Button
+                                asChild
+                                className="h-10 w-full rounded-full text-xs font-semibold shadow-sm"
+                                style={{ backgroundColor: primary, color: "#fff" }}
+                              >
+                                <a href={previewBookingCta.primaryUrl} target="_blank" rel="noopener noreferrer">
+                                  {previewBookingCta.primaryLabel}
+                                </a>
+                              </Button>
+                            ) : null}
+                            {onKeepDesigning ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onKeepDesigning();
+                                  setOverlayPricingExpanded(false);
+                                }}
+                                className="h-9 w-full rounded-full border border-white/15 bg-white/5 px-3 text-[11px] font-semibold text-white/90 hover:bg-white/10"
+                              >
+                                Keep designing
+                              </button>
+                            ) : null}
+                            <div className="text-center text-[10px] text-white/60">Talk to a specialist • No obligation</div>
+                            <button
+                              type="button"
+                              disabled={isUploadingOwnImages || busy}
+                              onClick={handleUploadClick}
+                              className="text-center text-[11px] font-medium underline-offset-2 hover:underline"
+                              style={{ color: theme.primaryColor || "#3b82f6" }}
+                            >
+                              {isUploadingOwnImages ? "Uploading…" : "Want this on your actual space?"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-stretch justify-end gap-2 sm:gap-3">{previewPricingPill}</div>
+                  )}
                 </div>
               ) : null}
 
@@ -3930,7 +4216,7 @@ export function ImagePreviewExperience(props: {
 
               {/* Upload section below image — folds in smoothly once image is ready (no jarring layout push) */}
               <AnimatePresence initial={false}>
-                {hero && !busy && isDominantLayout && (!leadGateEnabled || leadCaptured) ? (
+                {hero && !busy && isDominantLayout && (!leadGateEnabled || leadCaptured) && !revenuePanelActive ? (
                   <motion.div
                     key="upload-section"
                     initial={{ opacity: 0 }}
@@ -3965,7 +4251,7 @@ export function ImagePreviewExperience(props: {
                   </motion.div>
                 ) : null}
               </AnimatePresence>
-
+              </div>
             </div>
 	          </CardContent>
 	        </Card>

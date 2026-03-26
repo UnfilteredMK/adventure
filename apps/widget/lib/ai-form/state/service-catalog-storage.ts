@@ -8,6 +8,8 @@ export type ServiceCatalogItem = {
   industryId: string | null;
   industryName: string | null;
   serviceSummary?: string | null;
+  heroCtaUrl?: string | null;
+  heroCtaText?: string | null;
   subcategoryComponents?: RefinementComponent[];
   styleQuestion?: string | null;
   styleOptions?: Array<{
@@ -86,6 +88,12 @@ export function saveServiceCatalog(sessionId: string, items: ServiceCatalogItem[
         industryId: typeof item?.industryId === "string" ? item.industryId : null,
         industryName: typeof item?.industryName === "string" ? item.industryName : null,
         serviceSummary: typeof (item as any)?.serviceSummary === "string" ? String((item as any).serviceSummary).trim() || null : null,
+        ...(typeof (item as any)?.heroCtaUrl === "string" && String((item as any).heroCtaUrl).trim()
+          ? { heroCtaUrl: String((item as any).heroCtaUrl).trim() }
+          : {}),
+        ...(typeof (item as any)?.heroCtaText === "string" && String((item as any).heroCtaText).trim()
+          ? { heroCtaText: String((item as any).heroCtaText).trim() }
+          : {}),
         ...(subcategoryComponents.length > 0 ? { subcategoryComponents } : {}),
         styleQuestion: typeof (item as any)?.styleQuestion === "string" ? String((item as any).styleQuestion).trim() || null : null,
         styleOptions: Array.isArray((item as any)?.styleOptions)

@@ -558,6 +558,8 @@ export async function hydrateServiceCatalogFromWidget(args: {
                 : typeof o?.service_summary === "string"
                   ? o.service_summary
                   : null,
+            ...(typeof o?.heroCtaUrl === "string" && o.heroCtaUrl.trim() ? { heroCtaUrl: o.heroCtaUrl.trim() } : {}),
+            ...(typeof o?.heroCtaText === "string" && o.heroCtaText.trim() ? { heroCtaText: o.heroCtaText.trim() } : {}),
             styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
             styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
           }))

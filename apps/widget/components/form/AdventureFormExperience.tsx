@@ -54,6 +54,8 @@ type BootstrapServiceOption = {
   industryId?: string | null;
   industryName?: string | null;
   serviceSummary?: string | null;
+  heroCtaUrl?: string | null;
+  heroCtaText?: string | null;
   subcategoryComponents?: Array<{ key: string; label: string; priority: number }>;
   styleQuestion?: string | null;
   styleOptions?: Array<{
@@ -100,6 +102,8 @@ function inferBootstrapServiceOptions({
           industryId: typeof meta?.industryId === "string" ? meta.industryId : null,
           industryName: typeof meta?.industryName === "string" ? meta.industryName : null,
           serviceSummary: typeof meta?.serviceSummary === "string" ? meta.serviceSummary : null,
+          ...(typeof meta?.heroCtaUrl === "string" && meta.heroCtaUrl.trim() ? { heroCtaUrl: meta.heroCtaUrl.trim() } : {}),
+          ...(typeof meta?.heroCtaText === "string" && meta.heroCtaText.trim() ? { heroCtaText: meta.heroCtaText.trim() } : {}),
           subcategoryComponents: Array.isArray(meta?.subcategoryComponents) ? meta.subcategoryComponents : undefined,
           styleQuestion: typeof meta?.styleQuestion === "string" ? meta.styleQuestion : null,
           styleOptions: Array.isArray(meta?.styleOptions) ? meta.styleOptions : undefined,
@@ -506,6 +510,8 @@ export function AdventureFormExperience({
                     industryId: typeof o?.industryId === "string" ? o.industryId : null,
                     industryName: typeof o?.industryName === "string" ? o.industryName : null,
                     serviceSummary: typeof o?.serviceSummary === "string" ? o.serviceSummary : null,
+                    ...(typeof o?.heroCtaUrl === "string" && o.heroCtaUrl.trim() ? { heroCtaUrl: o.heroCtaUrl.trim() } : {}),
+                    ...(typeof o?.heroCtaText === "string" && o.heroCtaText.trim() ? { heroCtaText: o.heroCtaText.trim() } : {}),
                     subcategoryComponents: Array.isArray(o?.subcategoryComponents)
                       ? o.subcategoryComponents
                       : Array.isArray(o?.subcategory_components)

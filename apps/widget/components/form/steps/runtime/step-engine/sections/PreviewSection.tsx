@@ -3,7 +3,6 @@
 import React, { useMemo } from "react";
 import { ImagePreviewExperience } from "../../../image-preview-experience/ImagePreviewExperience";
 import { cn } from "@/lib/utils";
-
 interface PreviewSectionProps {
   adventureInputMode: "questions" | "prompt" | "budget" | "uploads";
   answeredQuestionCount: number;
@@ -30,6 +29,7 @@ interface PreviewSectionProps {
   useDesktopPreviewLayout: boolean;
   useMobilePreviewLayout: boolean;
   usePreviewDominantLayout: boolean;
+  onKeepDesigning?: () => void;
 }
 
 export function PreviewSection({
@@ -57,8 +57,8 @@ export function PreviewSection({
   useDesktopPreviewLayout,
   useMobilePreviewLayout,
   usePreviewDominantLayout,
+  onKeepDesigning,
 }: PreviewSectionProps) {
-  void _showQuestionPaneUnderPreview;
   const stepDataSoFar = useMemo(() => {
     const base = { ...(stateStepData || {}) };
     if (previewRefreshNonce > 0) base["__previewRefreshNonce"] = previewRefreshNonce;
@@ -79,17 +79,17 @@ export function PreviewSection({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col overflow-hidden",
+        "flex min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain",
         usePreviewDominantLayout
           ? hasPreviewSubsections
             ? "flex-1"
-            : "flex-1 flex items-center justify-center"
+            : "flex-1 flex items-start justify-center"
           : "flex-1 shrink-0"
       )}
     >
       <div
         className={cn(
-          "mx-auto flex h-full min-h-0 w-full flex-col",
+          "mx-auto flex w-full min-h-0 flex-col",
           useMobilePreviewLayout
             ? "px-2 max-w-none"
             : useDesktopPreviewLayout
@@ -100,7 +100,7 @@ export function PreviewSection({
           usePreviewDominantLayout ? "py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
-        <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex w-full min-h-0 flex-col">
           <ImagePreviewExperience
             key="image-preview"
             enabled={true}
@@ -120,9 +120,9 @@ export function PreviewSection({
             previewMaxPx={previewMaxPx ?? undefined}
             previewChromePx={8}
             suppressUploadOverlay={isRefinementUploadStep}
-            hideBudgetInOverlay={usePreviewDominantLayout}
             toolingEnabled={toolingEnabled}
             disableConceptPicker={disableConceptPicker}
+            onKeepDesigning={onKeepDesigning}
           />
         </div>
       </div>

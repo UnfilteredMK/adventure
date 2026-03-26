@@ -56,7 +56,8 @@ import {
 } from "./step-engine/utils/function-calls";
 import { loadFormState, normalizeFormState, saveFormState } from "./step-engine/utils/form-state";
 import { extractFirstName, personalizeStepCopy } from "./step-engine/utils/personalization";
-import { buildAnsweredQA, getMetricGain, safeStableJsonForPricingContext } from "./step-engine/utils/pricing-context";
+import { buildAnsweredQA, getMetricGain } from "./step-engine/utils/pricing-context";
+import { normalizePricingEstimate } from "./step-engine/utils/pricing-estimate";
 import { buildStepJoggerSteps } from "./step-engine/utils/step-jogger";
 import {
   fetchAndAppendGenerateStepsBatch,
@@ -194,6 +195,7 @@ export function StepEngine({
   /** When true, we just completed a scene upload step and are fetching the next batch; prefer preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders. */
   const sceneUploadJustCompletedRef = useRef(false);
   const [adventureInputMode, setAdventureInputMode] = useState<"questions" | "prompt" | "budget" | "uploads">("questions");
+  const [designControlsRevealed, setDesignControlsRevealed] = useState<boolean>(() => !leadCapturedForUI);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptSubmitCount, setPromptSubmitCount] = useState(0);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
@@ -334,6 +336,39 @@ export function StepEngine({
     () => pickPrimaryServiceId((state?.stepData || {}) as Record<string, any>),
     [state?.stepData]
   );
+  const scopeStepIdsInFlow = useMemo(
+    () =>
+      (state?.steps || [])
+        .map((step: any) => String((step as any)?.id || ""))
+        .filter((stepId) => PRE_CONCEPT_SCOPE_STEP_IDS.has(stepId)),
+    [state?.steps]
+  );
+  const scopePricingReady = useMemo(
+    () =>
+      Boolean(
+        selectedServiceId &&
+          scopeStepIdsInFlow.length > 0 &&
+          scopeStepIdsInFlow.every((stepId) => hasMeaningfulAnswer((state?.stepData || {})[stepId]))
+      ),
+    [scopeStepIdsInFlow, selectedServiceId, state?.stepData]
+  );
+  const scopePricingHash = useMemo(() => {
+    if (!scopePricingReady || !selectedServiceId) return "";
+    const scopeAnswers = Object.fromEntries(
+      scopeStepIdsInFlow.map((stepId) => [stepId, (state?.stepData || {})[stepId] ?? null])
+    );
+    try {
+      return fnv1a32(
+        JSON.stringify({
+          serviceId: selectedServiceId,
+          useCase: config?.useCase ?? null,
+          scopeAnswers,
+        })
+      );
+    } catch {
+      return "";
+    }
+  }, [config?.useCase, scopePricingReady, scopeStepIdsInFlow, selectedServiceId, state?.stepData]);
   const selectedServiceMeta = selectedServiceId ? (serviceCatalogSnapshot?.byServiceId as any)?.[selectedServiceId] : null;
   const activePreviewRun = useMemo(
     () => getActivePreviewRunSnapshot(previewCacheSnapshot),
@@ -361,7 +396,6 @@ export function StepEngine({
   }, [selectedServiceMeta, serviceCatalogSnapshot]);
 
   const { awaitingRefinementAdvance } = useRefinementOrchestration({
-    enabled: !localSkeletonMode,
     previewHasImage,
     flowPlanSessionId: flowPlan?.sessionId,
     instanceId,
@@ -640,6 +674,10 @@ export function StepEngine({
       REFINEMENT_UPLOAD_STEP_ID,
     ]);
   }, [desiredDeterministicUploadSteps]);
+  const leadCaptureStepIds = useMemo(
+    () => new Set(["step-lead-capture", "step-lead-name", "step-lead-phone"]),
+    []
+  );
 
   // After lead capture, budget/upload controls live in the bottom control bar.
   // Remove their dedicated steps from the guided sequence, but keep their values in stepData
@@ -655,9 +693,23 @@ export function StepEngine({
     removeStepsByIds(belowPreviewControlStepIds);
   }, [belowPreviewControlStepIds, effectiveLeadCompleteForPreviewFlow, previewHasImage, removeStepsByIds, state?.steps]);
 
+  // If lead capture completed from the preview modal/popover, remove any inline lead-capture
+  // step that was inserted earlier so it doesn't block refinement-step focus/advance.
+  useEffect(() => {
+    if (!effectiveLeadCompleteForPreviewFlow) return;
+    if (!state?.steps?.length) return;
+    const hasInlineLeadStep = state.steps.some((step: any) => leadCaptureStepIds.has(String((step as any)?.id || "")));
+    if (!hasInlineLeadStep) return;
+    leadCapturedAdvancedRef.current = false;
+    removeStepsByIds(leadCaptureStepIds);
+  }, [effectiveLeadCompleteForPreviewFlow, leadCaptureStepIds, removeStepsByIds, state?.steps]);
+
   // When lead is captured: switch to Guided tab so user sees next questions immediately.
   useEffect(() => {
-    if (leadCapturedForUI) setAdventureInputMode("questions");
+    if (!leadCapturedForUI) return;
+    setAdventureInputMode("questions");
+    // Hide refinement controls until user explicitly opts in via "Keep designing".
+    setDesignControlsRevealed(false);
   }, [leadCapturedForUI]);
 
   useEffect(() => {
@@ -742,38 +794,39 @@ export function StepEngine({
     state?.steps,
   ]);
 
-  // --- Pricing estimate (AI) ---
+  // --- Shared pricing seed (service + scope) ---
   const pricingEstimateAbortRef = useRef<AbortController | null>(null);
   const pricingEstimateInFlightHashRef = useRef<string | null>(null);
-
-  const pricingContextHash = useMemo(() => {
-    const stable = safeStableJsonForPricingContext(state?.stepData || {});
-    return stable ? fnv1a32(stable) : "";
-  }, [state?.stepData]);
 
   useEffect(() => {
     if (!flowPlan?.sessionId) return;
     if (!instanceId) return;
     if (!state?.stepData || !state?.steps) return;
-    if (!effectiveLeadCompleteForPreviewFlow) return;
-    if (!pricingContextHash) return;
+    if (!scopePricingReady) return;
+    if (!scopePricingHash) return;
 
-	    if (pricingEstimateInFlightHashRef.current === pricingContextHash) return;
+    if (pricingEstimateInFlightHashRef.current === scopePricingHash) return;
 
-	    const existing = state.stepData?.[PRICING_ESTIMATE_KEY];
-	    const existingObj = existing && typeof existing === "object" ? (existing as any) : null;
-	    const existingStatus = typeof existingObj?.status === "string" ? String(existingObj.status) : null;
-	    const existingHash = typeof existingObj?.contextHash === "string" ? String(existingObj.contextHash) : null;
-	    // "running" is not terminal: requests can be aborted during step-data churn; allow retry when not actually in-flight.
-	    if (existingHash === pricingContextHash && (existingStatus === "complete" || existingStatus === "error")) {
-	      return;
-	    }
+    const existing = normalizePricingEstimate(state.stepData?.[PRICING_ESTIMATE_KEY]);
+    const existingStatus = typeof existing?.status === "string" ? String(existing.status) : null;
+    const existingHash =
+      typeof existing?.scopeHash === "string"
+        ? String(existing.scopeHash)
+        : typeof existing?.contextHash === "string"
+          ? String(existing.contextHash)
+          : null;
+    // "running" is not terminal: requests can be aborted during step-data churn; allow retry when not actually in-flight.
+    if (existingHash === scopePricingHash && (existingStatus === "complete" || existingStatus === "error")) {
+      return;
+    }
 
-    const pricingIndex = (state.steps || []).findIndex((s: any) => String((s as any)?.id || "") === "step-pricing");
-    const stepsForPricingQA = pricingIndex > 0 ? (state.steps || []).slice(0, pricingIndex) : (state.steps || []);
+    const scopeStepIdSet = new Set<string>(scopeStepIdsInFlow);
+    const stepsForPricingQA = (state.steps || []).filter((step: any) => {
+      const stepId = String((step as any)?.id || "");
+      return stepId === DETERMINISTIC_SERVICE_ID || scopeStepIdSet.has(stepId);
+    });
     const answeredQA = buildAnsweredQA({ steps: stepsForPricingQA as any[], stepData: state.stepData || {}, max: 80 });
     const askedStepIds = Array.isArray(formState?.askedStepIds) ? formState.askedStepIds : [];
-    const selectedServiceId = pickPrimaryServiceId(state.stepData || {});
     const serviceCatalog = loadServiceCatalog(flowPlan.sessionId);
     const serviceMeta = selectedServiceId ? (serviceCatalog?.byServiceId as any)?.[selectedServiceId] : null;
     const cachedServiceSummary =
@@ -827,20 +880,22 @@ export function StepEngine({
     pricingEstimateAbortRef.current?.abort();
     const controller = new AbortController();
     pricingEstimateAbortRef.current = controller;
-    pricingEstimateInFlightHashRef.current = pricingContextHash;
+    pricingEstimateInFlightHashRef.current = scopePricingHash;
 
     try {
-      console.log("[pricing] start", {
+      console.log("[pricing:seed] start", {
         sessionId: flowPlan.sessionId,
         instanceId,
-        pricingContextHash,
+        scopePricingHash,
         answeredQACount: answeredQA.length,
       });
     } catch {}
 
     updateStepData(PRICING_ESTIMATE_KEY, {
       status: "running",
-      contextHash: pricingContextHash,
+      sourcePhase: "scope_seed",
+      contextHash: scopePricingHash,
+      scopeHash: scopePricingHash,
       startedAt: Date.now(),
     });
 
@@ -867,11 +922,13 @@ export function StepEngine({
           const message =
             typeof (json as any)?.error === "string" ? String((json as any).error) : `Pricing estimate failed (${res.status})`;
           try {
-            console.warn("[pricing] error", { sessionId: flowPlan.sessionId, instanceId, status: res.status, message, json });
+            console.warn("[pricing:seed] error", { sessionId: flowPlan.sessionId, instanceId, status: res.status, message, json });
           } catch {}
           updateStepData(PRICING_ESTIMATE_KEY, {
             status: "error",
-            contextHash: pricingContextHash,
+            sourcePhase: "scope_seed",
+            contextHash: scopePricingHash,
+            scopeHash: scopePricingHash,
             error: message,
             errorDetails: json,
             updatedAt: Date.now(),
@@ -880,22 +937,16 @@ export function StepEngine({
         }
 
         const est = (json as any)?.estimate ?? json;
-        const totalMin = Number((est as any)?.totalMin);
-        const totalMax = Number((est as any)?.totalMax);
-        const currency =
-          typeof (est as any)?.currency === "string" ? String((est as any).currency).trim().toUpperCase() : "USD";
-        const confidence =
-          typeof (est as any)?.confidence === "string" ? String((est as any).confidence).trim().toLowerCase() : null;
-        const requestId =
-          typeof (est as any)?.requestId === "string" ? String((est as any).requestId).trim() : null;
-
-        if (!Number.isFinite(totalMin) || !Number.isFinite(totalMax)) {
+        const normalizedEstimate = normalizePricingEstimate(est);
+        if (!normalizedEstimate || !Number.isFinite(normalizedEstimate.totalMin) || !Number.isFinite(normalizedEstimate.totalMax)) {
           try {
-            console.warn("[pricing] invalid numbers", { sessionId: flowPlan.sessionId, instanceId, est, json });
+            console.warn("[pricing:seed] invalid numbers", { sessionId: flowPlan.sessionId, instanceId, est, json });
           } catch {}
           updateStepData(PRICING_ESTIMATE_KEY, {
             status: "error",
-            contextHash: pricingContextHash,
+            sourcePhase: "scope_seed",
+            contextHash: scopePricingHash,
+            scopeHash: scopePricingHash,
             error: "Pricing estimate returned invalid numbers",
             errorDetails: json,
             updatedAt: Date.now(),
@@ -903,38 +954,34 @@ export function StepEngine({
           return;
         }
 
-        const normalizedMin = Math.min(totalMin, totalMax);
-        const normalizedMax = Math.max(totalMin, totalMax);
         updateStepData(PRICING_ESTIMATE_KEY, {
+          ...normalizedEstimate,
           status: "complete",
-          contextHash: pricingContextHash,
-          totalMin: normalizedMin,
-          totalMax: normalizedMax,
-          currency,
-          source: typeof (est as any)?.source === "string" ? String((est as any).source) : "ai",
-          ...(confidence ? { confidence } : {}),
-          ...(requestId ? { requestId } : {}),
+          sourcePhase: "scope_seed",
+          contextHash: scopePricingHash,
+          scopeHash: scopePricingHash,
           updatedAt: Date.now(),
         });
         try {
-          console.log("[pricing] complete", {
+          console.log("[pricing:seed] complete", {
             sessionId: flowPlan.sessionId,
             instanceId,
-            totalMin: normalizedMin,
-            totalMax: normalizedMax,
-            currency,
-            confidence,
-            requestId,
+            totalMin: normalizedEstimate.totalMin,
+            totalMax: normalizedEstimate.totalMax,
+            currency: normalizedEstimate.currency,
+            calibrationKey: normalizedEstimate.calibrationKey,
           });
         } catch {}
       } catch (e) {
         if ((e as any)?.name === "AbortError") return;
         try {
-          console.warn("[pricing] exception", { sessionId: flowPlan?.sessionId, instanceId, err: e });
+          console.warn("[pricing:seed] exception", { sessionId: flowPlan?.sessionId, instanceId, err: e });
         } catch {}
         updateStepData(PRICING_ESTIMATE_KEY, {
           status: "error",
-          contextHash: pricingContextHash,
+          sourcePhase: "scope_seed",
+          contextHash: scopePricingHash,
+          scopeHash: scopePricingHash,
           error: e instanceof Error ? e.message : String(e),
           updatedAt: Date.now(),
         });
@@ -949,8 +996,10 @@ export function StepEngine({
     flowPlan?.sessionId,
     formState,
     instanceId,
-    effectiveLeadCompleteForPreviewFlow,
-    pricingContextHash,
+    scopePricingHash,
+    scopePricingReady,
+    scopeStepIdsInFlow,
+    selectedServiceId,
     state?.stepData,
     state?.steps,
     updateStepData,
@@ -1955,6 +2004,26 @@ export function StepEngine({
     !isPreviewGenerationStage &&
     previewQuestionRevealReady &&
     (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm);
+
+  const gatedQuestionPaneUnderPreview = Boolean(
+    showQuestionPaneUnderPreview && (designControlsRevealed || !leadCapturedForUI)
+  );
+
+  const handleKeepDesigning = useCallback(() => {
+    setAdventureInputMode("questions");
+    setDesignControlsRevealed(true);
+    if (!gatedQuestionPaneUnderPreview) return;
+    const el = questionViewportRef.current;
+    if (!el || typeof window === "undefined") return;
+    const run = () => {
+      try {
+        el.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" });
+      } catch {
+        el.scrollIntoView();
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(run));
+  }, [gatedQuestionPaneUnderPreview, questionViewportRef]);
   // Hide while advancing after lead capture (waiting for next step to load)
   const advancingStepId = leadCapturedAdvanceStepIdRef.current;
   const isAdvancingAfterLeadCapture = Boolean(
@@ -1968,7 +2037,7 @@ export function StepEngine({
   }, [currentStep?.id]);
   const hideQuestionPane = Boolean(
     isInitialLoading ||
-    !showQuestionPaneUnderPreview ||
+    !gatedQuestionPaneUnderPreview ||
     isAdvancingAfterLeadCapture
   );
   useEffect(() => {
@@ -2107,7 +2176,7 @@ export function StepEngine({
           pricedGridStepActive={pricedGridStepActive}
           allowConceptGallery={allowConceptGallery}
           styleStepActive={isStyleStepActive}
-          showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
+          showQuestionPaneUnderPreview={gatedQuestionPaneUnderPreview}
           adventureInputMode={adventureInputMode}
           previewAutoAnsweredQuestionCount={previewAutoAnsweredQuestionCount}
           previewAutoGenerationCounterScope={previewAutoGenerationCounterScope}
@@ -2174,6 +2243,7 @@ export function StepEngine({
           previewGeneratingFocused={isPreviewGenerationStage || showPreviewGeneratingEarly}
           showAccuratePricingLoader={showAccuratePricingLoader}
           showEasePrompt={showEasePrompt}
+          onKeepDesigning={handleKeepDesigning}
           stepForRenderer={stepForRenderer}
           theme={{
             borderRadius: theme.borderRadius,

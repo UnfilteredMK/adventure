@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { BadgeDollarSign, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LeadGenPopover } from '@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover';
+import { PRICING_LEAD_COPY } from '@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy';
 
 export interface PricingBreakdown {
   base: number;
@@ -87,9 +88,21 @@ function withAlpha(color: string | undefined, alpha: number): string {
   return `color-mix(in srgb, ${c} ${pct}%, transparent)`;
 }
 
-function maskedLockedParts(): { prefix: string; masked: string } {
-  // Only XXXXX is blurred; no $1 teaser
+function maskedLockedParts(lockedPrice?: string, fallbackPrice?: string): { prefix: string; masked: string } {
+  const raw = String(lockedPrice || fallbackPrice || '').trim();
+  if (raw) return { prefix: '', masked: raw };
   return { prefix: '', masked: 'XXXXX' };
+}
+
+function splitLockedPriceMask(lockedPrice?: string, fallbackPrice?: string): {
+  prefix: string;
+  blur: string;
+} | null {
+  const raw = String(lockedPrice || fallbackPrice || '').trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\D*\d)(.*)$/);
+  if (!m) return { prefix: raw, blur: '' };
+  return { prefix: m[1], blur: m[2] || '' };
 }
 
 export interface PricingPillProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
@@ -134,10 +147,10 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
 ) {
   const effectiveDisabled = Boolean(disabled || (loading && revealed));
   const accent = typeof accentColor === 'string' && accentColor.trim().length > 0 ? accentColor.trim() : null;
-  const lockedMask = maskedLockedParts();
+  const lockedMask = maskedLockedParts(lockedPrice, price);
+  const lockedRangeMask = splitLockedPriceMask(lockedPrice, price);
 
   void termsHref;
-  void lockedPrice;
   void allowToggle;
   void autoReveal;
 
@@ -166,6 +179,10 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     "relative box-border flex h-full w-full min-w-0 flex-1 flex-col items-stretch px-0 pt-0 pb-0 min-h-[clamp(2rem,12cqi,3rem)]";
   const labelFrameClass =
     "block w-full min-w-0 self-start whitespace-nowrap px-0 pb-[clamp(0.18rem,1cqi,0.34rem)]";
+  const helperLabel = helperText && helperText.trim() ? helperText.trim() : null;
+  const labelRowClass = helperLabel
+    ? "relative flex w-full min-w-0 items-center justify-center overflow-visible"
+    : "flex w-full min-w-0 items-center justify-center overflow-visible";
   const labelTextClass =
     "min-w-0 text-[clamp(0.78rem,5.2cqi,1.32rem)] font-normal tracking-[0.02em] leading-none text-white/95";
   const lockedLabelTextClass =
@@ -179,7 +196,6 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     revealedPriceClass,
     "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-visible"
   );
-  const helperLabel = helperText && helperText.trim() ? helperText.trim() : null;
   return (
       <div
         className={cn(
@@ -232,19 +248,19 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             className={labelFrameClass}
             style={{ fontFamily: pricingFont }}
           >
-            <span className="flex w-full min-w-0 items-center justify-between gap-2 overflow-visible">
+            <span className={labelRowClass}>
               {revealed ? (
-                <span className={cn(labelTextClass, "block min-w-0 truncate")}>{pillLabel}</span>
+                <span className={cn(labelTextClass, "block min-w-0 truncate text-center")}>{pillLabel}</span>
               ) : pillLabel === 'SHOW PRICING' ? (
                 <span
-                  className={cn(lockedLabelTextClass, "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible")}
+                  className={cn(lockedLabelTextClass, "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible text-center")}
                   style={lockedLabelStyle}
                 >
                   <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
                   <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
                 </span>
               ) : (
-                <span className={cn(lockedLabelTextClass, "block min-w-0 truncate")} style={lockedLabelStyle}>{pillLabel}</span>
+                <span className={cn(lockedLabelTextClass, "block min-w-0 truncate text-center")} style={lockedLabelStyle}>{pillLabel}</span>
               )}
               {helperLabel ? (
                 <TooltipProvider delayDuration={70}>
@@ -252,7 +268,7 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                     <TooltipTrigger asChild>
                       <span
                         aria-label="How this pricing guide works"
-                        className="inline-flex h-[0.98rem] w-[0.98rem] shrink-0 items-center justify-center self-center rounded-full border border-white/16 bg-white/[0.10] font-sans text-[0.56rem] font-semibold leading-none text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors duration-150 cursor-help select-none hover:bg-white/[0.16] hover:text-white/92"
+                        className="absolute right-0 inline-flex h-[0.98rem] w-[0.98rem] shrink-0 items-center justify-center self-center rounded-full border border-white/16 bg-white/[0.10] font-sans text-[0.56rem] font-semibold leading-none text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors duration-150 cursor-help select-none hover:bg-white/[0.16] hover:text-white/92"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -296,10 +312,19 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
               )
             ) : (
               <span className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em]")} style={lockedValueStyle}>
-                {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
-                <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
-                  <span className="inline-block px-[0.03em] blur-[0.34em] opacity-90 leading-none">{lockedMask.masked}</span>
-                </span>
+                {lockedRangeMask ? (
+                  <span className="inline-flex items-center whitespace-nowrap leading-none">
+                    <span>{lockedRangeMask.prefix}</span>
+                    <span className={cn("opacity-95", lockedRangeMask.blur ? "blur-[0.26em]" : null)}>{lockedRangeMask.blur}</span>
+                  </span>
+                ) : (
+                  <>
+                    {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
+                    <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
+                      <span className="inline-block px-[0.03em] blur-[0.26em] opacity-95 leading-none">{lockedMask.masked}</span>
+                    </span>
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -370,12 +395,7 @@ function PricingExperiencePill(props: PricingExperiencePillProps) {
 	      gateContext={gateContext}
 	      surface="overlay"
 	      contentStyle={style}
-	      title="Where should we send the pricing to?"
-	      description="Enter your email to reveal pricing."
-	      finePrint="Instant reveal after sending."
-	      ctaLabel="Send pricing"
-	      phoneTitle="Best phone number?"
-	      phoneDescription="We can text updates too."
+	      {...PRICING_LEAD_COPY}
 	      requirePhone={requirePhone}
 	      submitOnEmail={false}
       submissionData={{ surface: 'preview_pricing', ...(submissionData || {}) }}
@@ -616,15 +636,10 @@ function PricingExperiencePanel(props: PricingExperiencePanelProps) {
                       ["--sif-lead-gen-action-border" as any]: "rgba(255,255,255,0.26)",
                       ["--sif-lead-gen-ring" as any]: "rgba(255,255,255,0.38)",
                     }}
-                    title="Your personalized estimate is ready"
-                    description="Enter your email to see pricing and download options"
-                    finePrint="Instant unlock after sending."
-                    ctaLabel="Unlock My Estimate"
+                    {...PRICING_LEAD_COPY}
                     requirePhone
                     submitOnEmail={false}
                     enableExitIntentSubmit
-                    phoneTitle="Best phone number?"
-                    phoneDescription="We can text updates too."
                     submissionData={{ surface: 'pricing_panel' }}
                     onSubmitted={() => onLeadCaptured?.()}
                   >

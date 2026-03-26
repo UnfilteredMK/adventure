@@ -3,6 +3,7 @@ import { DETERMINISTIC_SCENE_IMAGE_ID } from "../constants";
 import { isQuestionStepForAskedIds } from "../utils/step-classification";
 
 type PendingAdvance = { stepId: string; data: any } | null;
+const REFINEMENT_FOCUS_STEP_IDS = new Set(["step-priced-image-grid", "step-lead-capture", "step-lead-name", "step-lead-phone"]);
 
 export function useRefinementOrchestration(args: {
   enabled?: boolean;
@@ -24,8 +25,6 @@ export function useRefinementOrchestration(args: {
   pendingRefinementPreviewAdvanceStageRef: React.MutableRefObject<"idle" | "waiting_for_start" | "waiting_for_finish">;
   previewAutoGenerationBusy: boolean;
 }) {
-  // Deprecated for fixed local skeleton form mode.
-  // This hook remains for legacy / future refinement flows and is gated off in the simplified runtime.
   const {
     enabled = true,
     previewHasImage,
@@ -127,7 +126,13 @@ export function useRefinementOrchestration(args: {
           refinementAdvanceFromStepIdRef.current = String(currentStep.id);
           setAwaitingRefinementAdvance(true);
         }
-        if (!userIsWaiting && currentStep && isStructuralStep(currentStep) && firstRefinementQuestionId) {
+        const currentStepId = String(currentStep?.id || "");
+        if (
+          !userIsWaiting &&
+          currentStep &&
+          firstRefinementQuestionId &&
+          (isStructuralStep(currentStep) || REFINEMENT_FOCUS_STEP_IDS.has(currentStepId))
+        ) {
           pendingRefinementFocusStepIdRef.current = String(firstRefinementQuestionId);
         }
         addSteps(markedDeduped, userIsWaiting, { insertAtIndex });

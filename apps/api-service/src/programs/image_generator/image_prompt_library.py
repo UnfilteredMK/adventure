@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Dict
 
-from programs.common.visual_text_safety import ANTI_COMPARISON_NEGATIVE_TERMS
+from programs.common.visual_text_safety import ANTI_COMPARISON_NEGATIVE_TERMS, ANTI_TEXT_OVERLAY_NEGATIVE_TERMS
 
 # ---------------------------------------------------------------------------
 # Negative prompt templates per model family
@@ -18,29 +18,29 @@ from programs.common.visual_text_safety import ANTI_COMPARISON_NEGATIVE_TERMS
 
 NEGATIVE_PROMPTS: Dict[str, str] = {
     "default": (
-        "blurry text, watermark, logo, letters, words, writing, signage, "
-        "cartoon, anime, painting, illustration, low quality, deformed, "
+        f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, "
+        "blurry, cartoon, anime, painting, illustration, low quality, deformed, "
         f"artifacts, noise, pixelated, oversaturated, {ANTI_COMPARISON_NEGATIVE_TERMS}"
     ),
     "flux-schnell": (
-        "text, letters, words, writing, signage, watermark, logo, stamp, "
+        f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, stamp, "
         "blurry, low quality, deformed, distorted, disfigured, "
         "cartoon, anime, painting, illustration, sketch, "
         "oversaturated, artifacts, noise, pixelated, "
         f"extra limbs, extra fingers, mutated hands, {ANTI_COMPARISON_NEGATIVE_TERMS}"
     ),
     "flux-kontext": (
-        "blurry text, watermark, logo, letters, words, writing, signage, "
+        f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, blurry, "
         "cartoon, anime, illustration, low quality, deformed, "
         f"dramatic layout changes, added windows, removed walls, {ANTI_COMPARISON_NEGATIVE_TERMS}"
     ),
     "flux-pro": (
-        "blurry text, watermark, logo, letters, words, writing, signage, "
+        f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, blurry, "
         "cartoon, anime, painting, illustration, low quality, deformed, "
         f"artifacts, noise, oversaturated, {ANTI_COMPARISON_NEGATIVE_TERMS}"
     ),
     "nano-banana": (
-        "blurry text, watermark, logo, letters, words, writing, "
+        f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, blurry, "
         "cartoon, anime, low quality, deformed, artifacts, "
         f"mismatched lighting, floating objects, wrong perspective, {ANTI_COMPARISON_NEGATIVE_TERMS}"
     ),
@@ -75,12 +75,13 @@ Never mention budget numbers, prices, or text in the visual description."""
 
 SCENE_EDIT_SYSTEM = """\
 You are generating an image-editing prompt. The user uploaded a photo of their space.
-Your prompt must tell the model what to CHANGE about the image.
+Your prompt must tell the model what the completed standalone result should look like for that same space.
 Use imperative language: "Replace the flooring with...", "Add subway tile backsplash...",
 "Change the vanity to a rustic wood style...".
 Hard anchor constraint: preserve camera angle, composition/framing, room geometry, perspective, windows, doors, overall layout.
 Transform: finishes, fixtures, materials, colors, styling, decor.
 Be specific about the desired end result, not the process.
+Treat the upload as source context only. Output one finished scene, never the original condition plus the result in a comparison layout.
 Never mention budget numbers, prices, or text in the visual description."""
 
 SCENE_PLACEMENT_SYSTEM = """\
@@ -123,14 +124,14 @@ OPTION_IMAGE_TEMPLATE = (
     "Clean white or neutral studio background. "
     "Sharp focus, even lighting, no shadows on background. "
     "Professional product photography style. "
-    "No text, no labels, no watermarks."
+    "No text, no numbers, no labels, no watermarks."
 )
 
 OPTION_IMAGE_SCENE_TEMPLATE = (
     "A photorealistic completed scene preview showing the '{label}' direction for {context}. "
     "Single real-world environment, natural lighting, realistic materials, editorial-quality photography. "
     "Show a believable finished service outcome, not a product cutout, icon, collage, diagram, or illustration. "
-    "No text, no labels, no watermarks."
+    "No text, no numbers, no labels, no watermarks."
 )
 
 _OPTION_SCENE_SIGNAL_RE = re.compile(

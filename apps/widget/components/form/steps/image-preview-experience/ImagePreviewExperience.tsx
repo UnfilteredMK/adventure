@@ -33,10 +33,11 @@ export interface ImagePreviewExperienceProps {
   previewMaxVw?: number;
   previewChromePx?: number;
   suppressUploadOverlay?: boolean;
-  /** When true, hides the budget slider overlay (e.g. when preview is in dominant/large mode). */
-  hideBudgetInOverlay?: boolean;
   toolingEnabled?: boolean;
+  /** When true, disable concept gallery picker and keep single-image hero mode. */
+  disableConceptPicker?: boolean;
   highConversionBuyerUI?: boolean;
+  onKeepDesigning?: () => void;
 }
 
 export function ImagePreviewExperience({
@@ -52,7 +53,7 @@ export function ImagePreviewExperience({
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
       <ImagePreviewCanvas
         {...canvasProps}
         enabled={enabled}

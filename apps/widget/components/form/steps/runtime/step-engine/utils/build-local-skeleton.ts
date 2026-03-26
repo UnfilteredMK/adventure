@@ -30,6 +30,12 @@ function normalizeServiceLabel(serviceOption: LocalSkeletonServiceOption | null 
   return label;
 }
 
+/** Placeholder labels from API fallbacks — using them in "your X project?" reads as broken copy ("service project"). */
+function isGenericServiceLabel(label: string): boolean {
+  const s = label.trim().toLowerCase();
+  return !s || s === "service" || s === "project";
+}
+
 export function resolveSelectedServiceOption(
   serviceOptions: LocalSkeletonServiceOption[],
   selectedServiceId?: string | null
@@ -75,10 +81,13 @@ export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | 
     : [];
 
   if (components.length > 0) {
+    const scopeQuestion = isGenericServiceLabel(serviceLabel)
+      ? "Which parts of this project should we focus on?"
+      : `What parts of your ${serviceLabel.toLowerCase()} are in scope?`;
     return {
       id: LOCAL_SCOPE_STEP_ID,
       type: components.length > 6 ? "chips_multi" : "multiple_choice",
-      question: `What parts of your ${serviceLabel.toLowerCase()} are in scope?`,
+      question: scopeQuestion,
       humanism: "Select everything you'd like us to focus on.",
       options: components.slice(0, 12).map((component) => ({
         label: component.label,
@@ -92,10 +101,14 @@ export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | 
     } as UIStep;
   }
 
+  const scaleQuestion = isGenericServiceLabel(serviceLabel)
+    ? "How extensive is this project?"
+    : `How big is your ${serviceLabel.toLowerCase()} project?`;
+
   return {
     id: LOCAL_SCOPE_STEP_ID,
     type: "multiple_choice",
-    question: `How big is your ${serviceLabel.toLowerCase()} project?`,
+    question: scaleQuestion,
     humanism: "Pick the option that feels closest.",
     options: [
       { label: "A quick refresh", value: "refresh" },

@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from programs.common.visual_text_safety import (
     ANTI_COMPARISON_NEGATIVE_TERMS,
+    ANTI_TEXT_OVERLAY_NEGATIVE_TERMS,
     SINGLE_SCENE_GUARDRAIL,
     sanitize_visual_context_text,
 )
@@ -456,8 +457,8 @@ def _budget_material_descriptor(budget_raw: str) -> str:
 
 
 _DEFAULT_NEGATIVE = (
-    "blurry text, watermark, logo, letters, words, writing, signage, "
-    f"cartoon, anime, painting, illustration, low quality, deformed, {ANTI_COMPARISON_NEGATIVE_TERMS}"
+    f"{ANTI_TEXT_OVERLAY_NEGATIVE_TERMS}, "
+    f"blurry, cartoon, anime, painting, illustration, low quality, deformed, {ANTI_COMPARISON_NEGATIVE_TERMS}"
 )
 
 _SKIP_KEYS = frozenset({
@@ -570,7 +571,9 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
     extra = _kv_details(step_data, skip_keys=set(_SKIP_KEYS))
     qa_pairs = _extract_answered_qa(payload)
 
-    lines: List[str] = ["No text, no words, no letters, no labels, no captions, no logos, no watermarks, no signs."]
+    lines: List[str] = [
+        "No text, no words, no letters, no numbers, no numerals, no digits, no labels, no captions, no logos, no watermarks, no signs."
+    ]
 
     if use_case == "scene-placement":
         lines.append(f"Seamlessly place the product into this scene for a {subject} project.")
@@ -596,7 +599,7 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
             lines.append(f"Style direction: {', '.join(style_tags)}.")
 
     elif is_edit:
-        # EDIT mode: the reference photo is the BEFORE state — generate the fully-completed AFTER.
+        # Edit mode: use the uploaded image only as source context and return one completed result.
         lines.append(SINGLE_SCENE_GUARDRAIL)
         generation_intent_raw = str(
             payload.get("generationIntent") or payload.get("generation_intent") or ""
@@ -605,16 +608,19 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if is_initial_overhaul:
             lines.append(
-                "MAKE A COMPLETE OVERHAUL. The uploaded photo is the BEFORE state. Generate the fully-completed "
-                "AFTER state with ALL surfaces, fixtures, and finishes replaced and upgraded. Apply style and budget "
-                "constraints to the renovated result. Preserve ONLY: room layout, camera angle, structural walls. "
-                "REPLACE everything else."
+                "MAKE A COMPLETE OVERHAUL. Use the uploaded photo only as source context for the existing space. "
+                "Generate one fully completed renovation result with ALL service-touched surfaces, fixtures, and finishes "
+                "replaced and upgraded. Apply style and budget constraints to the renovated result. Preserve ONLY: room "
+                "layout, camera angle, structural walls. REPLACE everything else."
             )
         else:
             lines.append(
-                f"The uploaded photo is the BEFORE state. Generate the photorealistic AFTER state: "
+                f"Use the uploaded photo as source context and generate one photorealistic completed result for "
                 f"this exact space once a professional {subject} project has been fully completed."
             )
+        lines.append(
+            "Show only the finished outcome as one coherent standalone image. Never show the original condition, multiple stages, or a comparison treatment."
+        )
         if not is_initial_overhaul:
             lines.append(
                 "Hard anchor constraint: preserve camera framing/perspective, scene geometry, lighting direction, and "
@@ -693,7 +699,9 @@ def build_image_prompt_text(payload: Dict[str, Any]) -> Dict[str, Any]:
             lines.append(f"Timeline: {timeline[:80]}.")
 
     lines.append("Photorealistic, high quality, realistic materials and natural lighting.")
-    lines.append("No text, no words, no letters, no labels, no captions, no logos, no watermarks, no annotations, no signs.")
+    lines.append(
+        "No text, no words, no letters, no numbers, no numerals, no digits, no labels, no captions, no logos, no watermarks, no annotations, no signs."
+    )
 
     prompt = "\n".join([x for x in lines if str(x).strip()]).strip()
 

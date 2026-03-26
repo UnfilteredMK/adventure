@@ -44,8 +44,10 @@ type LeadGenPopoverProps = {
   description?: string;
   finePrint?: string;
   ctaLabel?: string;
+  emailPlaceholder?: string;
   phoneTitle?: string;
   phoneDescription?: string;
+  phoneCtaLabel?: string;
   phoneLabel?: string;
   requirePhone?: boolean;
   /**
@@ -191,8 +193,10 @@ export function LeadGenPopover({
   description,
   finePrint,
   ctaLabel = "Send",
+  emailPlaceholder = "you@company.com",
   phoneTitle = "Best phone number?",
   phoneDescription = "Optional — we can text updates too.",
+  phoneCtaLabel = "Continue",
   phoneLabel = "Phone number",
   requirePhone = false,
   submitOnEmail = true,
@@ -466,7 +470,7 @@ export function LeadGenPopover({
                     autoFocus
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@company.com"
+                    placeholder={emailPlaceholder}
                     className="h-7 rounded-xl pl-8 pr-[112px] text-[12px] placeholder:text-[color:var(--sif-lead-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                     inputMode="email"
                     style={{
@@ -506,7 +510,7 @@ export function LeadGenPopover({
                       autoFocus
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@company.com"
+                      placeholder={emailPlaceholder}
                       className="h-8 pl-8 text-[12px] bg-white/70 focus-visible:ring-2 focus-visible:ring-offset-0"
                       inputMode="email"
                       style={{
@@ -606,7 +610,7 @@ export function LeadGenPopover({
                     : { backgroundColor: accent, fontFamily: theme.fontFamily }
                 }
               >
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue"}
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : phoneCtaLabel}
               </Button>
             </div>
             {!requirePhone ? (
@@ -643,6 +647,7 @@ export function LeadGenPopover({
       ctaLabel,
       description,
       email,
+      emailPlaceholder,
       handleEmailSubmit,
       handlePhoneSubmit,
       handleSkipPhone,
@@ -650,6 +655,7 @@ export function LeadGenPopover({
       finePrint,
       isSubmitting,
       phone,
+      phoneCtaLabel,
       phoneDescription,
       phoneLabel,
       phoneTitle,
@@ -709,7 +715,7 @@ export function LeadGenPopover({
 	        sticky="always"
         className={cn(
             "relative max-w-[92vw] overflow-visible rounded-2xl shadow-xl",
-            isOverlay ? "w-80 p-2.5" : "w-72 p-3"
+            isOverlay ? "w-[22rem] p-2.5" : "w-80 p-3"
           )}
 	        style={{
               ...(contentStyle || {}),

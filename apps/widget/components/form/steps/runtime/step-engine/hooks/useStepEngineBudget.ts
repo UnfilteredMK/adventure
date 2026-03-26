@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StepDefinition } from "@/types/ai-form";
 import { deriveBudgetSliderRange, roundBudgetStep } from "../utils/budget";
-import { DETERMINISTIC_BUDGET_ID, DETERMINISTIC_PRODUCT_IMAGE_ID, DETERMINISTIC_SCENE_IMAGE_ID, DETERMINISTIC_USER_IMAGE_ID } from "../constants";
+import {
+  DETERMINISTIC_BUDGET_ID,
+  DETERMINISTIC_PRODUCT_IMAGE_ID,
+  DETERMINISTIC_SCENE_IMAGE_ID,
+  DETERMINISTIC_USER_IMAGE_ID,
+  PRICING_ESTIMATE_KEY,
+} from "../constants";
 import { isQuestionStepForAskedIds } from "../utils/step-classification";
+import { normalizePricingEstimate } from "../utils/pricing-estimate";
 
 export function useStepEngineBudget(args: {
   config: any;
@@ -26,6 +33,10 @@ export function useStepEngineBudget(args: {
   } = args;
   const [budgetApiRange, setBudgetApiRange] = useState<{ min: number; max: number; currency: string } | null>(null);
   const budgetApiLoadedSessionRef = useRef<string | null>(null);
+  const pricingSeed = useMemo(
+    () => normalizePricingEstimate((stateStepData as any)?.[PRICING_ESTIMATE_KEY]),
+    [stateStepData]
+  );
 
   const optionalSceneImageStep: StepDefinition = useMemo(
     () => ({
@@ -100,14 +111,22 @@ export function useStepEngineBudget(args: {
 
   const deterministicBudgetStep: StepDefinition = useMemo(() => {
     const cfg = (config as any)?.previewPricing;
-    const apiMin = Number(budgetApiRange?.min);
-    const apiMax = Number(budgetApiRange?.max);
+    const seededRange =
+      pricingSeed?.servicePriceRange ??
+      pricingSeed?.imagePriceRange ??
+      (typeof pricingSeed?.totalMin === "number" && typeof pricingSeed?.totalMax === "number"
+        ? { low: pricingSeed.totalMin, high: pricingSeed.totalMax }
+        : null);
+    const apiMin = Number(seededRange?.low ?? budgetApiRange?.min);
+    const apiMax = Number(seededRange?.high ?? budgetApiRange?.max);
     const hasApiBounds = Number.isFinite(apiMin) && Number.isFinite(apiMax) && apiMin > 0 && apiMax > 0;
     const cfgMin = Number(cfg?.totalMin);
     const cfgMax = Number(cfg?.totalMax);
     const currency =
-      typeof budgetApiRange?.currency === "string" && budgetApiRange.currency.trim()
-        ? budgetApiRange.currency.trim().toUpperCase()
+      typeof pricingSeed?.currency === "string" && pricingSeed.currency.trim()
+        ? pricingSeed.currency.trim().toUpperCase()
+        : typeof budgetApiRange?.currency === "string" && budgetApiRange.currency.trim()
+          ? budgetApiRange.currency.trim().toUpperCase()
         : "USD";
     const defaultMin = normalizedUseCase === "tryon" ? 500 : 2000;
     const defaultMax = normalizedUseCase === "tryon" ? 10000 : 50000;
@@ -125,7 +144,7 @@ export function useStepEngineBudget(args: {
         subtext: "Move the slider to set your target spend so pricing and image quality stay aligned.",
       },
     };
-  }, [budgetApiRange, config, normalizedUseCase]);
+  }, [budgetApiRange, config, normalizedUseCase, pricingSeed]);
 
   const budgetSliderConfig = useMemo(() => {
     const data = (deterministicBudgetStep as any)?.data || {};
@@ -148,6 +167,14 @@ export function useStepEngineBudget(args: {
     if (!legacyBudgetUploadEnabled) return;
     if (!sessionId || !instanceId) return;
     if (!hasReceivedQuestionsFromGenerateSteps) return;
+    if (
+      pricingSeed?.status === "running" ||
+      pricingSeed?.servicePriceRange ||
+      pricingSeed?.imagePriceRange ||
+      (typeof pricingSeed?.totalMin === "number" && typeof pricingSeed?.totalMax === "number")
+    ) {
+      return;
+    }
     if (budgetApiLoadedSessionRef.current === sessionId) return;
     budgetApiLoadedSessionRef.current = sessionId;
 
@@ -183,7 +210,16 @@ export function useStepEngineBudget(args: {
       .catch((e) => {
         console.warn("[StepEngine] budget pricing seed failed", e);
       });
-  }, [config?.useCase, hasReceivedQuestionsFromGenerateSteps, instanceId, legacyBudgetUploadEnabled, sessionId, stateStepData, stateSteps]);
+  }, [
+    config?.useCase,
+    hasReceivedQuestionsFromGenerateSteps,
+    instanceId,
+    legacyBudgetUploadEnabled,
+    pricingSeed,
+    sessionId,
+    stateStepData,
+    stateSteps,
+  ]);
 
   const handleBudgetChange = useCallback(
     (value: number) => {
