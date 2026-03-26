@@ -263,39 +263,21 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
                 <span className={cn(lockedLabelTextClass, "block min-w-0 truncate text-center")} style={lockedLabelStyle}>{pillLabel}</span>
               )}
               {helperLabel ? (
-                <TooltipProvider delayDuration={70}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        aria-label="How this pricing guide works"
-                        className="absolute right-0 inline-flex h-[0.98rem] w-[0.98rem] shrink-0 items-center justify-center self-center rounded-full border border-white/16 bg-white/[0.10] font-sans text-[0.56rem] font-semibold leading-none text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors duration-150 cursor-help select-none hover:bg-white/[0.16] hover:text-white/92"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                      >
-                        i
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="top"
-                      align="end"
-                      sideOffset={6}
-                      className="z-[260] max-w-[16.5rem] rounded-2xl border-[color:var(--sif-overlay-border,rgba(255,255,255,0.24))] bg-[var(--sif-overlay-bg,rgba(51,65,85,0.52))] px-2.5 py-2 text-xs text-white shadow-lg shadow-black/25 backdrop-blur-md"
-                    >
-                      <div className="space-y-0.5" style={{ fontFamily: pricingFont }}>
-                        <p className="text-[0.6rem] font-medium uppercase tracking-[0.08em] leading-none text-white/55">
-                          How This Pricing Guide Works
-                        </p>
-                        <p className="text-[0.68rem] leading-[1.35] text-white/90">{helperLabel}</p>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <span
+                  aria-label={`How this pricing guide works. ${helperLabel}`}
+                  title={helperLabel}
+                  className="absolute right-0 inline-flex h-[0.98rem] w-[0.98rem] shrink-0 items-center justify-center self-center rounded-full border border-white/16 bg-white/[0.10] font-sans text-[0.56rem] font-semibold leading-none text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors duration-150 cursor-help select-none hover:bg-white/[0.16] hover:text-white/92"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  i
+                </span>
               ) : null}
             </span>
           </div>

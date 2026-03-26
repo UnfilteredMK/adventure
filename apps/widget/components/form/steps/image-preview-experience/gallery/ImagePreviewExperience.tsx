@@ -22,7 +22,7 @@ import {
 } from "@/lib/ai-form/state/form-state-storage";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
 import { PRICING_LEAD_COPY } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
@@ -2793,6 +2793,7 @@ export function ImagePreviewExperience(props: {
   const galleryPlaceholderPillHoverBg = "rgba(0, 0, 0, 0.72)";
   const singleModePricingPillBg = galleryPlaceholderPillBg;
   const singleModePricingPillHoverBg = galleryPlaceholderPillHoverBg;
+  const pricingDisplayFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
   // Keep lead popover on the exact same glass color token as overlay pills.
   const leadGenOverlayBg = overlayBg;
   const leadGenFg = "rgba(255,255,255,0.95)";
@@ -2923,7 +2924,7 @@ export function ImagePreviewExperience(props: {
     if (typeof window === "undefined") {
       return {
         primaryUrl: null as string | null,
-        primaryLabel: "Get exact quote & timeline",
+        primaryLabel: "Schedule an appointment",
         missingUrl: true,
       };
     }
@@ -2937,7 +2938,7 @@ export function ImagePreviewExperience(props: {
     const steps = loadStepState(instanceId)?.steps ?? [];
     const scheduleUrl = readConfirmationScheduleUrlFromSteps(steps);
     const primaryUrl = heroUrl || scheduleUrl;
-    const primaryLabel = heroText && heroText.length > 0 ? heroText : "Get exact quote & timeline";
+    const primaryLabel = heroText && heroText.length > 0 ? heroText : "Schedule an appointment";
     return { primaryUrl, primaryLabel, missingUrl: !primaryUrl };
   }, [instanceId, sessionId, selectedServiceIdForCta]);
 
@@ -3393,14 +3394,16 @@ export function ImagePreviewExperience(props: {
                       leadGateEnabled && !leadCaptured ? (
                         <LeadGenPopover
                           open={showGenerateGate}
-                          onOpenChange={(open) => {
-                            if (open === showGenerateGate) return;
-                            if (!open) {
-                              pendingActionRef.current = null;
-                              pendingGenerateModeRef.current = "manual";
-                              gateContextRef.current = "design_and_estimate";
-                            }
-                            setShowGenerateGate(open);
+                          onOpenChange={(nextOpen) => {
+                            setShowGenerateGate((prevOpen) => {
+                              if (prevOpen === nextOpen) return prevOpen;
+                              if (!nextOpen) {
+                                pendingActionRef.current = null;
+                                pendingGenerateModeRef.current = "manual";
+                                gateContextRef.current = "design_and_estimate";
+                              }
+                              return nextOpen;
+                            });
                           }}
                           instanceId={instanceId}
                           sessionId={sessionId}
@@ -3467,13 +3470,15 @@ export function ImagePreviewExperience(props: {
                         {leadGateEnabled ? (
                           <LeadGenPopover
                         open={showDownloadGate}
-                        onOpenChange={(v) => {
-                          if (v && !leadGateActive) return;
-                          if (v === showDownloadGate) return;
-                          if (!v) {
-                            pendingActionRef.current = null;
-                          }
-                          setShowDownloadGate(v);
+                        onOpenChange={(nextOpen) => {
+                          if (nextOpen && !leadGateActive) return;
+                          setShowDownloadGate((prevOpen) => {
+                            if (prevOpen === nextOpen) return prevOpen;
+                            if (!nextOpen) {
+                              pendingActionRef.current = null;
+                            }
+                            return nextOpen;
+                          });
                         }}
                         instanceId={instanceId}
                         sessionId={sessionId}
@@ -3724,13 +3729,15 @@ export function ImagePreviewExperience(props: {
                   {leadGateEnabled ? (
                     <LeadGenPopover
                       open={showUploadGate}
-                      onOpenChange={(v) => {
-                        if (v && !leadGateActive) return;
-                        if (v === showUploadGate) return;
-                        if (!v) {
-                          pendingActionRef.current = null;
-                        }
-                        setShowUploadGate(v);
+                      onOpenChange={(nextOpen) => {
+                        if (nextOpen && !leadGateActive) return;
+                        setShowUploadGate((prevOpen) => {
+                          if (prevOpen === nextOpen) return prevOpen;
+                          if (!nextOpen) {
+                            pendingActionRef.current = null;
+                          }
+                          return nextOpen;
+                        });
                       }}
                       instanceId={instanceId}
                       sessionId={sessionId}
@@ -3780,13 +3787,15 @@ export function ImagePreviewExperience(props: {
                 leadGateEnabled ? (
                   <LeadGenPopover
                     open={showUploadGate}
-                    onOpenChange={(v) => {
-                      if (v && !leadGateActive) return;
-                      if (v === showUploadGate) return;
-                      if (!v) {
-                        pendingActionRef.current = null;
-                      }
-                      setShowUploadGate(v);
+                    onOpenChange={(nextOpen) => {
+                      if (nextOpen && !leadGateActive) return;
+                      setShowUploadGate((prevOpen) => {
+                        if (prevOpen === nextOpen) return prevOpen;
+                        if (!nextOpen) {
+                          pendingActionRef.current = null;
+                        }
+                        return nextOpen;
+                      });
                     }}
                     instanceId={instanceId}
                     sessionId={sessionId}
@@ -4157,7 +4166,7 @@ export function ImagePreviewExperience(props: {
                         backgroundColor: singleModePricingPillBg,
                         backdropFilter: "blur(12px)",
                         WebkitBackdropFilter: "blur(12px)",
-                        fontFamily: theme.fontFamily,
+                        fontFamily: pricingDisplayFont,
                       }}
                       data-overlay-estimate-expanded
                     >
@@ -4173,62 +4182,58 @@ export function ImagePreviewExperience(props: {
                         />
 
                         <div className="relative flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="inline-flex items-center gap-2">
-                              <div className="text-[10px] font-semibold tracking-[0.18em] text-white/65">ESTIMATE</div>
-                              <div className="h-[1px] w-10 bg-white/15" aria-hidden />
-                              <div className="text-[10px] font-medium text-white/55">Based on similar projects</div>
+                          <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                            <div
+                              className="inline-flex items-center justify-center gap-2"
+                              style={{ fontFamily: pricingDisplayFont }}
+                            >
+                              <div className="text-[11px] font-semibold tracking-[0.12em] text-white/70 sm:text-[11.5px]">YOUR ESTIMATED PRICE</div>
+                              {waitingForExactPricing ? <div className="h-[1px] w-14 bg-white/22" aria-hidden /> : null}
+                              {waitingForExactPricing ? (
+                                <div className="text-[11px] font-medium tracking-[0.03em] text-white/60 sm:text-[11.5px]">
+                                  Calculating for this design
+                                </div>
+                              ) : null}
                             </div>
 
-                            <div className="mt-1 flex flex-wrap items-end gap-x-3 gap-y-1">
-                              <div className="text-[32px] font-semibold tabular-nums leading-none tracking-tight text-white sm:text-[40px]">
-                                {overlayPricingMidpointLabel}
-                              </div>
-                              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/80">
-                                {overlayPricingRangeLabel}
-                              </div>
+                            <div className="mt-1 flex flex-col items-center gap-1.5">
+                              {waitingForExactPricing ? (
+                                <>
+                                  <div className="inline-flex items-center gap-2 text-[18px] font-semibold leading-none tracking-tight text-white sm:text-[22px]">
+                                    <Loader2 className="h-5 w-5 animate-spin text-white/85" />
+                                    <span>Calculating price...</span>
+                                  </div>
+                                  <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/70">
+                                    Personalized estimate coming next
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div
+                                    className="text-[32px] font-semibold tabular-nums leading-none tracking-[0.01em] text-white/95 sm:text-[40px]"
+                                    style={{ fontFamily: pricingDisplayFont }}
+                                  >
+                                    {overlayPricingMidpointLabel}
+                                  </div>
+                                  <div
+                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/80"
+                                    style={{ fontFamily: pricingDisplayFont }}
+                                  >
+                                    {overlayPricingRangeLabel}
+                                  </div>
+                                </>
+                              )}
                             </div>
 
-                            <div className="mt-1.5 text-[10px] leading-snug text-white/55 sm:text-[11px]">
-                              Final quotes can change with measurements, materials, and local availability.
+                            <div className="mt-1.5 max-w-[28rem] text-[10px] leading-snug text-white/55 sm:text-[11px]">
+                              {waitingForExactPricing
+                                ? "We are analyzing your current image and answers to generate a more precise price range."
+                                  : "Final pricing may change based on your final selections and details."}
                             </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-white/85 hover:bg-white/10"
-                            onClick={() => {
-                              setOverlayPricingCollapsedPreference(true);
-                              setOverlayPricingExpanded(false);
-                            }}
-                            aria-label="Collapse pricing"
-                            title="Collapse"
-                          >
-                            Collapse
-                          </button>
-                        </div>
-
-                        <div className="relative mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_16rem] sm:items-center sm:gap-4">
-                          <div className="flex flex-wrap gap-1.5">
-                            {[
-                              "Based on real projects",
-                              "Materials + labor",
-                              "No obligation quote",
-                            ].map((label) => (
-                              <span
-                                key={label}
-                                className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
-                              >
-                                {label}
-                              </span>
-                            ))}
-                          </div>
-
-                          <div className="flex flex-col gap-2">
-                            {previewBookingCta.primaryUrl ? (
+                            {!waitingForExactPricing && previewBookingCta.primaryUrl ? (
                               <Button
                                 asChild
-                                className="h-10 w-full rounded-full text-xs font-semibold shadow-sm"
+                                className="mt-3 h-10 w-full max-w-[18rem] rounded-full text-xs font-semibold shadow-sm"
                                 style={{ backgroundColor: primary, color: "#fff" }}
                               >
                                 <a href={previewBookingCta.primaryUrl} target="_blank" rel="noopener noreferrer">
@@ -4236,28 +4241,103 @@ export function ImagePreviewExperience(props: {
                                 </a>
                               </Button>
                             ) : null}
-                            {onKeepDesigning ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onKeepDesigning();
-                                }}
-                                className="h-9 w-full rounded-full border border-white/15 bg-white/5 px-3 text-[11px] font-semibold text-white/90 hover:bg-white/10"
-                              >
-                                Keep designing
-                              </button>
-                            ) : null}
-                            <div className="text-center text-[10px] text-white/60">Talk to a specialist • No obligation</div>
-                            <button
-                              type="button"
-                              disabled={isUploadingOwnImages || busy}
-                              onClick={handleUploadClick}
-                              className="text-center text-[11px] font-medium underline-offset-2 hover:underline"
-                              style={{ color: theme.primaryColor || "#3b82f6" }}
-                            >
-                              {isUploadingOwnImages ? "Uploading…" : "Want this on your actual space?"}
-                            </button>
                           </div>
+
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
+                            onClick={() => {
+                              setOverlayPricingCollapsedPreference(true);
+                              setOverlayPricingExpanded(false);
+                            }}
+                            aria-label="Collapse pricing"
+                            title="Collapse pricing"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        <div className="relative mt-3 flex flex-col items-center gap-3">
+                          {waitingForExactPricing ? (
+                            <>
+                              <div className="flex flex-wrap justify-center gap-1.5">
+                                {[
+                                  "Reading your selections",
+                                  "Analyzing the image",
+                                  "Building a tighter range",
+                                ].map((label) => (
+                                  <span
+                                    key={label}
+                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="flex w-full max-w-[18rem] flex-col gap-2">
+                                <div className="flex h-10 w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Calculating exact estimate</span>
+                                </div>
+                                {onKeepDesigning ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onKeepDesigning();
+                                    }}
+                                    className="h-9 w-full rounded-full border border-white/15 bg-white/5 px-3 text-[11px] font-semibold text-white/90 hover:bg-white/10"
+                                  >
+                                    Keep designing
+                                  </button>
+                                ) : null}
+                                <div className="text-center text-[10px] text-white/60">This usually takes a moment</div>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap justify-center gap-1.5">
+                                {[
+                                  "Tailored to your answers",
+                                  "Includes key cost factors",
+                                  "No obligation",
+                                ].map((label) => (
+                                  <span
+                                    key={label}
+                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
+                                {onKeepDesigning ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onKeepDesigning();
+                                    }}
+                                    className="text-[11px] font-medium text-white/90 underline-offset-2 transition-colors hover:text-white hover:underline"
+                                  >
+                                    Refine this design
+                                  </button>
+                                ) : null}
+                                {onKeepDesigning ? (
+                                  <div className="text-[10px] font-semibold tracking-[0.16em] text-white/45">OR</div>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  disabled={isUploadingOwnImages || busy}
+                                  onClick={handleUploadClick}
+                                  className="text-[11px] font-medium underline-offset-2 transition-colors hover:underline"
+                                  style={{ color: theme.primaryColor || "#3b82f6" }}
+                                >
+                                  {isUploadingOwnImages ? "Uploading…" : "Try with your own photo"}
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
