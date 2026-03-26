@@ -699,11 +699,13 @@ export function LeadGenPopover({
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (next) {
-          onOpenChange(true);
-          return;
+        if (!next) {
+          // Keep dismissal side effects local, but avoid re-entering close logic
+          // based on a potentially stale `open` value from this render.
+          void submitPartialLeadSilently("dismiss");
+          upsertLeadGate(sessionId, gateContext, { dismissedAt: Date.now() });
         }
-        if (open) close();
+        onOpenChange(next);
       }}
     >
       <PopoverTrigger asChild>{children}</PopoverTrigger>

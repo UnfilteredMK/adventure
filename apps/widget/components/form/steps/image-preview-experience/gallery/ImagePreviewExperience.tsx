@@ -25,7 +25,7 @@ import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/cu
 import { ArrowLeft, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
-import { PRICING_LEAD_COPY, PRICING_LEAD_MODAL } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
+import { PRICING_LEAD_COPY } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
 import { useFormSubmission } from "@/hooks/use-form-submission";
@@ -294,6 +294,34 @@ function formatPricingRangeText(params: {
   return `${formatCurrency(Math.min(low, high), { locale: params.locale, currency })}-${formatCurrency(
     Math.max(low, high),
     { locale: params.locale, currency }
+  )}`;
+}
+
+function formatCompactCurrency(amount: number, locale?: string, currency?: string): string {
+  const normalizedCurrency = String(currency || "USD").trim().toUpperCase() || "USD";
+  return new Intl.NumberFormat(locale || undefined, {
+    style: "currency",
+    currency: normalizedCurrency,
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount);
+}
+
+function formatCompactPricingRangeText(params: {
+  pricing?: CachedPricing | null;
+  locale?: string;
+  currency?: string;
+}): string | null {
+  const pricing = params.pricing;
+  if (!pricing) return null;
+  const low = pricing.imagePriceRange?.low ?? pricing.totalMin;
+  const high = pricing.imagePriceRange?.high ?? pricing.totalMax;
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  const currency = String(params.currency || pricing.currency || "USD").trim().toUpperCase() || "USD";
+  return `${formatCompactCurrency(Math.min(low, high), params.locale, currency)}-${formatCompactCurrency(
+    Math.max(low, high),
+    params.locale,
+    currency
   )}`;
 }
 
@@ -2778,9 +2806,9 @@ export function ImagePreviewExperience(props: {
     ["--sif-lead-gen-ring" as any]: leadGenRing,
   } as React.CSSProperties;
   const centeredPricingOverlayInset = "clamp(0.7rem, 3cqi, 1rem)";
-  const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(17rem, 54cqi, 27rem))";
+  const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(19rem, 62cqi, 32rem))";
   const centeredPricingPanelRadius = "clamp(1rem, 4cqi, 1.5rem)";
-  const centeredPricingPanelPadding = "clamp(0.65rem, 2.5cqi, 0.95rem)";
+  const centeredPricingPanelPadding = "clamp(0.78rem, 2.9cqi, 1.08rem)";
   const centeredPricingPanelGap = "clamp(0.4rem, 1.45cqi, 0.62rem)";
   const centeredPricingHeaderGap = "clamp(0.38rem, 1.2cqi, 0.58rem)";
   const centeredPricingIconButtonSize = "clamp(1.8rem, 6cqi, 2.1rem)";
@@ -2795,7 +2823,7 @@ export function ImagePreviewExperience(props: {
   const centeredPricingInputPadLeft = "clamp(2.3rem, 8.2cqi, 2.7rem)";
 
   // Pricing pill: show only in single mode (user has chosen one image), not while picking from the 4-tile gallery.
-  const shouldShowPricingPill = Boolean(hero && variant === "hero" && previewPricing && !showConceptPicker);
+  const shouldShowPricingPill = Boolean(hero && !showConceptPicker);
   const formattedPricingRange = previewPricing
     ? `${formatCurrency(previewPricing.totalMin, { locale: pricingLocale, currency: pricingCurrency })}-${formatCurrency(
         previewPricing.totalMax,
@@ -2968,10 +2996,10 @@ export function ImagePreviewExperience(props: {
   const pillLoading = Boolean(leadGateEnabled && leadCaptured && accuratePricingStatus === "running");
   const shouldShowBottomPricingPill = Boolean(shouldShowPricingPill && lockedPillPrice);
   const shouldShowCenteredPricingFormOverlay = Boolean(
-    toolingEnabled && leadGateEnabled && !leadCaptured && showCenteredPricingForm
+    leadGateEnabled && !leadCaptured && showCenteredPricingForm
   );
   const shouldShowBottomControlsRow = Boolean(
-    toolingEnabled && !shouldShowCenteredPricingFormOverlay && shouldShowBottomPricingPill
+    !shouldShowCenteredPricingFormOverlay && shouldShowBottomPricingPill
   );
   const previewPricingPillMaxWidth =
     leadGateEnabled && !leadCaptured
@@ -3097,7 +3125,7 @@ export function ImagePreviewExperience(props: {
 
   /** Left-rail control sits outside the image frame; ancestors must not clip it. */
   const showGalleryBackControl =
-    toolingEnabled && !showConceptPicker && Boolean(hero) && hasMultiImageRun;
+    !showConceptPicker && Boolean(hero) && (selectedConceptIndex !== null || hasMultiImageRun);
 
   const useResponsiveConceptGalleryShell = showConceptPicker;
   const previewFrameStyle = useResponsiveConceptGalleryShell
@@ -3233,7 +3261,7 @@ export function ImagePreviewExperience(props: {
 
               {/* Left rail: sibling of the clipped image shell so negative translate is not cut off. */}
               {showGalleryBackControl ? (
-                <div className="absolute left-0 top-1/2 z-30 -translate-x-[calc(100%+0.75rem)] -translate-y-1/2 pointer-events-none flex">
+                <div className="absolute left-3 top-3 z-40 pointer-events-none flex sm:left-4 sm:top-4">
                   <div className="pointer-events-auto">
                     <button
                       type="button"
@@ -3511,6 +3539,11 @@ export function ImagePreviewExperience(props: {
                           locale: pricingLocale,
                           currency: pricingCurrency,
                         });
+                        const tilePriceCompactText = formatCompactPricingRangeText({
+                          pricing: tilePricing,
+                          locale: pricingLocale,
+                          currency: pricingCurrency,
+                        });
                         const tilePriceMask = splitPricingMaskSegments(tilePriceText);
                         const shouldBlurTilePrice = Boolean(leadGateEnabled && !leadCaptured);
                         if (!src) {
@@ -3564,19 +3597,16 @@ export function ImagePreviewExperience(props: {
                         />
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2.5">
                           <div
-                            className="flex h-9 min-w-[7rem] max-w-[calc(100%-0.5rem)] items-center justify-center rounded-full bg-black/60 px-3"
+                            className="flex h-7 min-w-[6rem] max-w-[calc(100%-0.75rem)] items-center justify-center rounded-full bg-black/60 px-2.5"
                             aria-hidden="true"
                           >
-                            {shouldBlurTilePrice && tilePriceMask ? (
-                              <span className="select-none truncate text-[12px] font-semibold text-white/95">
-                                <span>{tilePriceMask.prefix}</span>
-                                <span className={cn("opacity-95", tilePriceMask.blur ? "blur-[0.28em]" : null)}>
-                                  {tilePriceMask.blur}
-                                </span>
+                            {shouldBlurTilePrice ? (
+                              <span className="select-none truncate text-[11px] font-semibold text-white/90">
+                                Tap to view price
                               </span>
                             ) : (
-                              <span className="select-none truncate text-[12px] font-semibold text-white/95">
-                                {tilePriceText || "$•••-$•••"}
+                              <span className="select-none truncate text-[11px] font-semibold text-white/95">
+                                {tilePriceCompactText || tilePriceText || "$•••-$•••"}
                               </span>
                             )}
                           </div>
@@ -3861,7 +3891,7 @@ export function ImagePreviewExperience(props: {
                               {centeredPricingStep === "email"
                                 ? PRICING_LEAD_COPY.title
                                 : centeredPricingStep === "name"
-                                  ? PRICING_LEAD_MODAL.nameTitle
+                                  ? PRICING_LEAD_COPY.nameTitle
                                   : PRICING_LEAD_COPY.phoneTitle}
                             </div>
                           </div>
@@ -3878,7 +3908,7 @@ export function ImagePreviewExperience(props: {
                               className="text-[var(--sif-lead-gen-muted)]"
                               style={{ fontSize: centeredPricingMetaSize, fontFamily: theme.fontFamily }}
                             >
-                              {PRICING_LEAD_MODAL.nameDescription}
+                              {PRICING_LEAD_COPY.nameDescription}
                             </div>
                           ) : (
                             <div
@@ -3940,7 +3970,7 @@ export function ImagePreviewExperience(props: {
                                   autoFocus
                                   value={centeredPricingName}
                                   onChange={(e) => setCenteredPricingName(e.target.value)}
-                                  placeholder={PRICING_LEAD_MODAL.namePlaceholder}
+                                  placeholder={PRICING_LEAD_COPY.namePlaceholder}
                                   autoComplete="name"
                                   className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
                                   style={{
@@ -3968,7 +3998,7 @@ export function ImagePreviewExperience(props: {
                                   fontFamily: theme.fontFamily,
                                 }}
                               >
-                                {PRICING_LEAD_MODAL.nameCtaLabel}
+                                {PRICING_LEAD_COPY.nameCtaLabel}
                               </Button>
                             </div>
                           ) : (
@@ -4034,8 +4064,8 @@ export function ImagePreviewExperience(props: {
                                 {centeredPricingStep === "email"
                                   ? PRICING_LEAD_COPY.finePrint
                                   : centeredPricingStep === "name"
-                                    ? PRICING_LEAD_MODAL.nameFinePrint
-                                    : PRICING_LEAD_MODAL.phoneFinePrint}
+                                    ? PRICING_LEAD_COPY.nameFinePrint
+                                    : PRICING_LEAD_COPY.phoneFinePrint}
                               </span>
                               {centeredPricingStep === "phone" ? (
                                 <a
@@ -4062,7 +4092,7 @@ export function ImagePreviewExperience(props: {
                 <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-4 sm:right-4 sm:bottom-4">
                   {overlayPricingExpanded && (!leadGateEnabled || leadCaptured) && hero ? (
                     <div
-                      className="w-full rounded-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-md"
+                      className="ml-auto w-full rounded-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-md sm:w-[min(32rem,calc(100%-0.5rem))]"
                       style={{
                         // Keep glass color consistent with the pill.
                         backgroundColor: singleModePricingPillBg,
@@ -4149,7 +4179,6 @@ export function ImagePreviewExperience(props: {
                                 type="button"
                                 onClick={() => {
                                   onKeepDesigning();
-                                  setOverlayPricingExpanded(false);
                                 }}
                                 className="h-9 w-full rounded-full border border-white/15 bg-white/5 px-3 text-[11px] font-semibold text-white/90 hover:bg-white/10"
                               >

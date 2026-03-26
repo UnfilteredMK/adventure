@@ -62,7 +62,21 @@ export function buildStepJoggerSteps(args: {
 
   if (!steps?.length) return [];
   const indexed = steps.map((step, index) => ({ step, index }));
-  const withoutRefinementUpload = indexed.filter(
+  const withoutLeadCapture = indexed.filter(({ step }) => {
+    const stepId = String((step as any)?.id || "").toLowerCase();
+    const stepType = String((step as any)?.type || "").toLowerCase();
+    const componentType = String((step as any)?.componentType || "").toLowerCase();
+    if (stepType === "lead_capture" || componentType === "lead_capture") return false;
+    if (
+      stepId === "step-lead-capture" ||
+      stepId === "step-lead-name" ||
+      stepId === "step-lead-phone"
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const withoutRefinementUpload = withoutLeadCapture.filter(
     ({ step }) => String((step as any)?.id || "") !== refinementUploadStepId
   );
   const withoutBudgetUploadWhenLeadCaptured =
