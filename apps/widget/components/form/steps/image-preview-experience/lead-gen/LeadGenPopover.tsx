@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -245,18 +244,27 @@ export function LeadGenPopover({
 
   useEffect(() => {
     if (!open) return;
-    setError(null);
-    setStep("email");
-    const prefill = loadPrefill(sessionId);
-    prefillRef.current = prefill;
-    setEmail(prefill.email);
-    setPhone(prefill.phone ? formatPhoneInput(prefill.phone).display : "");
-    emailRef.current = prefill.email;
-    partialSubmittedRef.current = false;
-    fullSubmittedRef.current = false;
-    silentInFlightRef.current = false;
-    beaconSentRef.current = false;
-    upsertLeadGate(sessionId, gateContext, { shownAt: Date.now() });
+    // Defer until after Radix finishes Popover/Presence/FocusScope mount — syncing state in the same
+    // tick as `onOpenChange(true)` can thrash compose-refs and hit "Maximum update depth exceeded".
+    let alive = true;
+    queueMicrotask(() => {
+      if (!alive) return;
+      setError(null);
+      setStep("email");
+      const prefill = loadPrefill(sessionId);
+      prefillRef.current = prefill;
+      setEmail(prefill.email);
+      setPhone(prefill.phone ? formatPhoneInput(prefill.phone).display : "");
+      emailRef.current = prefill.email;
+      partialSubmittedRef.current = false;
+      fullSubmittedRef.current = false;
+      silentInFlightRef.current = false;
+      beaconSentRef.current = false;
+      upsertLeadGate(sessionId, gateContext, { shownAt: Date.now() });
+    });
+    return () => {
+      alive = false;
+    };
   }, [gateContext, open, sessionId]);
 
   const submitPartialLeadSilently = useCallback(
@@ -695,53 +703,52 @@ export function LeadGenPopover({
     };
   }, [enableExitIntentSubmit, open, sendBeaconPartial, submitPartialLeadSilently]);
 
+  /** New object identity every render makes Radix reposition/focus-scope thrash (can hit max update depth). */
+  const popoverSurfaceStyle = useMemo((): React.CSSProperties => {
+    return {
+      ...(contentStyle || {}),
+      backgroundColor: popBg as any,
+      borderColor: popBorder,
+      borderRadius: `${popRadiusPx}px`,
+      ...(isOverlay
+        ? {
+            backdropFilter: "blur(20px) saturate(1.15)",
+            WebkitBackdropFilter: "blur(20px) saturate(1.15)",
+          }
+        : {}),
+    };
+  }, [contentStyle, popBg, popBorder, popRadiusPx, isOverlay]);
+
+  const handlePopoverOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        void submitPartialLeadSilently("dismiss");
+        upsertLeadGate(sessionId, gateContext, { dismissedAt: Date.now() });
+      }
+      onOpenChange(next);
+    },
+    [gateContext, onOpenChange, sessionId, submitPartialLeadSilently]
+  );
+
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          // Keep dismissal side effects local, but avoid re-entering close logic
-          // from multiple close paths (escape/click-outside/controlled state).
-          void submitPartialLeadSilently("dismiss");
-          upsertLeadGate(sessionId, gateContext, { dismissedAt: Date.now() });
-        }
-        onOpenChange(next);
-      }}
-    >
+    <Popover open={open} onOpenChange={handlePopoverOpenChange} modal={false}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
 	      <PopoverContent
 	        align={align}
 	        side={side}
 	        sideOffset={sideOffset}
 	        collisionPadding={12}
-	        sticky="always"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
         className={cn(
             "relative max-w-[92vw] overflow-visible rounded-2xl shadow-xl",
-            isOverlay ? "w-[22rem] p-2.5" : "w-80 p-3"
+            isOverlay ? "w-[22rem] p-2.5" : "w-80 p-3",
+            // Default shadcn Popover animates zoom — fights Floating UI + FocusScope in tight layouts.
+            isOverlay &&
+              "data-[state=open]:animate-none data-[state=closed]:animate-none data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
           )}
-	        style={{
-              ...(contentStyle || {}),
-	          backgroundColor: popBg as any,
-	          borderColor: popBorder,
-	          borderRadius: `${popRadiusPx}px`,
-              ...(isOverlay
-                ? {
-                    backdropFilter: "blur(20px) saturate(1.15)",
-                    WebkitBackdropFilter: "blur(20px) saturate(1.15)",
-                  }
-                : {}),
-	        }}
+	        style={popoverSurfaceStyle}
 	      >
-        <PopoverPrimitive.Arrow
-          className="stroke-[color:var(--sif-pop-border)] fill-[color:var(--sif-pop-bg)]"
-          style={
-            {
-              ["--sif-pop-bg" as any]: popBg,
-              ["--sif-pop-border" as any]: popBorder,
-            } as React.CSSProperties
-          }
-        />
-
           {!isOverlay ? (
             <div
               className="pointer-events-none absolute inset-0"

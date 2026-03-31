@@ -11,11 +11,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
 from programs.common.visual_text_safety import sanitize_visual_context_text
-from programs.image_generator.prompt_builder import build_image_prompt_text, extract_negative_prompt, extract_reference_images
+from programs.image_generator.request_context import (
+    extract_negative_prompt,
+    extract_reference_images,
+    is_anchor_edit_for_prompt,
+    provider_image_inputs,
+)
+from programs.image_generator.request_normalizer import resolve_image_request
 
 
 _VERBOSE_LOG_ENV = "IMAGE_LOG_DETAILED_PAYLOADS"
@@ -49,6 +56,48 @@ def _log_verbose(label: str, data: Any) -> None:
         print(f"[image_generator] {label}:\n{text}", flush=True)
     except Exception:
         print(f"[image_generator] {label}: (unable to render payload)", flush=True)
+
+
+def _truncate_text(value: Any, *, limit: int = 240) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _payload_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    step_data = payload.get("stepDataSoFar") if isinstance(payload.get("stepDataSoFar"), dict) else {}
+    answered = payload.get("answeredQA") if isinstance(payload.get("answeredQA"), list) else []
+    refs = payload.get("referenceImages") if isinstance(payload.get("referenceImages"), list) else []
+    routing = payload.get("routingPolicy") if isinstance(payload.get("routingPolicy"), dict) else {}
+    return {
+        "instanceId": _truncate_text(payload.get("instanceId"), limit=80) or None,
+        "sessionId": _truncate_text(payload.get("sessionId") or ((payload.get("session") or {}).get("sessionId") if isinstance(payload.get("session"), dict) else ""), limit=80) or None,
+        "useCase": _truncate_text(payload.get("useCase"), limit=40) or None,
+        "modelId": _truncate_text(payload.get("modelId"), limit=120) or None,
+        "generationIntent": _truncate_text(payload.get("generationIntent"), limit=40) or None,
+        "variationMode": _truncate_text(payload.get("variationMode"), limit=40) or None,
+        "numOutputs": payload.get("numOutputs"),
+        "referenceImagesCount": len(refs),
+        "hasSceneImage": bool(str(payload.get("sceneImage") or "").strip()),
+        "hasProductImage": bool(str(payload.get("productImage") or "").strip()),
+        "hasUserImage": bool(str(payload.get("userImage") or "").strip()),
+        "stepDataKeys": sorted(list(step_data.keys()))[:20],
+        "answeredQACount": len(answered),
+        "routingPolicy": {
+            "provider": routing.get("provider"),
+            "priorities": routing.get("priorities"),
+            "traits": routing.get("traits"),
+            "requiredTags": routing.get("requiredTags"),
+        } if routing else None,
+    }
+
+
+def _prompt_inputs_summary(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: (_truncate_text(value, limit=320) if isinstance(value, str) else value)
+        for key, value in inputs.items()
+    }
 
 
 def _best_effort_parse_json(text: str) -> Any:
@@ -109,8 +158,78 @@ def _extract_provider_error(provider_resp: Any) -> str:
     return ""
 
 
+def _as_int(v: Any) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        return int(v)
+    except Exception:
+        return None
+
+
+def _as_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _as_bool(v: Any) -> Optional[bool]:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in {"1", "true", "yes", "on"}:
+            return True
+        if s in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+def _is_placeholder_service_name(name: str) -> bool:
+    t = (name or "").strip().lower()
+    return not t or t == "service"
+
+
+def _infer_service_label_from_summary(summary: str) -> str:
+    """When clients send serviceSummary but omit service.name, derive a short domain label for DSPy."""
+    text = str(summary or "").strip()
+    if not text:
+        return ""
+    lower = text.lower()
+    for sep in (" is a ", " is an ", " involves ", " means ", " refers to ", " includes "):
+        pos = lower.find(sep)
+        if 4 <= pos <= 120:
+            return sanitize_visual_context_text(text[:pos].strip(), max_len=160)
+    first_sentence = text.split(".")[0].strip()
+    return sanitize_visual_context_text(first_sentence, max_len=160)
+
+
+def _compact_dict_for_prefs(d: Dict[str, Any]) -> str:
+    """Shorten nested dicts (e.g. pricing blobs) so Groq/DSPy requests stay under context limits."""
+    if not isinstance(d, dict) or not d:
+        return ""
+    if "totalMin" in d and "totalMax" in d:
+        try:
+            lo = int(float(d.get("totalMin")))
+            hi = int(float(d.get("totalMax")))
+            cur = str(d.get("currency") or "USD").strip() or "USD"
+            conf = str(d.get("confidence") or "").strip()
+            tail = f", confidence {conf}" if conf else ""
+            return f"pricing ~${lo:,}–${hi:,} {cur}{tail}"
+        except Exception:
+            pass
+    try:
+        blob = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        blob = str(d)
+    return sanitize_visual_context_text(blob, max_len=360)
+
+
 def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract structured inputs for the DSPy ImagePromptModule from the raw payload."""
+    """Extract structured inputs shared across the active DSPy prompt modules."""
     import re
 
     step_data = payload.get("stepDataSoFar") or payload.get("step_data_so_far") or {}
@@ -136,25 +255,35 @@ def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     ctx = payload.get("instanceContext") or payload.get("instance_context") or {}
     if not isinstance(ctx, dict):
         ctx = {}
-    svc = ctx.get("service") or {}
-    service_name = sanitize_visual_context_text((svc.get("name") or "") if isinstance(svc, dict) else "", max_len=160)
+    svc_raw = ctx.get("service")
+    svc = svc_raw if isinstance(svc_raw, dict) else {}
+    service_name = sanitize_visual_context_text(str(svc.get("name") or "").strip(), max_len=160)
     service_summary = sanitize_visual_context_text(ctx.get("serviceSummary") or ctx.get("service_summary") or "", max_len=500)
+    if _is_placeholder_service_name(service_name) and service_summary:
+        inferred = _infer_service_label_from_summary(service_summary)
+        if inferred:
+            service_name = inferred
 
     use_case = str(payload.get("useCase") or payload.get("use_case") or "scene").strip().lower()
-    # Use normalized extraction so edit-mode follows all usable refs
-    # (explicit refs + scene/product + context-mined URLs).
-    reference_images, _, _ = extract_reference_images(payload)
-    is_edit = len(reference_images) > 0
+    is_edit = is_anchor_edit_for_prompt(payload)
 
     prefs_parts = []
     skip_keys = {"step-service-primary", "service_primary", "collect_context"}
     for k, v in step_data.items():
-        if k in skip_keys:
+        if k in skip_keys or str(k).startswith("__"):
             continue
-        val = clean(v)
+        if isinstance(v, dict):
+            val = _compact_dict_for_prefs(v)
+        elif isinstance(v, str) and v.strip().lower().startswith("data:"):
+            val = "[inline image]"
+        else:
+            val = clean(v)
         if not val:
             continue
-        prefs_parts.append(f"{k}: {val}")
+        line = f"{k}: {val}"
+        if len(line) > 420:
+            line = f"{line[:417]}..."
+        prefs_parts.append(line)
 
     qa = payload.get("answeredQA") or payload.get("answered_qa") or []
     if isinstance(qa, list):
@@ -181,12 +310,16 @@ def _extract_dspy_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     location_state = sanitize_visual_context_text(step_data.get("location_state") or step_data.get("locationState") or "", max_len=80)
     location = f"{location_city}, {location_state}".strip(", ") if location_city or location_state else ""
 
+    pref_text = "\n".join(prefs_parts[:18])
+    if len(pref_text) > 5200:
+        pref_text = f"{pref_text[:5197]}..."
+
     return {
         "service_name": service_name or "Home improvement",
         "service_summary": service_summary,
         "use_case": use_case,
         "is_edit": is_edit,
-        "user_preferences": "\n".join(prefs_parts[:15]),
+        "user_preferences": pref_text,
         "style_tags": style_tags,
         "budget_level": budget,
         "location": location,
@@ -226,7 +359,7 @@ def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     if bool(inputs.get("is_edit")):
         if out["generation_intent"] == "initial":
             out["reference_adherence"] = (
-                "INITIAL LARGE OVERHAUL: The uploaded photo is the BEFORE state. Generate the fully-completed AFTER state. "
+                "INITIAL LARGE OVERHAUL: Treat the uploaded photo as the source space. Generate the fully completed result. "
                 "Preserve ONLY: room layout, camera angle, structural walls, perspective. REPLACE everything else the service touches — "
                 "all finishes, fixtures, materials, surfaces. Every service-touched element must look brand-new and professionally done. "
                 "Nothing old, worn, or original should remain in the renovated scope."
@@ -251,6 +384,106 @@ def _extract_scene_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         out["reference_adherence"] = ""
     return out
+
+
+def _use_fast_schnell_scene_prompt(payload: Dict[str, Any]) -> bool:
+    """Skip DSPy LLM for Schnell text-to-scene when latency matters (see IMAGE_SCENE_USE_DSPY_PROMPT to opt in)."""
+    if str(os.getenv("IMAGE_SCENE_USE_DSPY_PROMPT") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    mid = str(payload.get("modelId") or payload.get("model_id") or "").strip().lower()
+    if "flux-schnell" not in mid:
+        return False
+    raw_uc = str(payload.get("useCase") or payload.get("use_case") or "scene").strip().lower().replace("_", "-")
+    if raw_uc != "scene":
+        return False
+    if is_anchor_edit_for_prompt(payload):
+        return False
+    gi = str(payload.get("generationIntent") or payload.get("generation_intent") or "").strip().lower().replace("-", "_")
+    if gi and gi not in ("initial", "budget_tier_shift"):
+        return False
+    return True
+
+
+def _build_fast_schnell_scene_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dict[str, Any]]:
+    """Deterministic photorealistic prompt for Flux Schnell (no LLM round-trip)."""
+    from programs.image_generator.helpers.prompt_templates import get_negative_prompt
+    from programs.image_generator.schemas.image_prompt import ImagePromptSpec
+
+    try:
+        inputs = _extract_scene_inputs(payload)
+    except Exception:
+        return None
+
+    service_name = str(inputs.get("service_name") or "").strip() or "home improvement"
+    style_tags = str(inputs.get("style_tags") or "").strip()
+    prefs = str(inputs.get("user_preferences") or "").strip()
+    budget = str(inputs.get("budget_level") or "").strip()
+    location = str(inputs.get("location") or "").strip()
+    gen_intent = str(inputs.get("generation_intent") or "initial")
+
+    def _humanize_styles(s: str) -> str:
+        parts = [p.strip().replace("_", " ") for p in re.split(r"[,]", s) if p.strip()]
+        return ", ".join(parts[:14])
+
+    style_phrase = _humanize_styles(style_tags)
+    detail_bits: list[str] = []
+    if prefs:
+        detail_bits.append(sanitize_visual_context_text(prefs, max_len=900))
+    if budget:
+        detail_bits.append(f"Budget around {budget} USD.")
+    if location:
+        detail_bits.append(f"Region {location}.")
+    details = sanitize_visual_context_text(" ".join(detail_bits), max_len=1150)
+
+    if gen_intent == "budget_tier_shift":
+        lead = (
+            f"Photorealistic photograph of a visibly upgraded {service_name} outcome with higher-end finishes "
+            "and fixtures than a basic remodel."
+        )
+    else:
+        lead = (
+            f"Photorealistic editorial photograph of a completed professional {service_name} outcome, "
+            "believable finished installation."
+        )
+
+    tail = (
+        " Natural soft lighting, realistic materials, sharp focus, interior photography, "
+        "no people, no text overlays, no logos."
+    )
+    mid = f" {style_phrase} aesthetic." if style_phrase else ""
+    detail_clause = f" {details}" if details else ""
+
+    prompt_text = sanitize_visual_context_text(f"{lead}{mid}{detail_clause}{tail}", max_len=1500)
+    if len(prompt_text) < 24:
+        prompt_text = sanitize_visual_context_text(
+            f"Photorealistic photograph of a finished {service_name} result.{tail}", max_len=1500
+        )
+
+    neg_text = get_negative_prompt("black-forest-labs/flux-schnell")
+    spec_obj = {
+        "prompt": prompt_text,
+        "negativePrompt": neg_text,
+        "styleTags": [t.strip() for t in style_phrase.split(",") if t.strip()],
+        "isEdit": False,
+        "metadata": {"useCase": "scene", "dspy": False, "fastPath": "schnell_scene", "isEdit": False},
+    }
+    try:
+        spec = ImagePromptSpec.model_validate(spec_obj).model_dump(by_alias=True)
+    except Exception:
+        return None
+
+    print(
+        "[image_generator] prompt_built",
+        {
+            "module": "fast_schnell_scene",
+            "useCase": "scene",
+            "isEdit": False,
+            "promptPreview": _truncate_text(prompt_text, limit=220),
+            "negativePromptPreview": _truncate_text(neg_text, limit=220),
+        },
+        flush=True,
+    )
+    return {"ok": True, "requestId": request_id, "prompt": spec}
 
 
 def _extract_scene_placement_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -442,33 +675,10 @@ def _extract_tryon_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_deterministic_prompt(payload: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    """Deterministic prompt construction (no LLM call)."""
-    try:
-        from programs.image_generator.signatures.image_prompt import ImagePromptSpec
-    except Exception as e:
-        return {
-            "ok": False,
-            "error": f"Image prompt schema unavailable: {type(e).__name__}: {e}",
-            "requestId": request_id,
-        }
-    try:
-        obj = build_image_prompt_text(payload)
-        spec = ImagePromptSpec.model_validate(obj).model_dump(by_alias=True)
-    except Exception as e:
-        return {
-            "ok": False,
-            "error": f"Failed to build image prompt: {type(e).__name__}: {e}",
-            "requestId": request_id,
-        }
-    return {"ok": True, "requestId": request_id, "prompt": spec}
-
-
 def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dict[str, Any]]:
     """
-    Attempt DSPy-based prompt generation.  Returns None on any failure
-    so the caller can fall back to the deterministic builder.
-    Dispatches to use-case-specific module: scene, scene-placement, tryon.
+    Attempt DSPy-based prompt generation.
+    Returns None when DSPy is unavailable or fails to produce a valid prompt spec.
     """
     try:
         from programs.form_pipeline.orchestrator import _configure_dspy as _configure_dspy
@@ -482,12 +692,12 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
 
     try:
         import dspy
-        from programs.image_generator.image_prompt_library import get_negative_prompt
-        from programs.image_generator.scene_placement_prompt_module import ScenePlacementPromptModule
-        from programs.image_generator.scene_refinement_prompt_module import SceneRefinementPromptModule
-        from programs.image_generator.scene_prompt_module import ScenePromptModule
-        from programs.image_generator.signatures.image_prompt import ImagePromptSpec
-        from programs.image_generator.tryon_prompt_module import TryonPromptModule
+        from programs.image_generator.dspy.scene_placement_prompt import ScenePlacementPromptModule
+        from programs.image_generator.dspy.scene_prompt import ScenePromptModule
+        from programs.image_generator.dspy.scene_refinement_prompt import SceneRefinementPromptModule
+        from programs.image_generator.dspy.tryon_prompt import TryonPromptModule
+        from programs.image_generator.helpers.prompt_templates import get_negative_prompt
+        from programs.image_generator.schemas.image_prompt import ImagePromptSpec
     except Exception:
         return None
 
@@ -506,8 +716,7 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         _configure_dspy(lm)
 
     use_case = _normalize_use_case_for_dispatch(payload)
-    reference_images, _, _ = extract_reference_images(payload)
-    is_edit = len(reference_images) > 0
+    is_edit = is_anchor_edit_for_prompt(payload)
 
     pred = None
     used_module_name = ""
@@ -517,6 +726,11 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         if use_case == "scene":
             inputs = _extract_scene_inputs(payload)
             module = ScenePromptModule()
+            print(
+                "[image_generator] dspy_prompt_inputs",
+                {"useCase": use_case, "module": "scene", "inputs": _prompt_inputs_summary(inputs)},
+                flush=True,
+            )
             pred = module(**inputs)
             used_module_name = "scene"
             style_tags_str = inputs.get("style_tags", "")
@@ -524,6 +738,11 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         elif use_case == "scene-placement":
             inputs = _extract_scene_placement_inputs(payload)
             module = ScenePlacementPromptModule()
+            print(
+                "[image_generator] dspy_prompt_inputs",
+                {"useCase": use_case, "module": "scene-placement", "inputs": _prompt_inputs_summary(inputs)},
+                flush=True,
+            )
             pred = module(**inputs)
             used_module_name = "scene-placement"
             style_tags_str = inputs.get("style_tags", "")
@@ -531,6 +750,11 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         elif use_case == "scene-refinement":
             inputs = _extract_scene_refinement_inputs(payload)
             module = SceneRefinementPromptModule()
+            print(
+                "[image_generator] dspy_prompt_inputs",
+                {"useCase": use_case, "module": "scene-refinement", "inputs": _prompt_inputs_summary(inputs)},
+                flush=True,
+            )
             pred = module(**inputs)
             used_module_name = "scene-refinement"
             style_tags_str = inputs.get("style_tags", "")
@@ -538,6 +762,11 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
         elif use_case == "tryon":
             inputs = _extract_tryon_inputs(payload)
             module = TryonPromptModule()
+            print(
+                "[image_generator] dspy_prompt_inputs",
+                {"useCase": use_case, "module": "tryon", "inputs": _prompt_inputs_summary(inputs)},
+                flush=True,
+            )
             pred = module(**inputs)
             used_module_name = "tryon"
             style_tags_str = inputs.get("style_direction", "")
@@ -575,28 +804,148 @@ def _build_dspy_prompt(payload: Dict[str, Any], request_id: str) -> Optional[Dic
     except Exception:
         return None
 
-    print(f"[image_generator] prompt built via DSPy ({used_module_name})", flush=True)
+    print(
+        "[image_generator] prompt_built",
+        {
+            "module": used_module_name,
+            "useCase": use_case,
+            "isEdit": is_edit,
+            "promptPreview": _truncate_text(prompt_text, limit=220),
+            "negativePromptPreview": _truncate_text(neg_text, limit=220),
+        },
+        flush=True,
+    )
     return {"ok": True, "requestId": request_id, "prompt": spec}
 
 
 def build_image_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Build an image prompt spec.
-
-    Default: try DSPy first for higher-quality prompts, fall back to deterministic.
-    Set IMAGE_PROMPT_MODE=deterministic to skip DSPy entirely.
+    Build an image prompt spec: fast deterministic path for Schnell text-to-scene, else DSPy.
     """
     request_id = f"image_prompt_{int(time.time() * 1000)}"
+    if _use_fast_schnell_scene_prompt(payload):
+        fast = _build_fast_schnell_scene_prompt(payload, request_id)
+        if fast and fast.get("ok"):
+            return fast
+    dspy_result = _build_dspy_prompt(payload, request_id)
+    if dspy_result and dspy_result.get("ok"):
+        return dspy_result
+    return {
+        "ok": False,
+        "error": "dspy_prompt_unavailable",
+        "message": "DSPy prompt generation is unavailable or failed for this request.",
+        "requestId": request_id,
+    }
 
-    mode = str(os.getenv("IMAGE_PROMPT_MODE") or "dspy").strip().lower()
 
-    if mode == "dspy":
-        dspy_result = _build_dspy_prompt(payload, request_id)
-        if dspy_result and dspy_result.get("ok"):
-            return dspy_result
-        print("[image_generator] DSPy prompt failed or unavailable, falling back to deterministic", flush=True)
+def _normalize_generation_request(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return resolve_image_request(payload)
 
-    return _build_deterministic_prompt(payload, request_id)
+
+def _resolve_prompt_phase(payload: Dict[str, Any]) -> tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+    prompt_text = str(payload.get("prompt") or "").strip()
+    negative_prompt = extract_negative_prompt(payload) or None
+    if prompt_text:
+        print(
+            "[image_generator] prompt_phase",
+            {
+                "source": "request",
+                "promptPreview": _truncate_text(prompt_text, limit=220),
+                "negativePromptPreview": _truncate_text(negative_prompt, limit=220) or None,
+            },
+            flush=True,
+        )
+        return prompt_text, negative_prompt, None
+
+    prompt_result = build_image_prompt(payload)
+    if not isinstance(prompt_result, dict) or not prompt_result.get("ok"):
+        print(
+            "[image_generator] prompt_phase",
+            {
+                "source": "dspy",
+                "ok": False,
+                "error": (prompt_result or {}).get("error") if isinstance(prompt_result, dict) else "invalid_prompt_result",
+                "message": (prompt_result or {}).get("message") if isinstance(prompt_result, dict) else None,
+            },
+            flush=True,
+        )
+        return None, None, prompt_result if isinstance(prompt_result, dict) else {
+            "ok": False,
+            "error": "image_prompt_failed",
+            "message": "Prompt builder returned an invalid response.",
+        }
+
+    prompt_obj = prompt_result.get("prompt") if isinstance(prompt_result.get("prompt"), dict) else {}
+    _log_verbose("generated_prompt_spec", prompt_obj)
+    prompt_text = ((prompt_obj.get("prompt") if isinstance(prompt_obj, dict) else "") or "").strip()
+
+    if isinstance(prompt_obj, dict) and isinstance(prompt_obj.get("negativePrompt"), str):
+        negative_prompt = str(prompt_obj.get("negativePrompt") or "").strip() or None
+    if not negative_prompt:
+        negative_prompt = extract_negative_prompt(payload) or None
+    meta = prompt_obj.get("metadata") if isinstance(prompt_obj.get("metadata"), dict) else {}
+    prompt_source = (
+        "fast_schnell_scene"
+        if meta.get("fastPath") == "schnell_scene"
+        else "dspy"
+    )
+    print(
+        "[image_generator] prompt_phase",
+        {
+            "source": prompt_source,
+            "ok": True,
+            "promptPreview": _truncate_text(prompt_text, limit=220),
+            "negativePromptPreview": _truncate_text(negative_prompt, limit=220) or None,
+        },
+        flush=True,
+    )
+    return prompt_text, negative_prompt, None
+
+
+def _execute_provider_phase(
+    payload: Dict[str, Any],
+    *,
+    prompt_text: str,
+    negative_prompt: Optional[str],
+) -> Dict[str, Any]:
+    from programs.image_generator.providers.image_generation import generate_images
+
+    num_outputs = (
+        payload.get("numOutputs")
+        or payload.get("num_outputs")
+        or payload.get("gallery_max_images")
+        or payload.get("galleryMaxImages")
+        or 1
+    )
+    try:
+        n = int(num_outputs)
+    except Exception:
+        n = 1
+
+    reference_images, scene_image, product_image = provider_image_inputs(payload)
+    reference_images_list: Optional[list[str]] = reference_images if reference_images else None
+
+    return generate_images(
+        prompt=prompt_text,
+        num_outputs=n,
+        output_format=str(payload.get("outputFormat") or payload.get("output_format") or "png"),
+        model_id=str(payload.get("modelId") or payload.get("model_id") or "").strip() or None,
+        use_case=str(payload.get("useCase") or "").strip() or None,
+        negative_prompt=negative_prompt,
+        aspect_ratio=str(payload.get("aspectRatio") or payload.get("aspect_ratio") or "").strip() or None,
+        width=_as_int(payload.get("width")),
+        height=_as_int(payload.get("height")),
+        num_inference_steps=_as_int(payload.get("numInferenceSteps") or payload.get("num_inference_steps")),
+        guidance_scale=_as_float(payload.get("guidanceScale") or payload.get("guidance_scale")),
+        prompt_strength=_as_float(payload.get("promptStrength") or payload.get("prompt_strength") or payload.get("strength")),
+        image_prompt_strength=_as_float(payload.get("imagePromptStrength") or payload.get("image_prompt_strength")),
+        safety_tolerance=_as_int(payload.get("safetyTolerance") or payload.get("safety_tolerance")),
+        prompt_upsampling=_as_bool(payload.get("promptUpsampling") or payload.get("prompt_upsampling")),
+        go_fast=_as_bool(payload.get("goFast") or payload.get("go_fast")),
+        reference_images=reference_images_list,
+        scene_image=scene_image,
+        product_image=product_image,
+    )
 
 
 def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -607,7 +956,17 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
     - Return `{ images: string[], predictionId }` for widget compatibility
     """
     request_id = f"image_{int(time.time() * 1000)}"
+    payload = _normalize_generation_request(payload)
     variation_mode = str(payload.get("variationMode") or payload.get("variation_mode") or "").strip().lower()
+
+    print(
+        "[image_generator] request_normalized",
+        {
+            "requestId": request_id,
+            "summary": _payload_summary(payload),
+        },
+        flush=True,
+    )
 
     if variation_mode == "price_ladder_9":
         from programs.pricing.price_ladder_gallery import generate_price_ladder_gallery
@@ -627,6 +986,7 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
         print(
             "[image_generator] generate_image request",
             {
+                "requestId": request_id,
                 "instanceId": str(instance_id or "")[:80] or None,
                 "sessionId": str(session_id or "")[:80] or None,
                 "useCase": str(use_case or "")[:40] or None,
@@ -639,132 +999,18 @@ def generate_image(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    prompt_text = str(payload.get("prompt") or "").strip()
-    negative_prompt = extract_negative_prompt(payload) or None
-    if prompt_text:
-        print("[image_generator] using explicit prompt from request", flush=True)
-    else:
-        prompt_result = build_image_prompt(payload)
-        if not isinstance(prompt_result, dict) or not prompt_result.get("ok"):
-            return prompt_result
-        prompt_obj = prompt_result.get("prompt") if isinstance(prompt_result.get("prompt"), dict) else {}
-        _log_verbose("generated_prompt_spec", prompt_obj)
-        prompt_text = ((prompt_obj.get("prompt") if isinstance(prompt_obj, dict) else "") or "").strip()
-
-        # Prefer prompt-spec negativePrompt, fall back to payload negativePrompt.
-        if isinstance(prompt_obj, dict) and isinstance(prompt_obj.get("negativePrompt"), str):
-            negative_prompt = str(prompt_obj.get("negativePrompt") or "").strip() or None
-        if not negative_prompt:
-            negative_prompt = extract_negative_prompt(payload) or None
-
-    # Wire through common widget fields
-    def _as_int(v: Any) -> Optional[int]:
-        try:
-            if v is None:
-                return None
-            n = int(v)
-            return n
-        except Exception:
-            return None
-
-    def _as_float(v: Any) -> Optional[float]:
-        try:
-            if v is None:
-                return None
-            return float(v)
-        except Exception:
-            return None
-
-    def _as_bool(v: Any) -> Optional[bool]:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, str):
-            s = v.strip().lower()
-            if s in {"1", "true", "yes", "on"}:
-                return True
-            if s in {"0", "false", "no", "off"}:
-                return False
-        return None
-
-    num_outputs = (
-        payload.get("numOutputs")
-        or payload.get("num_outputs")
-        or payload.get("gallery_max_images")
-        or payload.get("galleryMaxImages")
-        or 1
-    )
-    try:
-        n = int(num_outputs)
-    except Exception:
-        n = 1
-
-    model_id = payload.get("modelId") or payload.get("model_id") or None
-    if not isinstance(model_id, str):
-        model_id = None
-
-    reference_images, scene_image, product_image = extract_reference_images(payload)
-    reference_images_list: Optional[list[str]] = reference_images if reference_images else None
-
-    width = _as_int(payload.get("width"))
-    height = _as_int(payload.get("height"))
-    aspect_ratio = (
-        str(payload.get("aspectRatio") or payload.get("aspect_ratio") or "").strip() or None
-    )
-    num_inference_steps = _as_int(
-        payload.get("numInferenceSteps")
-        or payload.get("num_inference_steps")
-    )
-    guidance_scale = _as_float(
-        payload.get("guidanceScale")
-        or payload.get("guidance_scale")
-    )
-    prompt_strength = _as_float(
-        payload.get("promptStrength")
-        or payload.get("prompt_strength")
-        or payload.get("strength")
-    )
-    image_prompt_strength = _as_float(
-        payload.get("imagePromptStrength")
-        or payload.get("image_prompt_strength")
-    )
-    go_fast = _as_bool(
-        payload.get("goFast")
-        or payload.get("go_fast")
-    )
-    safety_tolerance = _as_int(
-        payload.get("safetyTolerance")
-        or payload.get("safety_tolerance")
-    )
-    prompt_upsampling = _as_bool(
-        payload.get("promptUpsampling")
-        or payload.get("prompt_upsampling")
-    )
-
-    # Provider call
-    from programs.image_generator.providers.image_generation import generate_images  # local import (keeps module light)
+    prompt_text, negative_prompt, prompt_error = _resolve_prompt_phase(payload)
+    if prompt_error:
+        if "requestId" not in prompt_error:
+            prompt_error["requestId"] = request_id
+        return prompt_error
 
     provider_name = "replicate"
     try:
-        provider_resp = generate_images(
-            prompt=prompt_text,
-            num_outputs=n,
-            output_format=str(payload.get("outputFormat") or payload.get("output_format") or "url"),
-            model_id=model_id,
-            use_case=str(payload.get("useCase") or "").strip() or None,
+        provider_resp = _execute_provider_phase(
+            payload,
+            prompt_text=prompt_text,
             negative_prompt=negative_prompt,
-            aspect_ratio=aspect_ratio,
-            width=width,
-            height=height,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            prompt_strength=prompt_strength,
-            image_prompt_strength=image_prompt_strength,
-            safety_tolerance=safety_tolerance,
-            prompt_upsampling=prompt_upsampling,
-            go_fast=go_fast,
-            reference_images=reference_images_list,
-            scene_image=scene_image,
-            product_image=product_image,
         )
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"

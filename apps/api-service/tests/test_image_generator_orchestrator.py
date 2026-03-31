@@ -115,6 +115,20 @@ def test_scene_inputs_budget_tier_shift_uses_broad_regeneration_adherence() -> N
     assert "tiny accessories" in inputs["reference_adherence"].lower()
 
 
+def test_dspy_inputs_replace_placeholder_service_name_with_inferred_label() -> None:
+    out = orchestrator._extract_dspy_inputs(
+        {
+            "useCase": "scene",
+            "instanceContext": {
+                "service": {"name": "Service", "id": "00000000-0000-0000-0000-000000000001"},
+                "serviceSummary": "Bathroom remodeling is a service that includes new fixtures and tile.",
+            },
+        }
+    )
+    assert out["service_name"].lower() != "service"
+    assert "bathroom" in out["service_name"].lower()
+
+
 def test_scene_refinement_inputs_budget_tier_shift_expands_refinement_scope() -> None:
     inputs = orchestrator._extract_scene_refinement_inputs(
         {
@@ -130,3 +144,45 @@ def test_scene_refinement_inputs_budget_tier_shift_expands_refinement_scope() ->
 
     assert inputs["refinement_notes"].lower().startswith("budget tier shift requested.")
     assert "new budget tier" in inputs["reference_adherence"].lower()
+
+
+def test_fast_schnell_scene_prompt_builds_without_reference(monkeypatch) -> None:
+    monkeypatch.delenv("IMAGE_SCENE_USE_DSPY_PROMPT", raising=False)
+    payload = {
+        "useCase": "scene",
+        "modelId": "black-forest-labs/flux-schnell",
+        "generationIntent": "initial",
+        "instanceContext": {
+            "service": {"name": "Bathroom Remodeling"},
+            "serviceSummary": "Bathroom remodeling updates fixtures and finishes.",
+        },
+        "stepDataSoFar": {
+            "step-style-direction": "modern_minimal",
+            "step-budget-range": 25000,
+        },
+    }
+    assert orchestrator._use_fast_schnell_scene_prompt(payload) is True
+    out = orchestrator._build_fast_schnell_scene_prompt(payload, "req_test_fast")
+    assert out and out.get("ok") is True
+    spec = out.get("prompt") or {}
+    assert "bathroom" in str(spec.get("prompt") or "").lower()
+    assert spec.get("metadata", {}).get("fastPath") == "schnell_scene"
+
+
+def test_fast_schnell_scene_prompt_disabled_when_anchor_present(monkeypatch) -> None:
+    monkeypatch.delenv("IMAGE_SCENE_USE_DSPY_PROMPT", raising=False)
+    payload = {
+        "useCase": "scene",
+        "modelId": "black-forest-labs/flux-schnell",
+        "referenceImages": ["https://example.com/ref.png"],
+    }
+    assert orchestrator._use_fast_schnell_scene_prompt(payload) is False
+
+
+def test_fast_schnell_scene_prompt_respects_dspy_env(monkeypatch) -> None:
+    monkeypatch.setenv("IMAGE_SCENE_USE_DSPY_PROMPT", "1")
+    payload = {
+        "useCase": "scene",
+        "modelId": "black-forest-labs/flux-schnell",
+    }
+    assert orchestrator._use_fast_schnell_scene_prompt(payload) is False

@@ -13,8 +13,8 @@ from starlette.status import HTTP_400_BAD_REQUEST
 from api.request_adapter import to_next_steps_payload
 from api.utils import dedup_urls, normalize_output_urls
 from programs.common.visual_text_safety import sanitize_visual_context_text
-from programs.image_generator.model_selector import select_model, select_routing_policy
 from programs.image_generator.orchestrator import generate_image
+from programs.image_generator.request_normalizer import resolve_image_request
 
 
 def register(router: APIRouter, compat_router: APIRouter) -> None:
@@ -31,6 +31,33 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         """
         return generate_image(payload)
 
+    _ROUTER_REQUEST_FIELDS = (
+        "generationIntent",
+        "generationIndex",
+        "guidanceScale",
+        "height",
+        "imagePromptStrength",
+        "modelId",
+        "negativePrompt",
+        "numInferenceSteps",
+        "numOutputs",
+        "originalReferenceImage",
+        "outputFormat",
+        "previousPrompt",
+        "productImage",
+        "promptStrength",
+        "promptUpsampling",
+        "referenceImages",
+        "refinementNotes",
+        "safetyTolerance",
+        "sceneImage",
+        "selectedImage",
+        "userImage",
+        "useCase",
+        "variationMode",
+        "width",
+    )
+
     def _provider_from_prediction(pred: Any) -> str:
         if isinstance(pred, dict):
             provider = str(pred.get("provider") or "").strip().lower()
@@ -38,69 +65,89 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
                 return provider
         return "replicate"
 
-    def _has_explicit_value(payload: Dict[str, Any], *keys: str) -> bool:
-        for key in keys:
-            if key not in payload:
-                continue
-            value = payload.get(key)
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            if isinstance(value, (list, tuple, dict)) and len(value) == 0:
-                continue
-            return True
-        return False
+    def _extract_instance_id(payload: Dict[str, Any]) -> str:
+        if isinstance(payload.get("instanceId"), str):
+            return str(payload.get("instanceId") or "").strip()
+        if isinstance(payload.get("session"), dict):
+            return str((payload.get("session") or {}).get("instanceId") or "").strip()
+        return ""
 
-    def _apply_replicate_routing_defaults(
+    def _reject_client_prompt_fields(payload: Dict[str, Any]) -> Optional[JSONResponse]:
+        for k in ("prompt", "promptTemplate"):
+            if k in payload and payload.get(k) not in (None, ""):
+                return JSONResponse(
+                    status_code=HTTP_400_BAD_REQUEST,
+                    content={
+                        "ok": False,
+                        "error": "unsupported_field",
+                        "message": f"Field '{k}' is not supported; prompts are generated server-side.",
+                    },
+                )
+        return None
+
+    def _copy_router_fields(adapted: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        for key in _ROUTER_REQUEST_FIELDS:
+            alias = f"{key[0].lower()}{key[1:]}" if key and key[0].isupper() else key
+            snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).lower()
+            if key in payload and payload.get(key) is not None:
+                adapted[key] = payload.get(key)
+            elif alias in payload and payload.get(alias) is not None:
+                adapted[key] = payload.get(alias)
+            elif snake in payload and payload.get(snake) is not None:
+                adapted[key] = payload.get(snake)
+
+    def _resolve_widget_request(
         *,
+        instance_id: str,
         payload: Dict[str, Any],
-        adapted: Dict[str, Any],
-        use_case: str,
-        num_input_images: int,
-        has_scene_image: bool = False,
-        has_product_image: bool = False,
-        has_user_image: bool = False,
-        is_edit: bool = False,
+        route_name: str = "image",
+        use_case: Optional[str] = None,
+        prompt_to_step_input: bool = False,
+        overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        recommendation = select_model(
-            use_case=use_case,
-            num_input_images=max(0, int(num_input_images or 0)),
-            has_scene_image=bool(has_scene_image),
-            has_product_image=bool(has_product_image),
-            has_user_image=bool(has_user_image),
+        _image_route_log(
+            "incoming",
+            {
+                "route": route_name,
+                "summary": _image_payload_summary(payload),
+                "rawKeys": sorted(list(payload.keys()))[:40],
+            },
+            force=True,
         )
-        routing_policy = select_routing_policy(use_case=use_case, is_edit=bool(is_edit))
-
-        if not _has_explicit_value(payload, "modelId", "model_id"):
-            adapted["modelId"] = recommendation.model_id
-        if not _has_explicit_value(payload, "guidanceScale", "guidance_scale"):
-            adapted["guidanceScale"] = recommendation.guidance_scale
-        if not _has_explicit_value(payload, "numInferenceSteps", "num_inference_steps"):
-            adapted["numInferenceSteps"] = recommendation.num_inference_steps
-        if not _has_explicit_value(payload, "outputFormat", "output_format"):
-            adapted["outputFormat"] = recommendation.output_format
-        if recommendation.prompt_upsampling is not None and not _has_explicit_value(payload, "promptUpsampling", "prompt_upsampling"):
-            adapted["promptUpsampling"] = recommendation.prompt_upsampling
-        if not _has_explicit_value(payload, "safetyTolerance", "safety_tolerance"):
-            adapted["safetyTolerance"] = recommendation.safety_tolerance
-        if routing_policy.prompt_strength is not None and not _has_explicit_value(payload, "promptStrength", "prompt_strength", "strength"):
-            adapted["promptStrength"] = routing_policy.prompt_strength
-        if routing_policy.image_prompt_strength is not None and not _has_explicit_value(payload, "imagePromptStrength", "image_prompt_strength"):
-            adapted["imagePromptStrength"] = routing_policy.image_prompt_strength
-        if routing_policy.go_fast is not None and not _has_explicit_value(payload, "goFast", "go_fast"):
-            adapted["goFast"] = routing_policy.go_fast
-
-        if not _has_explicit_value(payload, "traits"):
-            adapted["traits"] = list(routing_policy.traits)
-        if routing_policy.required_tags and not _has_explicit_value(payload, "requiredTags", "required_tags"):
-            adapted["requiredTags"] = list(routing_policy.required_tags)
-        if not _has_explicit_value(payload, "routingPriorities", "routing_priorities"):
-            adapted["routingPriorities"] = list(routing_policy.priorities)
-
-        adapted["provider"] = "replicate"
-        adapted["routingPolicy"] = routing_policy.to_dict()
-        return routing_policy.to_dict()
+        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
+        _copy_router_fields(adapted, payload)
+        if prompt_to_step_input:
+            prompt = str(payload.get("prompt") or "").strip()
+            if prompt:
+                step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
+                adapted["stepDataSoFar"] = {**step_data, "step-promptInput": prompt}
+        adapted.pop("prompt", None)
+        adapted.pop("promptTemplate", None)
+        if use_case:
+            adapted["useCase"] = use_case
+        for key, value in (overrides or {}).items():
+            if value is not None:
+                adapted[key] = value
+        _image_route_log(
+            "adapted",
+            {
+                "route": route_name,
+                "summary": _image_payload_summary(adapted),
+                "appliedUseCase": use_case,
+                "overrideKeys": sorted(list((overrides or {}).keys())),
+            },
+            force=True,
+        )
+        resolved = resolve_image_request(adapted)
+        _image_route_log(
+            "resolved",
+            {
+                "route": route_name,
+                "summary": _image_payload_summary(resolved),
+            },
+            force=True,
+        )
+        return resolved
 
     def _prompt_cache_get(key: str) -> Optional[dict[str, Any]]:
         if not key:
@@ -134,64 +181,62 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         except Exception:
             print(f"[option_images] {label} (unable to serialize)", flush=True)
 
+    def _image_route_debug_enabled() -> bool:
+        return str(os.getenv("IMAGE_ROUTE_DEBUG_LOG") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def _image_route_log(label: str, data: Dict[str, Any], *, force: bool = False) -> None:
+        if not force and not _image_route_debug_enabled():
+            return
+        try:
+            text = json.dumps(data, ensure_ascii=False, sort_keys=True)
+            if len(text) > 6000:
+                text = text[:6000] + "…"
+            print(f"[image_route] {label} {text}", flush=True)
+        except Exception:
+            print(f"[image_route] {label} (unable to serialize)", flush=True)
+
+    def _image_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+        step_data = payload.get("stepDataSoFar") if isinstance(payload.get("stepDataSoFar"), dict) else {}
+        answered = payload.get("answeredQA") if isinstance(payload.get("answeredQA"), list) else []
+        refs = payload.get("referenceImages") if isinstance(payload.get("referenceImages"), list) else []
+        routing = payload.get("routingPolicy") if isinstance(payload.get("routingPolicy"), dict) else {}
+        session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+        return {
+            "instanceId": str(payload.get("instanceId") or session.get("instanceId") or "")[:80] or None,
+            "sessionId": str(payload.get("sessionId") or session.get("sessionId") or "")[:80] or None,
+            "useCase": str(payload.get("useCase") or "")[:40] or None,
+            "modelId": str(payload.get("modelId") or "")[:120] or None,
+            "generationIntent": str(payload.get("generationIntent") or "")[:40] or None,
+            "variationMode": str(payload.get("variationMode") or "")[:40] or None,
+            "numOutputs": payload.get("numOutputs"),
+            "referenceImagesCount": len(refs),
+            "hasSceneImage": bool(str(payload.get("sceneImage") or "").strip()),
+            "hasProductImage": bool(str(payload.get("productImage") or "").strip()),
+            "hasUserImage": bool(str(payload.get("userImage") or "").strip()),
+            "stepDataKeys": sorted(list(step_data.keys()))[:20],
+            "answeredQACount": len(answered),
+            "routingPolicy": {
+                "provider": routing.get("provider"),
+                "priorities": routing.get("priorities"),
+                "traits": routing.get("traits"),
+                "requiredTags": routing.get("requiredTags"),
+            } if routing else None,
+        }
+
+    # Canonical image generation routes. These are the primary endpoints for the
+    # active image-generation runtime and should stay aligned with the orchestrator.
     @router.post("/image")
     def image(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        instance_id = ""
-        if isinstance(payload.get("instanceId"), str):
-            instance_id = str(payload.get("instanceId") or "").strip()
-        if not instance_id and isinstance(payload.get("session"), dict):
-            instance_id = str((payload.get("session") or {}).get("instanceId") or "").strip()
+        instance_id = _extract_instance_id(payload)
         if not instance_id:
             return {"ok": False, "error": "instanceId is required"}
 
-        for k in ("prompt", "promptTemplate"):
-            if k in payload and payload.get(k) not in (None, ""):
-                return JSONResponse(
-                    status_code=HTTP_400_BAD_REQUEST,
-                    content={
-                        "ok": False,
-                        "error": "unsupported_field",
-                        "message": f"Field '{k}' is not supported; prompts are generated server-side.",
-                    },
-                )
+        rejected = _reject_client_prompt_fields(payload)
+        if rejected:
+            return rejected
 
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        for k in ("prompt", "promptTemplate"):
-            adapted.pop(k, None)
-        for k in (
-            "numOutputs",
-            "outputFormat",
-            "modelId",
-            "negativePrompt",
-            "width",
-            "height",
-            "numInferenceSteps",
-            "guidanceScale",
-            "referenceImages",
-            "sceneImage",
-            "productImage",
-            "generationIntent",
-            "originalReferenceImage",
-            "generationIndex",
-        ):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-        use_case = str(adapted.get("useCase") or payload.get("useCase") or "scene").strip().lower().replace("_", "-")
-        refs = adapted.get("referenceImages") if isinstance(adapted.get("referenceImages"), list) else []
-        scene_image = str(adapted.get("sceneImage") or "").strip()
-        product_image = str(adapted.get("productImage") or "").strip()
-        user_image = str(adapted.get("userImage") or "").strip()
-        _apply_replicate_routing_defaults(
-            payload=payload,
-            adapted=adapted,
-            use_case=use_case,
-            num_input_images=len(refs),
-            has_scene_image=bool(scene_image),
-            has_product_image=bool(product_image),
-            has_user_image=bool(user_image),
-            is_edit=bool(refs or scene_image or product_image or user_image),
-        )
-        return generate_image(adapted)
+        resolved = _resolve_widget_request(instance_id=instance_id, payload=payload, route_name="image")
+        return generate_image(resolved)
 
     @router.post("/image/prompt")
     def image_prompt(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
@@ -204,46 +249,20 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             },
         )
 
+    # Compatibility routes below preserve older payload shapes while delegating
+    # into the same generation path where possible.
     @compat_router.post("/image")
     def image_compat(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        instance_id = ""
-        if isinstance(payload.get("instanceId"), str):
-            instance_id = str(payload.get("instanceId") or "").strip()
-        if not instance_id and isinstance(payload.get("session"), dict):
-            instance_id = str((payload.get("session") or {}).get("instanceId") or "").strip()
+        instance_id = _extract_instance_id(payload)
         if not instance_id:
             return {"ok": False, "error": "instanceId is required"}
 
-        for k in ("prompt", "promptTemplate"):
-            if k in payload and payload.get(k) not in (None, ""):
-                return JSONResponse(
-                    status_code=HTTP_400_BAD_REQUEST,
-                    content={
-                        "ok": False,
-                        "error": "unsupported_field",
-                        "message": f"Field '{k}' is not supported; prompts are generated server-side.",
-                    },
-                )
+        rejected = _reject_client_prompt_fields(payload)
+        if rejected:
+            return rejected
 
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        for k in ("prompt", "promptTemplate"):
-            adapted.pop(k, None)
-        for k in (
-            "numOutputs",
-            "outputFormat",
-            "modelId",
-            "negativePrompt",
-            "width",
-            "height",
-            "numInferenceSteps",
-            "guidanceScale",
-            "referenceImages",
-            "sceneImage",
-            "productImage",
-        ):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-        return _generate_with_optional_optimized_request(adapted)
+        resolved = _resolve_widget_request(instance_id=instance_id, payload=payload, route_name="image_compat")
+        return _generate_with_optional_optimized_request(resolved)
 
     # Maps price_tier badges to concrete material/quality descriptors used in image prompts.
     _PRICE_TIER_DESCS: Dict[str, str] = {
@@ -257,7 +276,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @router.post("/subcategory-catalog/generate")
     async def subcategory_catalog_generate(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
         from programs.form_pipeline.orchestrator import _should_skip_option_image_for_label  # noqa: E402
-        from programs.image_generator.image_prompt_library import build_option_image_prompt  # noqa: E402
         from programs.image_generator.providers.image_generation import generate_option_images_for_step  # noqa: E402
         from programs.subcategory_catalog.orchestrator import generate_subcategory_catalog  # noqa: E402
 
@@ -397,7 +415,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             context_prompt = f"{context_prompt} [{budget_context}]"
 
         from programs.form_pipeline.orchestrator import _should_skip_option_image_for_label  # noqa: E402
-        from programs.image_generator.image_prompt_library import build_option_image_prompt  # noqa: E402
+        from programs.image_generator.helpers.prompt_templates import build_option_image_prompt  # noqa: E402
         from programs.image_generator.providers.image_generation import generate_option_images_for_step  # noqa: E402
 
         prompts: list[str] = []
@@ -544,7 +562,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @compat_router.post("/generate/try-on")
     @router.post("/generate/try-on")
     async def generate_try_on(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
@@ -557,34 +574,22 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         if not reference_images:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "referenceImages_required"})
 
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-        if prompt:
-            step_data = {**step_data, "step-promptInput": prompt}
-        adapted["stepDataSoFar"] = step_data
-        adapted["useCase"] = "tryon"
-        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or "google/nano-banana").strip()
-        adapted["numOutputs"] = int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4)
-        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
-        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
-        adapted["width"] = int(payload.get("width") or 1024)
-        adapted["height"] = int(payload.get("height") or 1024)
-        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or 18)
-        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
-        adapted["referenceImages"] = reference_images
-        if user_image:
-            adapted["userImage"] = user_image
-        if product_image:
-            adapted["productImage"] = product_image
-        routing_policy = _apply_replicate_routing_defaults(
+        adapted = _resolve_widget_request(
+            instance_id=instance_id,
             payload=payload,
-            adapted=adapted,
-            use_case="try-on",
-            num_input_images=len(reference_images),
-            has_product_image=bool(product_image),
-            has_user_image=bool(user_image),
-            is_edit=True,
+            route_name="generate_try_on",
+            use_case="tryon",
+            prompt_to_step_input=True,
+            overrides={
+                "numOutputs": int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4),
+                "width": int(payload.get("width") or 1024),
+                "height": int(payload.get("height") or 1024),
+                "referenceImages": reference_images,
+                "userImage": user_image,
+                "productImage": product_image,
+            },
         )
+        routing_policy = adapted.get("routingPolicy")
 
         pred = _generate_with_optional_optimized_request(adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
@@ -604,7 +609,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @compat_router.post("/generate/scene-placement")
     @router.post("/generate/scene-placement")
     async def generate_scene_placement(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         scene_image = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip()
         product_image = str(payload.get("productImage") or payload.get("product_image") or "").strip()
@@ -617,36 +621,22 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         refs = [x for x in (refs_in if isinstance(refs_in, list) else []) if isinstance(x, str) and x.strip()]
         seed_refs = [scene_image, *([product_image] if product_image else []), *refs]
         reference_images = dedup_urls(seed_refs)
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-        if prompt:
-            step_data = {**step_data, "step-promptInput": prompt}
-        adapted["stepDataSoFar"] = step_data
-        adapted["useCase"] = "scene-placement"
-        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or "xai/grok-imagine-image").strip()
-        adapted["numOutputs"] = int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4)
-        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
-        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
-        adapted["width"] = int(payload.get("width") or 1024)
-        adapted["height"] = int(payload.get("height") or 1024)
-        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or 18)
-        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
-        adapted["referenceImages"] = reference_images
-        adapted["sceneImage"] = scene_image
-        if product_image:
-            adapted["productImage"] = product_image
-        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-        routing_policy = _apply_replicate_routing_defaults(
+        adapted = _resolve_widget_request(
+            instance_id=instance_id,
             payload=payload,
-            adapted=adapted,
+            route_name="generate_scene_placement",
             use_case="scene-placement",
-            num_input_images=len(reference_images),
-            has_scene_image=bool(scene_image),
-            has_product_image=bool(product_image),
-            is_edit=True,
+            prompt_to_step_input=True,
+            overrides={
+                "numOutputs": int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4),
+                "width": int(payload.get("width") or 1024),
+                "height": int(payload.get("height") or 1024),
+                "referenceImages": reference_images,
+                "sceneImage": scene_image,
+                "productImage": product_image or None,
+            },
         )
+        routing_policy = adapted.get("routingPolicy")
 
         pred = _generate_with_optional_optimized_request(adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
@@ -666,7 +656,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @compat_router.post("/generate/scene-refinement")
     @router.post("/generate/scene-refinement")
     async def generate_scene_refinement(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         scene_image = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip()
         if not instance_id:
@@ -677,33 +666,21 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         refs_in = payload.get("referenceImages") or payload.get("reference_images") or []
         refs = [x for x in (refs_in if isinstance(refs_in, list) else []) if isinstance(x, str) and x.strip()]
         reference_images = dedup_urls([scene_image, *refs])
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-        if prompt:
-            step_data = {**step_data, "step-promptInput": prompt}
-        adapted["stepDataSoFar"] = step_data
-        adapted["useCase"] = "scene-refinement"
-        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or "xai/grok-imagine-image").strip()
-        adapted["numOutputs"] = int(payload.get("numOutputs") or payload.get("gallery_max_images") or 1)
-        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
-        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
-        adapted["width"] = int(payload.get("width") or 1024)
-        adapted["height"] = int(payload.get("height") or 1024)
-        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or 18)
-        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
-        adapted["referenceImages"] = reference_images
-        adapted["sceneImage"] = scene_image
-        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-        routing_policy = _apply_replicate_routing_defaults(
+        adapted = _resolve_widget_request(
+            instance_id=instance_id,
             payload=payload,
-            adapted=adapted,
+            route_name="generate_scene_refinement",
             use_case="scene-refinement",
-            num_input_images=len(reference_images),
-            has_scene_image=bool(scene_image),
-            is_edit=True,
+            prompt_to_step_input=True,
+            overrides={
+                "numOutputs": int(payload.get("numOutputs") or payload.get("gallery_max_images") or 1),
+                "width": int(payload.get("width") or 1024),
+                "height": int(payload.get("height") or 1024),
+                "referenceImages": reference_images,
+                "sceneImage": scene_image,
+            },
         )
+        routing_policy = adapted.get("routingPolicy")
 
         pred = _generate_with_optional_optimized_request(adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
@@ -723,52 +700,57 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @compat_router.post("/generate/scene")
     @router.post("/generate/scene")
     async def generate_scene(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
 
         refs_in = payload.get("referenceImages") or payload.get("reference_images") or []
         refs = [x for x in (refs_in if isinstance(refs_in, list) else []) if isinstance(x, str) and x.strip()]
-        ordered_candidates = [
-            str(payload.get("userImage") or payload.get("user_image") or "").strip() or None,
-            str(payload.get("sceneImage") or payload.get("scene_image") or "").strip() or None,
-            str(payload.get("productImage") or payload.get("product_image") or "").strip() or None,
-            *refs,
-        ]
-        ordered = [x for x in ordered_candidates if isinstance(x, str) and x]
-        deduped = dedup_urls(ordered)
-        is_edit = len(deduped) > 0
-        primary_image = deduped[0] if is_edit else None
+        ref_mode = str(payload.get("referenceMode") or payload.get("reference_mode") or "").strip().lower()
+        user_img = str(payload.get("userImage") or payload.get("user_image") or "").strip() or None
+        scene_img = str(payload.get("sceneImage") or payload.get("scene_image") or "").strip() or None
+        product_img = str(payload.get("productImage") or payload.get("product_image") or "").strip() or None
+        explicit_anchor = user_img or scene_img or product_img
 
-        model_id_default = "black-forest-labs/flux-kontext-pro" if is_edit else "black-forest-labs/flux-1.1-pro"
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-        if prompt:
-            step_data = {**step_data, "step-promptInput": prompt}
-        adapted["stepDataSoFar"] = step_data
-        adapted["useCase"] = "scene"
-        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or model_id_default).strip()
-        adapted["numOutputs"] = int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4)
-        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
-        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
-        adapted["width"] = int(payload.get("width") or 1024)
-        adapted["height"] = int(payload.get("height") or 1024)
-        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or (20 if is_edit else 18))
-        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or (4.0 if is_edit else 6.0))
-        adapted["referenceImages"] = [primary_image] if primary_image else []
-        adapted["sceneImage"] = primary_image or None
-        for k in ("generationIntent", "previousPrompt", "refinementNotes", "originalReferenceImage", "generationIndex"):
-            if k in payload and payload.get(k) is not None:
-                adapted[k] = payload.get(k)
-        routing_policy = _apply_replicate_routing_defaults(
+        if explicit_anchor:
+            # Keep the client's anchor + any extra reference URLs (e.g. style cards) for DSPy routing.
+            primary_image = explicit_anchor
+            rest = [u for u in refs if u and u != primary_image]
+            reference_images_out = dedup_urls([primary_image, *rest])
+            is_edit = True
+        elif ref_mode == "guide_only":
+            # Style-reference URLs only: do not promote the first URL to sceneImage.
+            primary_image = None
+            reference_images_out = dedup_urls(refs)
+            is_edit = False
+        else:
+            ordered_candidates = [user_img, scene_img, product_img, *refs]
+            ordered = [x for x in ordered_candidates if isinstance(x, str) and x]
+            deduped = dedup_urls(ordered)
+            is_edit = len(deduped) > 0
+            primary_image = deduped[0] if is_edit else None
+            reference_images_out = [primary_image] if primary_image else []
+
+        scene_overrides: Dict[str, Any] = {
+            "numOutputs": int(payload.get("numOutputs") or payload.get("gallery_max_images") or 4),
+            "width": int(payload.get("width") or 1024),
+            "height": int(payload.get("height") or 1024),
+            "referenceImages": reference_images_out,
+        }
+        # When the client already sent an explicit anchor (room/product/person), keep those fields; only
+        # normalize referenceImages. Legacy paths without explicit anchors still promote the primary URL.
+        if not explicit_anchor:
+            scene_overrides["sceneImage"] = primary_image or None
+
+        adapted = _resolve_widget_request(
+            instance_id=instance_id,
             payload=payload,
-            adapted=adapted,
+            route_name="generate_scene",
             use_case="scene",
-            num_input_images=len(adapted["referenceImages"]) if isinstance(adapted.get("referenceImages"), list) else 0,
-            has_scene_image=bool(primary_image),
-            is_edit=bool(is_edit),
+            prompt_to_step_input=True,
+            overrides=scene_overrides,
         )
+        routing_policy = adapted.get("routingPolicy")
 
         pred = _generate_with_optional_optimized_request(adapted)
         if (
@@ -794,7 +776,6 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
     @compat_router.post("/generate/drilldown")
     @router.post("/generate/drilldown")
     async def generate_drilldown(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
-        prompt = str(payload.get("prompt") or "").strip()
         instance_id = str(payload.get("instanceId") or payload.get("instance_id") or "").strip()
         if not instance_id:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "instanceId_required"})
@@ -806,31 +787,22 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         if not reference_images:
             return JSONResponse(status_code=HTTP_400_BAD_REQUEST, content={"ok": False, "error": "referenceImages_required"})
 
-        adapted = to_next_steps_payload(instance_id=instance_id, body=payload)
-        step_data = adapted.get("stepDataSoFar") if isinstance(adapted.get("stepDataSoFar"), dict) else {}
-        if prompt:
-            step_data = {**step_data, "step-promptInput": prompt}
-        adapted["stepDataSoFar"] = step_data
-        adapted["useCase"] = "scene"
-        adapted["modelId"] = str(payload.get("modelId") or payload.get("model_id") or "google/nano-banana").strip()
-        adapted["numOutputs"] = 1
-        adapted["outputFormat"] = str(payload.get("outputFormat") or payload.get("output_format") or "url")
-        adapted["negativePrompt"] = str(payload.get("negativePrompt") or payload.get("negative_prompt") or "").strip() or None
-        adapted["width"] = int(payload.get("width") or 1024)
-        adapted["height"] = int(payload.get("height") or 1024)
-        adapted["numInferenceSteps"] = int(payload.get("numInferenceSteps") or payload.get("num_inference_steps") or 18)
-        adapted["guidanceScale"] = float(payload.get("guidanceScale") or payload.get("guidance_scale") or 6.0)
-        adapted["referenceImages"] = reference_images
-        adapted["sceneImage"] = selected_image or (reference_images[0] if reference_images else None)
-        adapted["selectedImage"] = selected_image
-        routing_policy = _apply_replicate_routing_defaults(
+        adapted = _resolve_widget_request(
+            instance_id=instance_id,
             payload=payload,
-            adapted=adapted,
+            route_name="generate_drilldown",
             use_case="drilldown",
-            num_input_images=len(reference_images),
-            has_scene_image=bool(adapted.get("sceneImage")),
-            is_edit=True,
+            prompt_to_step_input=True,
+            overrides={
+                "numOutputs": 1,
+                "width": int(payload.get("width") or 1024),
+                "height": int(payload.get("height") or 1024),
+                "referenceImages": reference_images,
+                "sceneImage": selected_image or (reference_images[0] if reference_images else None),
+                "selectedImage": selected_image,
+            },
         )
+        routing_policy = adapted.get("routingPolicy")
 
         pred = _generate_with_optional_optimized_request(adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)

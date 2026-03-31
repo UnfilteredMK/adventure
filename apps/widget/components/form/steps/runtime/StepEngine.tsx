@@ -46,6 +46,8 @@ import {
   PRICING_ESTIMATE_KEY,
 } from "./step-engine/constants";
 import { clamp01, fnv1a32, joinSummaries, mergeUniqueStrings, normalizeOptionalString } from "./step-engine/utils/core";
+import type { Suggestion } from "@/types";
+import { inferSuggestionToolbarMode } from "@/lib/suggestion-toolbar";
 import {
   getActivePreviewRunSnapshot,
   updatePreviewCacheSnapshot,
@@ -187,6 +189,11 @@ export function StepEngine({
   const [reflectionFeedbackSent, setReflectionFeedbackSent] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewHasImage, setPreviewHasImage] = useState(false);
+  const [previewSurfaceMode, setPreviewSurfaceMode] = useState<"gallery" | "single" | "empty">("empty");
+  /** Last mode reported by ImagePreviewExperience — used to detect entering single view (e.g. gallery → single). */
+  const previewSurfaceReportedRef = useRef<"gallery" | "single" | "empty">("empty");
+  /** `previewEnabled` is derived later via `usePreviewEligibility`; back-handler reads this ref on click. */
+  const previewEnabledForBackNavRef = useRef(false);
   const [, setPreviewAdvanceGateOpen] = useState(false);
   const pendingPreviewAdvanceRef = useRef<null | { stepId: string; data: any }>(null);
   const leadCapturedAdvancedRef = useRef(false);
@@ -194,7 +201,9 @@ export function StepEngine({
   const leadGateLocksQuestionAreaRef = useRef(false);
   /** When true, we just completed a scene upload step and are fetching the next batch; prefer preview "generating" loader over "Getting you accurate pricing..." to avoid overlapping loaders. */
   const sceneUploadJustCompletedRef = useRef(false);
-  const [adventureInputMode, setAdventureInputMode] = useState<"questions" | "prompt" | "budget" | "uploads">("questions");
+  const [adventureInputMode, setAdventureInputMode] = useState<
+    "questions" | "ideas" | "prompt" | "budget" | "uploads"
+  >("questions");
   const [designControlsRevealed, setDesignControlsRevealed] = useState(false);
   const [questionPaneRevealedByUser, setQuestionPaneRevealedByUser] = useState(false);
   const previewPaneAutoCollapsedRef = useRef(false);
@@ -339,6 +348,34 @@ export function StepEngine({
     legacyBudgetUploadEnabled,
     updateStepData,
   });
+
+  const applyIdeaSuggestion = useCallback(
+    (s: Suggestion) => {
+      const target = inferSuggestionToolbarMode(s);
+      if (target === "budget") {
+        setAdventureInputMode("budget");
+        if (typeof budgetValue === "number" && Number.isFinite(budgetValue) && budgetSliderConfig) {
+          const { min, max, step } = budgetSliderConfig;
+          const raw = Math.min(max, budgetValue + 3000);
+          if (raw > budgetValue) {
+            const snapped = Math.round((raw - min) / step) * step + min;
+            handleBudgetChange(Math.min(max, snapped));
+          }
+        }
+        setPreviewRefreshNonce((n) => n + 1);
+        return;
+      }
+      if (target === "uploads") {
+        setAdventureInputMode("uploads");
+        return;
+      }
+      setPromptDraft(String(s.prompt || s.text || "").trim());
+      setPromptSubmitCount((c) => c + 1);
+      setPreviewRefreshNonce((c) => c + 1);
+    },
+    [budgetSliderConfig, budgetValue, handleBudgetChange]
+  );
+
   const serviceCatalogSnapshot = useMemo(
     () => (sessionId ? loadServiceCatalog(sessionId) : null),
     [sessionId, state?.stepData]
@@ -771,12 +808,12 @@ export function StepEngine({
     removeStepsByIds(leadCaptureStepIds);
   }, [effectiveLeadCompleteForPreviewFlow, leadCaptureStepIds, removeStepsByIds, state?.steps]);
 
-  // When lead is captured from the preview, keep the hero in its presentation state
-  // until the user explicitly asks to continue designing.
+  // After lead capture, reveal the compacted question pane immediately so pricing
+  // and refinement controls unlock together instead of waiting for a second CTA.
   useEffect(() => {
     if (!leadCapturedForUI) return;
-    // Keep the preview visually stable until the user explicitly opts in via "Keep designing".
-    setDesignControlsRevealed(false);
+    setAdventureInputMode("questions");
+    setDesignControlsRevealed(true);
   }, [leadCapturedForUI]);
 
   useEffect(() => {
@@ -1213,6 +1250,7 @@ export function StepEngine({
       const currentBudgetStep = (state.steps || [])[budgetIdx] as any;
       const budgetData = (deterministicBudgetStep as any)?.data || {};
       const budgetCopy = (deterministicBudgetStep as any)?.copy || {};
+      const budgetBlueprint = (deterministicBudgetStep as any)?.blueprint;
       const nextQuestion = String(budgetCopy.headline || "What budget range should we design around?");
       const nextMin = Number(budgetData.min ?? 2000);
       const nextMax = Number(budgetData.max ?? 50000);
@@ -1221,6 +1259,7 @@ export function StepEngine({
       const nextUnit = String(budgetData.unit || "$");
       const nextUnitType = String(budgetData.unitType || "currency");
       const nextFormat = String(budgetData.format || "currency");
+      const nextRequired = budgetData.required !== false;
       const isDifferent =
         String(currentBudgetStep?.question || "") !== nextQuestion ||
         Number(currentBudgetStep?.min) !== nextMin ||
@@ -1229,7 +1268,8 @@ export function StepEngine({
         String(currentBudgetStep?.currency || "") !== nextCurrency ||
         String(currentBudgetStep?.unit || "") !== nextUnit ||
         String(currentBudgetStep?.unitType || "") !== nextUnitType ||
-        String(currentBudgetStep?.format || "") !== nextFormat;
+        String(currentBudgetStep?.format || "") !== nextFormat ||
+        currentBudgetStep?.data?.required !== nextRequired;
       if (isDifferent) {
         patchStep(DETERMINISTIC_BUDGET_ID, {
           componentType: "slider",
@@ -1250,8 +1290,9 @@ export function StepEngine({
             unit: nextUnit,
             unitType: nextUnitType,
             format: nextFormat,
-            required: true,
+            required: nextRequired,
           },
+          blueprint: budgetBlueprint,
           copy: {
             headline: nextQuestion,
             subtext: String(budgetCopy.subtext || ""),
@@ -1259,6 +1300,8 @@ export function StepEngine({
         });
       }
     }
+
+    if (localSkeletonMode && allPresent) return;
 
     // Reposition if any deterministic step is too late (e.g. after a later-arriving API question).
     const needsReposition =
@@ -1414,7 +1457,14 @@ export function StepEngine({
       const id = String((step as any)?.id || "");
       const value = stepData?.[id];
       if (hasMeaningfulAnswer(value)) return true;
-      if (id === DETERMINISTIC_SCENE_IMAGE_ID && stepData && Object.prototype.hasOwnProperty.call(stepData, id)) {
+      if (
+        stepData &&
+        Object.prototype.hasOwnProperty.call(stepData, id) &&
+        (id === DETERMINISTIC_BUDGET_ID ||
+          id === DETERMINISTIC_SCENE_IMAGE_ID ||
+          id === DETERMINISTIC_USER_IMAGE_ID ||
+          id === DETERMINISTIC_PRODUCT_IMAGE_ID)
+      ) {
         return value === null || value === "__skip__";
       }
       return false;
@@ -1655,7 +1705,7 @@ export function StepEngine({
     instanceId,
     formBatchIndex: formState?.batchIndex,
   });
-  const { handleBack, handleNavigateToStep } = useStepNavigation({
+  const { handleBack: navigateStepBack, handleNavigateToStep } = useStepNavigation({
     state,
     currentStep,
     sessionId,
@@ -1668,6 +1718,17 @@ export function StepEngine({
     goToStep,
     setAdventureInputMode,
   });
+  const [stepNavReturnToGalleryNonce, setStepNavReturnToGalleryNonce] = useState(0);
+  const handleBack = useCallback(async () => {
+    const idx = state?.currentStepIndex ?? 0;
+    const atFirstStep = idx <= 0;
+    if (atFirstStep && previewEnabledForBackNavRef.current && previewHasImage) {
+      setAdventureInputMode("questions");
+      setStepNavReturnToGalleryNonce((n) => n + 1);
+      return;
+    }
+    await navigateStepBack();
+  }, [navigateStepBack, previewHasImage, setAdventureInputMode, state?.currentStepIndex]);
   const handleStepJoggerNavigate = useCallback(
     (stepIndex: number) => {
       setQuestionPaneRevealedByUser(true);
@@ -1675,6 +1736,17 @@ export function StepEngine({
     },
     [handleNavigateToStep]
   );
+
+  const handlePreviewSurfaceModeChange = useCallback((mode: "gallery" | "single" | "empty") => {
+    const prev = previewSurfaceReportedRef.current;
+    previewSurfaceReportedRef.current = mode;
+    setPreviewSurfaceMode(mode);
+    // Only switch to Ideas when leaving the concept grid for a single hero — not on first image (empty→single),
+    // so guided flow stays on the Questions tab for the next form steps.
+    if (mode === "single" && prev === "gallery") {
+      setAdventureInputMode("ideas");
+    }
+  }, []);
 
   const completedQuestionCount = useMemo(() => {
     if (!state?.steps || !state?.stepData) return 0;
@@ -1891,11 +1963,12 @@ export function StepEngine({
     previewEverEnabled,
     progressPercentage: progress?.percentage ?? null,
     setPreviewEverEnabled,
-    mustAnswerBeforePreviewStepId: disableLegacyBudgetUploadSteps ? DETERMINISTIC_STYLE_ID : null,
+    mustAnswerBeforePreviewStepId: localSkeletonMode && deterministicStyleStep ? DETERMINISTIC_STYLE_ID : null,
     suppressDeterministicStepInsert: Boolean(disableLegacyBudgetUploadSteps || (effectiveLeadCompleteForPreviewFlow && previewHasImage)),
     state,
     updateStepData,
   });
+  previewEnabledForBackNavRef.current = previewEnabled;
 
   const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
 
@@ -1952,6 +2025,9 @@ export function StepEngine({
     if (!showPreviewSection) setPreviewVisible(false);
     else if (showPreviewGeneratingEarly) setPreviewVisible(true);
   }, [showPreviewSection, showPreviewGeneratingEarly]);
+  useEffect(() => {
+    if (!showPreviewSection) setPreviewSurfaceMode("empty");
+  }, [showPreviewSection]);
   useEffect(() => {
     if (!previewHasImage) {
       previewPaneAutoCollapsedRef.current = false;
@@ -2100,11 +2176,21 @@ export function StepEngine({
   const forceQuestionPaneVisibleForBacktracking = Boolean(
     isBacktrackingInForm && currentStepSupportsQuestionPane
   );
+  /** Concept grid (priced grid / post-complete gallery): full-height preview until user opens a tile in single mode. */
+  const conceptPickerStepActive = Boolean(pricedGridStepActive || allowConceptGallery);
+  const hideQuestionPaneUntilConceptSingle = Boolean(
+    !forceQuestionPaneVisibleForBacktracking &&
+      previewEnabled &&
+      conceptPickerStepActive &&
+      previewSurfaceMode !== "single"
+  );
+  // Once a preview image exists, keep the pane available (Ideas + questions) even if we're still on the
+  // same step as generation — otherwise previewQuestionRevealReady stays false and the pane never mounts.
   const showQuestionPaneUnderPreview =
     forceQuestionPaneVisibleForBacktracking ||
     (
       !isPreviewGenerationStage &&
-      previewQuestionRevealReady &&
+      (previewQuestionRevealReady || previewHasImage) &&
       (!useMobilePreviewLayout || previewHasImage || isBacktrackingInForm)
     );
 
@@ -2116,7 +2202,8 @@ export function StepEngine({
       forceQuestionPaneVisibleForBacktracking ||
       designControlsRevealed ||
       questionPaneRevealedByUser ||
-      !galleryPreviewActive
+      !galleryPreviewActive ||
+      previewHasImage
   );
   const gatedQuestionPaneUnderPreview = Boolean(
     showQuestionPaneUnderPreview && shouldRevealCompactedQuestionPane
@@ -2141,7 +2228,8 @@ export function StepEngine({
   const hideQuestionPane = Boolean(
     isInitialLoading ||
     !gatedQuestionPaneUnderPreview ||
-    isAdvancingAfterLeadCapture
+    isAdvancingAfterLeadCapture ||
+    hideQuestionPaneUntilConceptSingle
   );
   useEffect(() => {
     const committedRaw = (state?.stepData as any)?.["step-refinement-upload-scene-image"];
@@ -2291,7 +2379,9 @@ export function StepEngine({
           isRefinementUploadStep={isRefinementUploadStep}
           previewMaxPx={previewMaxPx}
           previewHasImage={previewHasImage}
+          previewSurfaceMode={previewSurfaceMode}
           previewRefreshNonce={previewRefreshNonce}
+          stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}
           pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
           promptDraft={promptDraft}
           promptSubmitCount={promptSubmitCount}
@@ -2299,6 +2389,7 @@ export function StepEngine({
           setPreviewAutoGenerationBusy={setPreviewAutoGenerationBusy}
           setPreviewHasImage={setPreviewHasImage}
           setPreviewVisible={setPreviewVisible}
+          onPreviewSurfaceModeChange={handlePreviewSurfaceModeChange}
           state={state}
           useDesktopPreviewLayout={useDesktopPreviewLayout}
           useMobilePreviewLayout={useMobilePreviewLayout}
@@ -2315,6 +2406,7 @@ export function StepEngine({
           effectiveLeadCompleteForPreviewFlow={effectiveLeadCompleteForPreviewFlow}
           leadGateLocksQuestionArea={leadGateLocksQuestionArea}
           setAdventureInputMode={setAdventureInputMode}
+          onApplyIdeaSuggestion={applyIdeaSuggestion}
           budgetSliderConfig={budgetSliderConfig}
           budgetValue={budgetValue}
           handleBudgetChange={handleBudgetChange}

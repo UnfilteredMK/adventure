@@ -1,8 +1,9 @@
 import type { StepDefinition, UIStep } from "@/types/ai-form";
 import { buildDeterministicStyleStep } from "../../../static/deterministic-style-step";
+import { buildDeterministicBudgetStep, buildDeterministicUploadSteps } from "./deterministic-adventure-steps";
 
 export const LOCAL_SKELETON_FLOW_MODE = "local_skeleton";
-export const LOCAL_SKELETON_VERSION = "local-skeleton-v1";
+export const LOCAL_SKELETON_VERSION = "local-skeleton-v2";
 export const LOCAL_SCOPE_STEP_ID = "step-project-scope";
 
 export type LocalSkeletonServiceOption = {
@@ -124,23 +125,45 @@ export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | 
 }
 
 export function buildLocalPostServiceSteps(serviceOption: LocalSkeletonServiceOption | null | undefined): Array<StepDefinition | UIStep> {
+  return buildLocalPostServiceStepsWithConfig({ serviceOption });
+}
+
+export function buildLocalPostServiceStepsWithConfig(params: {
+  serviceOption: LocalSkeletonServiceOption | null | undefined;
+  useCase?: string | null;
+  previewPricing?: any;
+}): Array<StepDefinition | UIStep> {
+  const { serviceOption, useCase, previewPricing } = params;
   if (!serviceOption) return [];
   const scopeStep = buildLocalScopeStep(serviceOption);
   const styleStep = buildDeterministicStyleStep(serviceOption);
-  return styleStep ? [scopeStep, styleStep] : [scopeStep];
+  const budgetStep = buildDeterministicBudgetStep({
+    config: { previewPricing },
+    useCase,
+  });
+  const uploadSteps = buildDeterministicUploadSteps(useCase);
+  return styleStep ? [scopeStep, styleStep, budgetStep, ...uploadSteps] : [scopeStep, budgetStep, ...uploadSteps];
 }
 
 export function buildLocalSkeletonFlow(params: {
   serviceOptions: LocalSkeletonServiceOption[];
   selectedServiceId?: string | null;
+  useCase?: string | null;
+  previewPricing?: any;
 }): Array<StepDefinition | UIStep> {
-  const { serviceOptions, selectedServiceId } = params;
+  const { serviceOptions, selectedServiceId, useCase, previewPricing } = params;
   const steps: Array<StepDefinition | UIStep> = [];
   const serviceStep = buildServiceSelectionStep(serviceOptions);
   if (serviceStep) steps.push(serviceStep);
   const selectedService = resolveSelectedServiceOption(serviceOptions, selectedServiceId);
   if (selectedService) {
-    steps.push(...buildLocalPostServiceSteps(selectedService));
+    steps.push(
+      ...buildLocalPostServiceStepsWithConfig({
+        serviceOption: selectedService,
+        useCase,
+        previewPricing,
+      })
+    );
   }
   return steps;
 }

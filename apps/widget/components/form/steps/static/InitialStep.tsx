@@ -141,7 +141,7 @@ export function InitialStep({
 
       {actionsVariant === "icon_only" ? (
         <div className="flex items-center justify-between pt-1">
-          {canGoBack && onBack ? (
+          {onBack ? (
             <Button
               type="button"
               onClick={onBack}
@@ -176,7 +176,7 @@ export function InitialStep({
         </div>
       ) : (
         <div className="flex min-w-0 gap-3 pt-2">
-          {canGoBack && onBack ? (
+          {onBack ? (
             <Button
               type="button"
               onClick={onBack}

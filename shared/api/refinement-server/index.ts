@@ -1,3 +1,5 @@
+export { buildSuggestionLabel, DEFAULT_SUGGESTION_LABEL_MAX } from "./suggestion-label";
+
 export {
   REFINEMENT_LIBRARY_MAX_COMPONENTS,
   REFINEMENT_LIBRARY_MIN_IMAGES_PER_COMPONENT,

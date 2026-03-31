@@ -43,7 +43,7 @@ class TryonPromptModule(dspy.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.generate = dspy.ChainOfThought(TryonPromptSignature)
+        self.generate = dspy.Predict(TryonPromptSignature)
 
     def forward(
         self,

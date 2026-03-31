@@ -1,4 +1,4 @@
-"""DSPy module for scene use case: text-to-image or edit of a space (design/renovation preview)."""
+"""DSPy module for scene use case: text-to-image or edit of a space."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ class ScenePromptSignature(dspy.Signature):
     You are an expert prompt engineer for AI image generation models (Flux, Stable Diffusion).
     Given structured context about a service project and user preferences, produce a
     concise, visually descriptive prompt that will generate a photorealistic design preview.
-    The service could be anything — home renovation, landscaping, jewelry, automotive,
+    The service could be anything - home renovation, landscaping, jewelry, automotive,
     fashion, commercial fit-out, etc. Derive all domain-specific visual language from
     service_name and service_summary; never assume a specific industry.
 
@@ -26,8 +26,8 @@ class ScenePromptSignature(dspy.Signature):
       diptych, collage, storyboard, annotated mockup, or any design with visible text overlays.
     - For edit mode (is_edit=true): treat the uploaded reference image as source context for the existing space.
       Generate one fully-completed, professional finished result.
-      Use service_name and service_summary to understand exactly what this project entails —
-      what elements would be replaced, upgraded, or transformed — and make ALL of those things
+      Use service_name and service_summary to understand exactly what this project entails -
+      what elements would be replaced, upgraded, or transformed - and make ALL of those things
       look brand-new and professionally done. Nothing the service would have touched should look
       old, worn, or original. Preserve only the structural/contextual elements that would NOT
       be changed by this service (e.g. background environment, camera angle, unchanged parts of
@@ -52,13 +52,13 @@ class ScenePromptSignature(dspy.Signature):
         High budget:   premium, custom, high-end, designer quality
         Luxury budget: bespoke, top-of-the-line, finest available materials/finishes
       Translate these quality tiers into the specific materials/finishes appropriate for
-      the service_name and service_summary — do not assume a home renovation context.
+      the service_name and service_summary - do not assume a home renovation context.
     """
 
     service_name: str = dspy.InputField(desc="Name of the service (e.g. 'Bathroom Remodeling')")
     service_summary: str = dspy.InputField(
         desc=(
-            "Description of what this service entails — use this to understand what gets replaced/upgraded. "
+            "Description of what this service entails - use this to understand what gets replaced/upgraded. "
             "For edit mode: any element this service would touch must look brand-new in the output."
         )
     )
@@ -106,7 +106,7 @@ class ScenePromptModule(dspy.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.generate = dspy.ChainOfThought(ScenePromptSignature)
+        self.generate = dspy.Predict(ScenePromptSignature)
 
     def forward(
         self,

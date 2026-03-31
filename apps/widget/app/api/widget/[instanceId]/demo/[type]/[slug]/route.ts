@@ -73,20 +73,19 @@ export async function GET(
     let selectedProspect: any | null = null;
     let demoTemplateConfig: any | null = null;
     let demoBranding: any | null = null;
-    let demoPromptId: any | null = null;
 
     if (demoType === 'industry') {
       // Look up subcategory by slug
       let { data: subcategoryMatches, error: subcatError } = await supabaseAdmin
         .from('categories_subcategories')
-        .select('id, slug, subcategory, demo_template_config, demo_prompt_id')
+        .select('id, slug, subcategory, demo_template_config')
         .eq('slug', cleanedSlug)
         .limit(1);
 
       if ((!subcategoryMatches || subcategoryMatches.length === 0) && !subcatError && cleanedSlug) {
         const { data: altMatches } = await supabaseAdmin
           .from('categories_subcategories')
-          .select('id, slug, subcategory, demo_template_config, demo_prompt_id')
+          .select('id, slug, subcategory, demo_template_config')
           .ilike('subcategory', `%${cleanedSlug.replace(/-/g, ' ')}%`)
           .limit(1);
         if (altMatches && altMatches.length > 0) {
@@ -109,7 +108,6 @@ export async function GET(
       }
 
       demoTemplateConfig = selectedSubcategory?.demo_template_config || null;
-      demoPromptId = selectedSubcategory?.demo_prompt_id || null;
     } else {
       // Prospect demo path
       const { data: prospect, error: pErr } = await supabaseAdmin
@@ -188,7 +186,6 @@ export async function GET(
         slug: cleanedSlug,
         subcategory: selectedSubcategory || null,
         prospect: selectedProspect || null,
-        demo_prompt_id: demoPromptId
       }
     } as any;
 

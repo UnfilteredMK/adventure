@@ -534,12 +534,13 @@ export function GalleryStep({
 
   const effectiveConfig: DesignSettings = useMemo(() => {
     // `ImageGallery` expects widget-like design settings; the form config is compatible.
-    // These defaults make the gallery usable in the form layout without requiring instance config changes.
+    // Default to 2 columns so multi-image runs use `MultiColumnGallery` (2×2 grid) instead of
+    // `SingleColumnGallery` (vertical stack), which looks poor for 4-up previews.
     return {
       ...designConfig,
-      gallery_columns: designConfig.gallery_columns ?? 1,
+      gallery_columns: designConfig.gallery_columns ?? 2,
       gallery_max_images: designConfig.gallery_max_images ?? 6,
-      gallery_spacing: designConfig.gallery_spacing ?? 8,
+      gallery_spacing: designConfig.gallery_spacing ?? 12,
     };
   }, [designConfig]);
 

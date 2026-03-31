@@ -24,6 +24,7 @@ def test_estimate_pricing_initial_without_baseline_returns_total_only(monkeypatc
 
     monkeypatch.setattr(orchestrator, "build_context", _fake_build_context)
     monkeypatch.setattr(orchestrator, "estimate_pricing_with_vlm", _fake_vlm)
+    monkeypatch.setattr(orchestrator, "_pricing_vlm_enabled", lambda: True)
 
     resp = orchestrator.estimate_pricing(
         {
@@ -58,6 +59,7 @@ def test_estimate_pricing_prefers_provided_baseline_range_over_baseline_image(mo
 
     monkeypatch.setattr(orchestrator, "build_context", _fake_build_context)
     monkeypatch.setattr(orchestrator, "estimate_pricing_with_vlm", _fake_vlm)
+    monkeypatch.setattr(orchestrator, "_pricing_vlm_enabled", lambda: True)
 
     resp = orchestrator.estimate_pricing(
         {
@@ -94,6 +96,7 @@ def test_estimate_pricing_with_baseline_image_returns_total_plus_delta(monkeypat
 
     monkeypatch.setattr(orchestrator, "build_context", _fake_build_context)
     monkeypatch.setattr(orchestrator, "estimate_pricing_with_vlm", _fake_vlm)
+    monkeypatch.setattr(orchestrator, "_pricing_vlm_enabled", lambda: True)
 
     resp = orchestrator.estimate_pricing(
         {
@@ -128,6 +131,7 @@ def test_estimate_pricing_refinement_applies_delta_floor_for_material_changes(mo
 
     monkeypatch.setattr(orchestrator, "build_context", _fake_build_context)
     monkeypatch.setattr(orchestrator, "estimate_pricing_with_vlm", _fake_vlm)
+    monkeypatch.setattr(orchestrator, "_pricing_vlm_enabled", lambda: True)
 
     resp = orchestrator.estimate_pricing(
         {

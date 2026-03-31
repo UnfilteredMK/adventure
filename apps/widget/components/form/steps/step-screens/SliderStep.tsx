@@ -45,6 +45,10 @@ export function SliderStep({
   const min = isUIStep ? Number((step as any).min ?? 0) : Number((step as StepDefinition).data?.min ?? 0);
   const max = isUIStep ? Number((step as any).max ?? 100) : Number((step as StepDefinition).data?.max ?? 100);
   const stepSize = isUIStep ? Number((step as any).step ?? 1) : Number((step as StepDefinition).data?.step ?? 1);
+  const required = isUIStep ? (step as any).required !== false : (step as StepDefinition).data?.required !== false;
+  const allowSkip = isUIStep
+    ? Boolean((step as any).allow_skip ?? (step as any).allowSkip ?? (step as any)?.blueprint?.presentation?.allow_skip)
+    : !required || Boolean((step as any)?.blueprint?.presentation?.allow_skip);
 
   const unit = isUIStep ? ((step as any).unit ?? null) : ((step as any).data?.unit ?? null);
   const currency = isUIStep ? ((step as any).currency ?? null) : ((step as any).data?.currency ?? null);
@@ -58,10 +62,17 @@ export function SliderStep({
 
   const defaultValue = Math.round((safeMin + safeMax) / 2);
   const [value, setValue] = React.useState<number>(typeof stepData === "number" ? stepData : defaultValue);
+  const [hasExplicitValue, setHasExplicitValue] = React.useState<boolean>(typeof stepData === "number");
 
   React.useEffect(() => {
-    if (typeof stepData === "number") setValue(stepData);
-  }, [stepData]);
+    if (typeof stepData === "number") {
+      setValue(stepData);
+      setHasExplicitValue(true);
+      return;
+    }
+    setValue(defaultValue);
+    setHasExplicitValue(false);
+  }, [defaultValue, stepData]);
 
   const formatValue = React.useCallback(
     (n: number) => {
@@ -88,10 +99,11 @@ export function SliderStep({
   return (
     <StepLayout
       step={step as any}
-      onComplete={() => onComplete(value)}
+      onComplete={() => onComplete(required ? value : hasExplicitValue ? value : null)}
       onBack={onBack}
       canGoBack={canGoBack}
       isLoading={isLoading}
+      canContinue={required || hasExplicitValue}
       feedbackPrompt={feedbackPrompt}
       headerInlineControl={headerInlineControl}
       actionsVariant={actionsVariant}
@@ -114,8 +126,11 @@ export function SliderStep({
           {formatValue(value)}
         </div>
         <SliderPrimitive
-          value={[value]}
-          onValueChange={(v) => setValue(v[0])}
+          value={[hasExplicitValue ? value : defaultValue]}
+          onValueChange={(v) => {
+            setValue(v[0]);
+            setHasExplicitValue(true);
+          }}
           min={safeMin}
           max={safeMax}
           step={safeStep}
@@ -127,6 +142,31 @@ export function SliderStep({
             <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMin)}</span>
             <span style={{ color: theme.textColor, fontFamily: theme.fontFamily }}>{formatValue(safeMax)}</span>
           </div>
+        ) : null}
+        {!required && allowSkip && !hasExplicitValue ? (
+          compactInPreview ? (
+            <button
+              type="button"
+              onClick={() => onComplete(null)}
+              disabled={isLoading}
+              className="mx-auto mt-1 h-9 shrink-0 rounded-xl border-2 border-[color:var(--form-surface-border-color)] px-3 text-[12px] font-semibold transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ fontFamily: "inherit", color: "var(--form-text-color, inherit)" }}
+            >
+              Skip for now
+            </button>
+          ) : (
+            <div className="pt-1 text-center">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Or</div>
+              <button
+                type="button"
+                onClick={() => onComplete(null)}
+                disabled={isLoading}
+                className="mt-1 text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Skip budget for now
+              </button>
+            </div>
+          )
         ) : null}
       </div>
     </StepLayout>

@@ -32,7 +32,11 @@ import { useFormSubmission } from "@/hooks/use-form-submission";
 import { safeStableJsonForPricingContext } from "../../runtime/step-engine/utils/pricing-context";
 import { PRICING_ESTIMATE_KEY } from "../../runtime/step-engine/constants";
 import { normalizePricingEstimate } from "../../runtime/step-engine/utils/pricing-estimate";
-import { PREVIEW_CACHE_UPDATED_EVENT, notifyPreviewCacheUpdated } from "./preview-cache-bridge";
+import {
+  OPEN_DESIGN_ESTIMATE_GATE_EVENT,
+  PREVIEW_CACHE_UPDATED_EVENT,
+  notifyPreviewCacheUpdated,
+} from "./preview-cache-bridge";
 
 function hexToRgba(hex: string, alpha: number): string | null {
   const h = String(hex || "").replace("#", "").trim();
@@ -138,18 +142,18 @@ type PreviewRun = {
   imagePricing?: (CachedPricing | undefined)[];
 };
 
-const CONCEPT_GALLERY_COUNT = 9;
-const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 9;
-const GALLERY_LOADING_TITLE = "Finding similar designs…";
-const GALLERY_LOADING_SUBTITLE = "Pulling together examples and price ranges…";
+const CONCEPT_GALLERY_COUNT = 4;
+const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 4;
+const GALLERY_LOADING_TITLE = "Generating your starter concepts…";
+const GALLERY_LOADING_SUBTITLE = "Turning your answers into design directions…";
 const GALLERY_LOADING_MESSAGES = [
   GALLERY_LOADING_TITLE,
-  "Checking pricing from similar examples…",
+  "Exploring a few design directions for your project…",
   GALLERY_LOADING_SUBTITLE,
-  "Matching your request to similar past work…",
-  "Looking for examples with a similar scope…",
-  "Reviewing comparable work and price ranges…",
-  "Pulling similar looks and pricing history…",
+  "Matching your scope, style, and inspiration picks…",
+  "Trying a few different looks for you…",
+  "Refining the strongest concepts…",
+  "Pulling together the best options…",
   "Almost there…",
 ] as const;
 
@@ -345,17 +349,6 @@ function readConfirmationScheduleUrlFromSteps(steps: any[] | undefined): string 
     if (url) return url;
   }
   return null;
-}
-
-function splitPricingMaskSegments(rangeText: string | null): {
-  prefix: string;
-  blur: string;
-} | null {
-  if (!rangeText) return null;
-  const raw = String(rangeText).trim();
-  const m = raw.match(/^(\D*\d)(.*)$/);
-  if (!m) return { prefix: raw, blur: "" };
-  return { prefix: m[1], blur: m[2] || "" };
 }
 
 function isPricingComparableUseCase(raw?: string | null): boolean {
@@ -740,6 +733,10 @@ export function ImagePreviewExperience(props: {
   disableConceptPicker?: boolean;
   /** Optional hook to bring Guided controls into focus. */
   onKeepDesigning?: () => void;
+  /** Matches visible preview chrome: concept grid vs single hero vs no image yet. */
+  onPreviewSurfaceModeChange?: (mode: "gallery" | "single" | "empty") => void;
+  /** Form question-pane Back on step 0 bumps this so we return to the concept grid. */
+  stepNavReturnToGalleryNonce?: number;
 }) {
   const { theme, config: designConfig } = useFormTheme();
   const {
@@ -765,6 +762,8 @@ export function ImagePreviewExperience(props: {
     toolingEnabled = true,
     disableConceptPicker = false,
     onKeepDesigning,
+    onPreviewSurfaceModeChange,
+    stepNavReturnToGalleryNonce = 0,
   } = props;
 
   const initialCache = useMemo(() => loadCache(instanceId, sessionId), [instanceId, sessionId]);
@@ -784,8 +783,6 @@ export function ImagePreviewExperience(props: {
     [designConfig]
   );
   const conceptGalleryTargetCount = useMemo(
-    // Initial scene gallery should always target eight concepts, even if an older
-    // theme config still carries the previous 4-image default.
     () => Math.max(CONCEPT_GALLERY_COUNT, Math.min(12, Math.max(galleryMaxImages || CONCEPT_GALLERY_COUNT, CONCEPT_GALLERY_COUNT))),
     [galleryMaxImages]
   );
@@ -874,11 +871,40 @@ export function ImagePreviewExperience(props: {
   const pendingActionRef = useRef<null | "refresh" | "upload" | "download">(null);
   const pendingGenerateModeRef = useRef<"manual" | "auto">("manual");
   const gateContextRef = useRef<string>("design_and_estimate");
+
+  const onGenerateGateOpenChange = useCallback((nextOpen: boolean) => {
+    setShowGenerateGate((prevOpen) => {
+      if (prevOpen === nextOpen) return prevOpen;
+      if (!nextOpen) {
+        pendingActionRef.current = null;
+        pendingGenerateModeRef.current = "manual";
+        gateContextRef.current = "design_and_estimate";
+      }
+      return nextOpen;
+    });
+  }, []);
+  const onDownloadGateOpenChange = useCallback((nextOpen: boolean) => {
+    setShowDownloadGate((prevOpen) => {
+      if (prevOpen === nextOpen) return prevOpen;
+      if (!nextOpen) pendingActionRef.current = null;
+      return nextOpen;
+    });
+  }, []);
+  const onUploadGateOpenChange = useCallback((nextOpen: boolean) => {
+    setShowUploadGate((prevOpen) => {
+      if (prevOpen === nextOpen) return prevOpen;
+      if (!nextOpen) pendingActionRef.current = null;
+      return nextOpen;
+    });
+  }, []);
+
   const promptSubmitNonceRef = useRef<number>(0);
   const promptSubmitNonceInitializedRef = useRef(false);
   const autoGenerationCounterScopeRef = useRef<string>(autoGenerationCounterScope);
   const previewRefreshNonceRef = useRef<number>(0);
   const pendingManualGenerateRef = useRef(false);
+  /** One-shot refinement from preview suggestion chips (not persisted to step-promptInput). */
+  const pendingRefinementNotesRef = useRef<string | null>(null);
   const pendingBudgetRefineRef = useRef(false);
   const pendingBudgetTierShiftRef = useRef(false);
   const prevBudgetForPricingRef = useRef<number | null>(null);
@@ -888,6 +914,8 @@ export function ImagePreviewExperience(props: {
   const skipNextFetchRef = useRef(false);
   const currentHeroRef = useRef<string | null>(null);
   const fetchAccuratePricingRef = useRef<(() => Promise<void>) | null>(null);
+  /** Synchronous guard: React Strict Mode and overlapping effects can fire twice before `running` state commits. */
+  const accuratePricingFetchLockRef = useRef(false);
   const [accuratePricing, setAccuratePricing] = useState<null | CachedPricing>(null);
   const [accuratePricingStatus, setAccuratePricingStatus] = useState<"idle" | "running" | "complete" | "error">("idle");
   const [liveBudget, setLiveBudget] = useState<number | null>(() => extractBudgetValue(stepDataSoFar || {}));
@@ -1218,6 +1246,17 @@ export function ImagePreviewExperience(props: {
     return activeRun.images[idx] ?? activeRun.images[0] ?? null;
   }, [activeRun, selectedConceptIndex]);
 
+  const previewSurfaceMode = useMemo((): "gallery" | "single" | "empty" => {
+    // Gallery first (including progressive load with placeholders) so the shell can hide the question pane until the user picks a tile.
+    if (showConceptPicker) return "gallery";
+    if (!hero) return "empty";
+    return "single";
+  }, [hero, showConceptPicker]);
+
+  useEffect(() => {
+    onPreviewSurfaceModeChange?.(previewSurfaceMode);
+  }, [previewSurfaceMode, onPreviewSurfaceModeChange]);
+
   // Persist "context updated" info, but do NOT auto-regenerate.
   useEffect(() => {
     if (!enabled) return;
@@ -1431,6 +1470,7 @@ export function ImagePreviewExperience(props: {
       })();
 
       const hasExistingPreview = Boolean(baseReferenceImage);
+      const useCase = normalizeUseCase((config as any)?.useCase);
       const isBudgetDrivenRegeneration = Boolean(pendingBudgetRefineRef.current);
       const isBudgetTierShift = Boolean(pendingBudgetTierShiftRef.current);
       const generationSignatureAtStart = safeJsonStringify({
@@ -1447,9 +1487,20 @@ export function ImagePreviewExperience(props: {
         isBudgetDrivenRegeneration
           ? (originalUploadedAnchorImage || activeAnchorImage)
           : activeAnchorImage;
+      const shouldUseOptionCardImagesAsGenerationRefs =
+        hasExistingPreview || useCase !== "scene" || Boolean(runAnchorImage);
+      const generationIntent: "initial" | "small_improvement" | "regenerate" | "budget_tier_shift" = isBudgetDrivenRegeneration
+        ? isBudgetTierShift
+          ? "budget_tier_shift"
+          : "regenerate"
+        : hasExistingPreview
+          ? "small_improvement"
+          : "initial";
       // First preview uses uploaded anchors. After the first generated preview exists,
       // treat prompt/guided edits as refinements anchored to the active anchor image.
       const primaryReferenceImage = runAnchorImage;
+      const isInitialConceptGalleryRun = generationIntent === "initial" && !hasExistingPreview;
+      const initialReferenceCap = stepSceneUpload || stepUserUpload ? 2 : 3;
       const referenceImagesForRequest = (
         hasExistingPreview
           ? [
@@ -1460,12 +1511,15 @@ export function ImagePreviewExperience(props: {
           : [
               ...(primaryReferenceImage ? [primaryReferenceImage] : []),
               ...storedUploads.filter((u) => u && u !== primaryReferenceImage),
-              ...selectedOptionReferenceImages.filter((u) => u && u !== primaryReferenceImage),
+              ...(
+                shouldUseOptionCardImagesAsGenerationRefs
+                  ? selectedOptionReferenceImages.filter((u) => u && u !== primaryReferenceImage)
+                  : []
+              ),
             ]
       )
         .filter(isValidUrlLikeImage)
-        .slice(0, 6);
-      const useCase = normalizeUseCase((config as any)?.useCase);
+        .slice(0, isInitialConceptGalleryRun ? initialReferenceCap : 6);
       // Only use scene-placement when there's a product to place. For pure scene redesign (no product),
       // keep scene use case with generationIntent-driven prompts (flux-kontext + scene module).
       const canUseScenePlacementForRefinement =
@@ -1489,23 +1543,16 @@ export function ImagePreviewExperience(props: {
       const originalReferenceImage =
         (stepSceneUpload || stepUserUpload || storedUploads?.[0] || null) as string | null;
       const generationIndex = runs.length;
-      const generationIntent: "initial" | "small_improvement" | "regenerate" | "budget_tier_shift" = isBudgetDrivenRegeneration
-        ? isBudgetTierShift
-          ? "budget_tier_shift"
-          : "regenerate"
-        : hasExistingPreview
-          ? "small_improvement"
-          : "initial";
       const guideOnlyInitialSceneRun =
         useCase === "scene" &&
         generationIntent === "initial" &&
         !hasExistingPreview &&
         referenceImagesForRequest.length > 0;
       // For refinements: use latest image as base. scene-placement + hasExistingPreview = drilldown edit.
+      // Do not clear this for guide_only: that mode only marks style refs as non-anchors; the user's room
+      // upload must still be the edit target when present.
       const sceneImageForRequest =
-        guideOnlyInitialSceneRun
-          ? undefined
-          : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
+        (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
           ? runAnchorImage
           : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && stepSceneUpload
             ? stepSceneUpload
@@ -1545,20 +1592,41 @@ export function ImagePreviewExperience(props: {
 	          (effectiveStepDataSoFar as any)?.["step_service_primary"] ??
 	          (effectiveStepDataSoFar as any)?.["step_service"];
 	        const selectedServiceId = Array.isArray(serviceIdRaw) ? String(serviceIdRaw[0] || "") : String(serviceIdRaw || "");
+	        const catalogMeta = selectedServiceId
+	          ? (() => {
+	              const cat = loadServiceCatalog(sessionId);
+	              return (cat?.byServiceId?.[selectedServiceId] ?? null) as {
+	                serviceName?: string | null;
+	                serviceSummary?: string | null;
+	                industryId?: string | null;
+	                industryName?: string | null;
+	              } | null;
+	            })()
+	          : null;
 	        const perServiceSummary =
-	          selectedServiceId
-	            ? (() => {
-	                const cat = loadServiceCatalog(sessionId);
-	                const meta: any = cat?.byServiceId?.[selectedServiceId];
-	                return typeof meta?.serviceSummary === "string" ? meta.serviceSummary : null;
-	              })()
+	          catalogMeta && typeof catalogMeta.serviceSummary === "string" ? catalogMeta.serviceSummary : null;
+	        const perServiceName =
+	          catalogMeta && typeof catalogMeta.serviceName === "string" && catalogMeta.serviceName.trim()
+	            ? catalogMeta.serviceName.trim()
 	            : null;
 	        const combinedServiceSummary =
 	          [formCtx.serviceSummary, perServiceSummary].filter((s) => typeof s === "string" && String(s).trim()).join("\n\n") || null;
-		      const instanceContext = {
+		      const instanceContext: Record<string, unknown> = {
 		          businessContext: (config as any)?.businessContext ?? formCtx.businessContext,
 		          serviceSummary: combinedServiceSummary,
 		        };
+		      if (selectedServiceId || perServiceName) {
+		        instanceContext.service = {
+		          ...(selectedServiceId ? { id: selectedServiceId } : {}),
+		          ...(perServiceName ? { name: perServiceName } : {}),
+		        };
+		      }
+		      if (catalogMeta?.industryName || catalogMeta?.industryId) {
+		        instanceContext.industry = {
+		          ...(catalogMeta.industryId ? { id: catalogMeta.industryId } : {}),
+		          ...(catalogMeta.industryName ? { name: catalogMeta.industryName } : {}),
+		        };
+		      }
 
 		        const ensureUrlLikeImage = async (src: string): Promise<string> => {
 		          if (!src || typeof src !== "string") return src;
@@ -1599,20 +1667,26 @@ export function ImagePreviewExperience(props: {
 		        const ensuredRefs = await Promise.all(refsForGeneration.map((u) => ensureUrlLikeImage(u)));
 		        const uniqueRefs = Array.from(new Set(ensuredRefs.filter(isValidUrlLikeImage))).slice(0, 6);
 
-		        const endpoint = "/api/generate";
+		        const endpoint =
+              normalizedUseCase === "tryon"
+                ? "/api/generate/try-on"
+                : normalizedUseCase === "scene-placement"
+                  ? "/api/generate/scene-placement"
+                  : normalizedUseCase === "scene-refinement"
+                    ? "/api/generate/scene-refinement"
+                    : "/api/generate/scene";
 		        const budgetForRequest = extractBudgetValue(effectiveStepDataSoFar || {});
-		        const refinementNotesRaw = (effectiveStepDataSoFar as any)?.["step-promptInput"];
+		        const pendingRefinement = pendingRefinementNotesRef.current;
+		        pendingRefinementNotesRef.current = null;
+		        const refinementNotesRaw =
+		          pendingRefinement !== null ? pendingRefinement : (effectiveStepDataSoFar as any)?.["step-promptInput"];
 		        const refinementNotes =
 		          typeof refinementNotesRaw === "string" && refinementNotesRaw.trim() ? refinementNotesRaw.trim() : undefined;
 		        const hasDirectImageInput = Boolean(userImage || productImage || sceneImage);
+		        // Multi-image concept grid: text + style refs only. A real upload (room/person/product) uses edit routing.
 		        const shouldGenerateConceptGallery =
-		          generationIntent === "initial" &&
-		          (
-		            !hasDirectImageInput ||
-		            ((normalizedUseCase === "scene" || normalizedUseCase === "scene-refinement") && Boolean(sceneImage))
-		          );
+		          generationIntent === "initial" && !hasDirectImageInput;
 		        const numOutputs = shouldGenerateConceptGallery ? conceptGalleryTargetCount : 1;
-            const initialBatchSize = shouldGenerateConceptGallery ? Math.min(2, numOutputs) : numOutputs;
             const generationMessage =
               !hasExistingPreview || shouldGenerateConceptGallery
                 ? GALLERY_LOADING_TITLE
@@ -1624,12 +1698,12 @@ export function ImagePreviewExperience(props: {
 		          sessionId,
 		          useCase: normalizedUseCase,
 		          generationIntent,
-		          stepDataSoFar: effectiveStepDataSoFar ?? {},
+              stepDataSoFar: effectiveStepDataSoFar ?? {},
 		          answeredQA,
-		          askedStepIds,
+              askedStepIds,
 		          instanceContext: { ...instanceContext },
 		        };
-		        if (guideOnlyInitialSceneRun) requestBodyBase.referenceMode = "guide_only";
+		        if (guideOnlyInitialSceneRun && !sceneImage) requestBodyBase.referenceMode = "guide_only";
 		        if (refinementNotes) requestBodyBase.refinementNotes = refinementNotes;
 		        if (originalReferenceImage) requestBodyBase.originalReferenceImage = originalReferenceImage;
 		        if (budgetForRequest !== null) requestBodyBase.budgetRange = budgetForRequest;
@@ -1649,8 +1723,11 @@ export function ImagePreviewExperience(props: {
 			          if (normalizedUseCase === "scene-placement" && productImage) requestBodyBase.productImage = productImage;
 			          requestBodyBase.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
 			        } else {
-		          if (!guideOnlyInitialSceneRun && sceneImage) requestBodyBase.sceneImage = sceneImage;
-		          if (uniqueRefs.length > 0) requestBodyBase.referenceImages = uniqueRefs.slice(0, 6);
+		          if (sceneImage) requestBodyBase.sceneImage = sceneImage;
+		          const refsMinusAnchor = sceneImage
+		            ? uniqueRefs.filter((u: string) => u && u !== sceneImage)
+		            : uniqueRefs;
+		          if (refsMinusAnchor.length > 0) requestBodyBase.referenceImages = refsMinusAnchor.slice(0, 6);
 		        }
 
             const buildBaseCache = (base?: PreviewCacheV3 | null): PreviewCacheV3 =>
@@ -1687,6 +1764,22 @@ export function ImagePreviewExperience(props: {
                 const base = buildBaseCache(prev ?? loadCache(instanceId, sessionId));
                 const nextRuns = Array.isArray(base.runs) ? [...base.runs] : [];
                 const existingIndex = nextRuns.findIndex((r) => r.id === runId);
+                const priorActiveRun =
+                  existingIndex < 0 &&
+                  params.status === "running" &&
+                  (!params.images || params.images.length === 0) &&
+                  base.activeRunId &&
+                  base.activeRunId !== runId
+                    ? nextRuns.find((r) => r.id === base.activeRunId)
+                    : null;
+                const carryoverImages =
+                  priorActiveRun && Array.isArray(priorActiveRun.images) && priorActiveRun.images.length > 0
+                    ? [...priorActiveRun.images]
+                    : [];
+                const carryoverPricing =
+                  carryoverImages.length > 0 && Array.isArray(priorActiveRun?.imagePricing) && priorActiveRun.imagePricing.length > 0
+                    ? [...priorActiveRun.imagePricing]
+                    : ([] as (CachedPricing | undefined)[]);
                 const existingRun =
                   existingIndex >= 0
                     ? nextRuns[existingIndex]
@@ -1695,10 +1788,11 @@ export function ImagePreviewExperience(props: {
                         createdAt: Date.now(),
                         contextSignature: generationSignatureAtStart,
                         answeredQuestionCount: Number.isFinite(answeredQuestionCount) ? answeredQuestionCount : null,
-                        images: [],
+                        images: carryoverImages,
                         expectedImageCount: numOutputs,
                         message: generationMessage,
                         stepDataSnapshot: pricingContextForNextRun.stepDataSnapshot,
+                        ...(carryoverPricing.length > 0 ? { imagePricing: carryoverPricing } : {}),
                       } satisfies PreviewRun);
                 const mergedImages =
                   params.images && params.images.length > 0
@@ -1752,215 +1846,88 @@ export function ImagePreviewExperience(props: {
               });
             };
 
-            const fetchImageBatch = async (requestedOutputs: number, variantStartIndex: number, attemptIndex = 0) => {
-              if (requestedOutputs <= 0) {
-                return { images: [] as string[], message: generationMessage, imagePricing: [] as (CachedPricing | undefined)[] };
-              }
-              const requestBody: any = {
-                ...requestBodyBase,
-                numOutputs: requestedOutputs,
-              };
-              if (shouldGenerateConceptGallery) {
-                requestBody.variationMode = "price_ladder_9";
-                requestBody.variantStartIndex = variantStartIndex;
-              }
-              if (generationIndex !== undefined) requestBody.generationIndex = generationIndex + attemptIndex;
-              const res = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Accept: "application/json" },
-                cache: "no-store",
-                body: JSON.stringify(requestBody),
-              });
-              const json = await res.json().catch(() => ({}));
-              if (!res.ok) {
-                const errorMessage =
-                  res.status === 413
-                    ? "That photo is too large to process. Try a smaller image (or retake the photo)."
-                    : typeof (json as any)?.error === "string"
-                      ? (json as any).error
-                      : `Failed (${res.status})`;
-                const detailsRaw = (json as any)?.details;
-                const normalizedDetails =
-                  typeof detailsRaw === "string"
-                    ? detailsRaw
-                    : detailsRaw && typeof detailsRaw === "object"
-                      ? safeJsonStringify(detailsRaw)
-                      : null;
-                responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
-                const err = new Error(errorMessage) as Error & { details?: string | null };
-                err.details = responseErrorDetails;
-                throw err;
-              }
-
-              const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
-              if (process.env.NODE_ENV !== "production") {
-                console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
-              }
-              if (imgs.length === 0) {
-                throw new Error("Preview generated, but no images were returned.");
-              }
-              const normalizedImages = imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src));
-              if (normalizedImages.length === 0) {
-                throw new Error("Preview generated, but only a placeholder image was returned.");
-              }
-              const rawVariants = Array.isArray((json as any)?.variants) ? ((json as any).variants as any[]) : [];
-              const pricingByImage = new Map<string, CachedPricing>();
-              rawVariants.forEach((variant: any) => {
-                const imageUrl = typeof variant?.imageUrl === "string" ? variant.imageUrl : null;
-                const priceRange = normalizeNumericRange((variant as any)?.priceRange ?? (variant as any)?.price_range);
-                if (!imageUrl || !priceRange || !isValidUrlLikeImage(imageUrl)) return;
-                const currency =
-                  typeof variant?.priceRange?.currency === "string"
-                    ? String(variant.priceRange.currency).trim().toUpperCase()
-                    : typeof variant?.price_range?.currency === "string"
-                      ? String(variant.price_range.currency).trim().toUpperCase()
-                      : "USD";
-                const budgetTier =
-                  typeof variant?.budgetTier === "string" ? String(variant.budgetTier).trim().toLowerCase() : undefined;
-                const budgetTierRangesRaw = variant?.budgetTierRanges ?? variant?.budget_tier_ranges;
-                const budgetTierRanges =
-                  budgetTierRangesRaw && typeof budgetTierRangesRaw === "object"
-                    ? Object.fromEntries(
-                        Object.entries(budgetTierRangesRaw)
-                          .map(([key, value]) => [key, normalizeNumericRange(value)])
-                          .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[1]))
-                      )
-                    : undefined;
-                pricingByImage.set(imageUrl, {
-                  totalMin: priceRange.low,
-                  totalMax: priceRange.high,
-                  currency,
-                  imagePriceRange: { low: priceRange.low, high: priceRange.high },
-                  ...(budgetTier ? { budgetTier } : {}),
-                  ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
-                  ...(typeof variant?.calibrationKey === "string" ? { calibrationKey: String(variant.calibrationKey) } : {}),
-                });
-              });
-              return {
-                images: normalizedImages,
-                message:
-                  shouldGenerateConceptGallery || !hasExistingPreview
-                    ? generationMessage
-                    : typeof (json as any)?.message === "string"
-                      ? String((json as any).message)
-                      : generationMessage,
-                imagePricing: normalizedImages.map((src: string) => pricingByImage.get(src)),
-              };
-            };
-
-            const fetchImageBatchUntilFilled = async (requestedOutputs: number, variantStartIndex: number) => {
-              if (requestedOutputs <= 0) {
-                return { images: [] as string[], message: generationMessage, imagePricing: [] as (CachedPricing | undefined)[] };
-              }
-              let collected: string[] = [];
-              let message = generationMessage;
-              let attempts = 0;
-              let nextVariantStartIndex = variantStartIndex;
-              const pricingByImage = new Map<string, CachedPricing>();
-
-              while (collected.length < requestedOutputs && attempts < 4) {
-                const remaining = requestedOutputs - collected.length;
-                const batch = await fetchImageBatch(remaining, nextVariantStartIndex, attempts);
-                message = batch.message;
-                batch.images.forEach((src: string, index: number) => {
-                  const pricing = batch.imagePricing?.[index];
-                  if (pricing && !pricingByImage.has(src)) pricingByImage.set(src, pricing);
-                });
-                const merged = mergeUniqueImageUrls(collected, batch.images);
-                const gained = merged.length - collected.length;
-                collected = merged;
-                attempts += 1;
-                nextVariantStartIndex = variantStartIndex + collected.length;
-
-                if (gained <= 0) break;
-              }
-
-              if (collected.length < requestedOutputs) {
-                console.warn("[preview] batch returned fewer images than requested", {
-                  requestedOutputs,
-                  actualImages: collected.length,
-                });
-              }
-
-              return {
-                images: collected,
-                message,
-                imagePricing: collected.map((src: string) => pricingByImage.get(src)),
-              };
-            };
-
             setActiveGenerationReason(reason);
             writeRunState({ status: "running", message: generationMessage });
 
-            const firstBatch = await fetchImageBatchUntilFilled(initialBatchSize, 0);
-            const remainingAfterFirstBatch = Math.max(0, numOutputs - firstBatch.images.length);
-            writeRunState({
-              status: remainingAfterFirstBatch > 0 ? "running" : "complete",
-              images: firstBatch.images,
-              appendImages: false,
-              message: firstBatch.message,
-              imagePricing: firstBatch.imagePricing,
-              imagePricingOffset: 0,
-              generated: remainingAfterFirstBatch === 0,
-            });
-
-        let initialImagePricing: (CachedPricing | undefined)[] | undefined;
-        try {
-          const pricedHero = firstBatch.images[0] ?? null;
-          if (pricedHero) {
-            const priced = await requestAccuratePricing({
-              answeredQA,
-              askedStepIds,
-              instanceContext,
-              previewImageUrl: pricedHero,
-              pricingScenario: pricingContextForNextRun.pricingScenario,
-              baselineImageUrl: pricingContextForNextRun.baselineImageUrl,
-              baselinePriceRange: pricingContextForNextRun.baselinePriceRange,
-              changedRefinementKeys: pricingContextForNextRun.changedRefinementKeys,
-              budgetRange: budgetForRequest,
-            });
-            initialImagePricing = firstBatch.images.map((_: string, index: number) => (index === 0 ? priced : undefined));
-            if (currentHeroRef.current === null || currentHeroRef.current === hero) {
-              heroForPricingRef.current = pricedHero;
-              setAccuratePricing(priced);
-              setAccuratePricingStatus("complete");
+            const requestBody: any = {
+              ...requestBodyBase,
+              numOutputs,
+            };
+            if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
+            if (process.env.NODE_ENV !== "production") {
+              console.debug("[preview] generate request", {
+                endpoint,
+                useCase: normalizedUseCase,
+                generationIntent,
+                hasExistingPreview,
+                isInitialConceptGalleryRun,
+                guideOnlyInitialSceneRun,
+                numOutputs,
+                stepDataKeys:
+                  requestBody.stepDataSoFar && typeof requestBody.stepDataSoFar === "object"
+                    ? Object.keys(requestBody.stepDataSoFar).slice(0, 20)
+                    : [],
+                askedStepIdsCount: Array.isArray(requestBody.askedStepIds) ? requestBody.askedStepIds.length : 0,
+                answeredQACount: Array.isArray(requestBody.answeredQA) ? requestBody.answeredQA.length : 0,
+                hasSceneImage: Boolean(requestBody.sceneImage),
+                hasUserImage: Boolean(requestBody.userImage),
+                hasProductImage: Boolean(requestBody.productImage),
+                referenceImagesCount: Array.isArray(requestBody.referenceImages) ? requestBody.referenceImages.length : 0,
+                budgetRange: requestBody.budgetRange ?? null,
+              });
             }
-          }
-        } catch {
-          if (currentHeroRef.current === hero) setAccuratePricingStatus("error");
-        }
-
-        if (initialImagePricing) {
-          writeRunState({
-            status: remainingAfterFirstBatch > 0 ? "running" : "complete",
-            message: firstBatch.message,
-            imagePricing: initialImagePricing,
-            imagePricingOffset: 0,
-            generated: remainingAfterFirstBatch === 0,
-          });
-        }
-
-        if (remainingAfterFirstBatch > 0) {
-          try {
-            const deferredBatch = await fetchImageBatchUntilFilled(remainingAfterFirstBatch, firstBatch.images.length);
-            writeRunState({
-              status: "complete",
-              images: deferredBatch.images,
-              appendImages: true,
-              message: deferredBatch.message,
-              imagePricing: deferredBatch.imagePricing,
-              imagePricingOffset: firstBatch.images.length,
-              generated: true,
+            const res = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              cache: "no-store",
+              body: JSON.stringify(requestBody),
             });
-          } catch (deferredError) {
-            console.error("[preview] deferred gallery batch failed", deferredError);
-            writeRunState({
-              status: "complete",
-              message: firstBatch.message,
-              generated: true,
-            });
-          }
-        }
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              const errorMessage =
+                res.status === 413
+                  ? "That photo is too large to process. Try a smaller image (or retake the photo)."
+                  : typeof (json as any)?.error === "string"
+                    ? (json as any).error
+                    : `Failed (${res.status})`;
+              const detailsRaw = (json as any)?.details;
+              const normalizedDetails =
+                typeof detailsRaw === "string"
+                  ? detailsRaw
+                  : detailsRaw && typeof detailsRaw === "object"
+                    ? safeJsonStringify(detailsRaw)
+                    : null;
+              responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
+              const err = new Error(errorMessage) as Error & { details?: string | null };
+              err.details = responseErrorDetails;
+              throw err;
+            }
+
+            const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
+            if (process.env.NODE_ENV !== "production") {
+              console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
+            }
+            if (imgs.length === 0) {
+              throw new Error("Preview generated, but no images were returned.");
+            }
+            const normalizedImages = imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src));
+            if (normalizedImages.length === 0) {
+              throw new Error("Preview generated, but only a placeholder image was returned.");
+            }
+            const completedMessage =
+              shouldGenerateConceptGallery || !hasExistingPreview
+                ? generationMessage
+                : typeof (json as any)?.message === "string"
+                  ? String((json as any).message)
+                  : generationMessage;
+
+        writeRunState({
+          status: "complete",
+          images: normalizedImages,
+          appendImages: false,
+          message: completedMessage,
+          generated: true,
+        });
 
         void refreshRegenAllowance();
       } catch (e) {
@@ -1991,7 +1958,7 @@ export function ImagePreviewExperience(props: {
               generatedForContextSignature: null,
               lastGeneratedAnsweredCount: null,
             } satisfies PreviewCacheV3);
-          const nextRuns = (Array.isArray(base.runs) ? base.runs : []).filter((run) => run.id !== runId || run.images.length > 0);
+          const nextRuns = (Array.isArray(base.runs) ? base.runs : []).filter((run) => run.id !== runId);
           const nextActiveRunId =
             base.activeRunId === runId ? nextRuns.at(-1)?.id ?? null : base.activeRunId ?? nextRuns.at(-1)?.id ?? null;
           const next: PreviewCacheV3 = {
@@ -2202,6 +2169,16 @@ export function ImagePreviewExperience(props: {
   const progressiveGalleryCellCount = showProgressiveGalleryLoader
     ? Math.max(INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS, activeRunExpectedImageCount, activeRun?.images?.length ?? 0)
     : Math.max(activeRun?.images?.length ?? 0, activeRunExpectedImageCount);
+  /** Cell count for the concept picker grid (placeholders while loading, then real tiles). */
+  const conceptGalleryCellCount = Math.max(
+    1,
+    showProgressiveGalleryLoader
+      ? progressiveGalleryCellCount
+      : Math.min(activeRunExpectedImageCount, conceptGalleryTargetCount)
+  );
+  /** Near-square grid: 4→2×2, 6→3×2, 9→3×3, capped at 4 columns. */
+  const conceptGalleryGridCols =
+    conceptGalleryCellCount <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(conceptGalleryCellCount)));
   const showRefreshMask = Boolean(hero && busy && !showConceptPicker);
   const showOverlayLoader = Boolean((showLoader || busy) && !showProgressiveGalleryLoader);
   const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
@@ -2209,6 +2186,26 @@ export function ImagePreviewExperience(props: {
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
   /** Single-image mode with pricing unlocked (no gate, or lead captured). */
   const revenuePanelActive = Boolean(hero && !showConceptPicker && (!leadGateEnabled || leadCaptured));
+
+  const openDesignEstimateLeadFlow = useCallback(() => {
+    if (!leadGateEnabled) return;
+    if (leadCaptured) return;
+    setCenteredPricingError(null);
+    setCenteredPricingStep("email");
+    setShowCenteredPricingForm(true);
+    upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
+  }, [leadCaptured, leadGateEnabled, sessionId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOpenGate = (e: Event) => {
+      const detail = (e as CustomEvent<{ sessionId?: string }>).detail;
+      if (!detail || detail.sessionId !== sessionId) return;
+      openDesignEstimateLeadFlow();
+    };
+    window.addEventListener(OPEN_DESIGN_ESTIMATE_GATE_EVENT, onOpenGate);
+    return () => window.removeEventListener(OPEN_DESIGN_ESTIMATE_GATE_EVENT, onOpenGate);
+  }, [openDesignEstimateLeadFlow, sessionId]);
   const galleryLoadingMessage =
     GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
 
@@ -2431,11 +2428,28 @@ export function ImagePreviewExperience(props: {
       : undefined;
   const pricingCurrency = (previewPricing?.currency || detectCurrencyFromLocale(pricingLocale) || "USD").toUpperCase();
 
+  /** When a tile has no per-image pricing yet, reuse explicit config preview range (never default 200–400 unless configured). */
+  const previewPricingForTileFallback = useMemo((): CachedPricing | undefined => {
+    if (!hasExplicitPricingConfig || !previewPricing) return undefined;
+    const lo = previewPricing.totalMin;
+    const hi = previewPricing.totalMax;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return undefined;
+    return {
+      totalMin: Math.min(lo, hi),
+      totalMax: Math.max(lo, hi),
+      currency: String(previewPricing.currency || pricingCurrency || "USD")
+        .trim()
+        .toUpperCase() || "USD",
+    };
+  }, [hasExplicitPricingConfig, previewPricing, pricingCurrency]);
+
   // Exact pricing is only fetched for the currently selected hero image.
   // The rest of the gallery keeps its original seeded ranges from the first pass.
   const fetchAccuratePricing = useCallback(async () => {
     if (!instanceId || !sessionId) return;
+    if (accuratePricingFetchLockRef.current) return;
     if (accuratePricingStatus === "running") return;
+    accuratePricingFetchLockRef.current = true;
     const heroAtFetchStart = hero;
     setAccuratePricingStatus("running");
 
@@ -2454,20 +2468,41 @@ export function ImagePreviewExperience(props: {
         (effectiveStepDataSoFar as any)?.["step_service_primary"] ??
         (effectiveStepDataSoFar as any)?.["step_service"];
       const selectedServiceId = Array.isArray(serviceIdRaw) ? String(serviceIdRaw[0] || "") : String(serviceIdRaw || "");
+      const catalogMeta = selectedServiceId
+        ? (() => {
+            const cat = loadServiceCatalog(sessionId);
+            return (cat?.byServiceId?.[selectedServiceId] ?? null) as {
+              serviceName?: string | null;
+              serviceSummary?: string | null;
+              industryId?: string | null;
+              industryName?: string | null;
+            } | null;
+          })()
+        : null;
       const perServiceSummary =
-        selectedServiceId
-          ? (() => {
-              const cat = loadServiceCatalog(sessionId);
-              const meta: any = cat?.byServiceId?.[selectedServiceId];
-              return typeof meta?.serviceSummary === "string" ? meta.serviceSummary : null;
-            })()
+        catalogMeta && typeof catalogMeta.serviceSummary === "string" ? catalogMeta.serviceSummary : null;
+      const perServiceName =
+        catalogMeta && typeof catalogMeta.serviceName === "string" && catalogMeta.serviceName.trim()
+          ? catalogMeta.serviceName.trim()
           : null;
       const combinedServiceSummary =
         [formCtx.serviceSummary, perServiceSummary].filter((s) => typeof s === "string" && String(s).trim()).join("\n\n") || null;
-      const instanceContext = {
+      const instanceContext: Record<string, unknown> = {
         businessContext: (config as any)?.businessContext ?? formCtx.businessContext,
         serviceSummary: combinedServiceSummary,
       };
+      if (selectedServiceId || perServiceName) {
+        instanceContext.service = {
+          ...(selectedServiceId ? { id: selectedServiceId } : {}),
+          ...(perServiceName ? { name: perServiceName } : {}),
+        };
+      }
+      if (catalogMeta?.industryName || catalogMeta?.industryId) {
+        instanceContext.industry = {
+          ...(catalogMeta.industryId ? { id: catalogMeta.industryId } : {}),
+          ...(catalogMeta.industryName ? { name: catalogMeta.industryName } : {}),
+        };
+      }
 
       const cached = await requestAccuratePricing({
         answeredQA,
@@ -2522,6 +2557,7 @@ export function ImagePreviewExperience(props: {
     } catch {
       if (currentHeroRef.current === heroAtFetchStart) setAccuratePricingStatus("error");
     } finally {
+      accuratePricingFetchLockRef.current = false;
       setPendingExactPricingReveal(false);
     }
   }, [
@@ -2661,15 +2697,6 @@ export function ImagePreviewExperience(props: {
     void downloadActiveImage();
   }, [downloadActiveImage, hero, leadGateActive]);
 
-  const handleSkipContinue = useCallback(() => {
-    pendingActionRef.current = null;
-    setShowUploadGate(false);
-    setShowDownloadGate(false);
-    setShowGenerateGate(false);
-    // Explicit skip should allow continuing without forcing lead capture UX.
-    setLeadCaptured(true);
-  }, []);
-
   // Let the parent know whether a real preview image is currently visible.
   useEffect(() => {
     onPreviewVisibleChange?.(isPreviewVisible);
@@ -2687,6 +2714,43 @@ export function ImagePreviewExperience(props: {
   const canNext = activeIndex < runs.length - 1;
   const hasMultiImageRun = runs.some((r) => r.images && r.images.length > 1);
   const activeRunHasMultiple = Boolean(activeRun?.images && activeRun.images.length > 1);
+  const lastStepNavGalleryNonceRef = useRef(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const n = stepNavReturnToGalleryNonce;
+    if (n <= 0 || n === lastStepNavGalleryNonceRef.current) return;
+    lastStepNavGalleryNonceRef.current = n;
+    if (!hero) return;
+    if (showConceptPicker) return;
+    if (!(selectedConceptIndex !== null || hasMultiImageRun)) return;
+
+    setCache((prev) => {
+      const base = prev ?? loadCache(instanceId, sessionId);
+      if (!base) return prev;
+      const runWithGrid = runs.find((r) => r.images && r.images.length > 1);
+      const next: PreviewCacheV3 = {
+        ...base,
+        viewMode: "gallery",
+        activeRunId: activeRunHasMultiple ? base.activeRunId : runWithGrid?.id ?? base.activeRunId,
+        selectedConceptIndex: null,
+        updatedAt: Date.now(),
+      };
+      saveCache(instanceId, sessionId, next);
+      return next;
+    });
+  }, [
+    activeRunHasMultiple,
+    enabled,
+    hasMultiImageRun,
+    hero,
+    instanceId,
+    runs,
+    selectedConceptIndex,
+    sessionId,
+    showConceptPicker,
+    stepNavReturnToGalleryNonce,
+  ]);
+
   const activeNavigationTransition =
     navigationTransition && navigationTransition.toRunId === activeRun?.id && navigationTransition.toImage === hero
       ? navigationTransition
@@ -2786,65 +2850,81 @@ export function ImagePreviewExperience(props: {
   const effectivePreviewSize = previewSize;
   // Neutral glass palette for all overlay controls (pills + lead popover).
   const primary = theme.primaryColor || "#3b82f6";
-  const overlayBg = "rgba(51, 65, 85, 0.52)";
-  const overlayHoverBg = "rgba(51, 65, 85, 0.64)";
-  const overlayBorder = "rgba(255,255,255,0.24)";
-  const galleryPlaceholderPillBg = "rgba(0, 0, 0, 0.60)";
-  const galleryPlaceholderPillHoverBg = "rgba(0, 0, 0, 0.72)";
-  const singleModePricingPillBg = galleryPlaceholderPillBg;
-  const singleModePricingPillHoverBg = galleryPlaceholderPillHoverBg;
   const pricingDisplayFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
-  // Keep lead popover on the exact same glass color token as overlay pills.
-  const leadGenOverlayBg = overlayBg;
-  const leadGenFg = "rgba(255,255,255,0.95)";
-  const leadGenMuted = "rgba(255,255,255,0.72)";
-  const leadGenInputBg = "rgba(255,255,255,0.12)";
-  const leadGenInputBorder = "rgba(255,255,255,0.20)";
-  const leadGenPlaceholder = "rgba(255,255,255,0.58)";
-  const leadGenActionBg = singleModePricingPillBg;
-  const leadGenActionFg = "#ffffff";
-  const leadGenActionBorder = "rgba(255,255,255,0.22)";
-  const leadGenRing = "rgba(255,255,255,0.38)";
-  const overlayVars = {
-    ["--sif-overlay-bg" as any]: overlayBg,
-    ["--sif-overlay-hover-bg" as any]: overlayHoverBg,
-    ["--sif-overlay-border" as any]: overlayBorder,
-    ["--sif-lead-gen-overlay-bg" as any]: leadGenOverlayBg,
-    ["--sif-lead-gen-fg" as any]: leadGenFg,
-    ["--sif-lead-gen-muted" as any]: leadGenMuted,
-    ["--sif-lead-gen-input-bg" as any]: leadGenInputBg,
-    ["--sif-lead-gen-input-border" as any]: leadGenInputBorder,
-    ["--sif-lead-gen-placeholder" as any]: leadGenPlaceholder,
-    ["--sif-lead-gen-action-bg" as any]: leadGenActionBg,
-    ["--sif-lead-gen-action-fg" as any]: leadGenActionFg,
-    ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
-    ["--sif-lead-gen-ring" as any]: leadGenRing,
-  } as React.CSSProperties;
-  const singleModeOverlayVars = {
-    ...overlayVars,
-    ["--sif-overlay-bg" as any]: galleryPlaceholderPillBg,
-    ["--sif-overlay-hover-bg" as any]: galleryPlaceholderPillHoverBg,
-  } as React.CSSProperties;
+  /** Stable identities — passed to LeadGenPopover `contentStyle`; new objects each render can thrash Radix focus-scope. */
+  const {
+    overlayVars,
+    singleModeOverlayVars,
+    pricingPillVars,
+    galleryPlaceholderPillBg,
+    singleModePricingPillBg,
+    overlayBorder,
+  } = useMemo(() => {
+      const overlayBg = "rgba(51, 65, 85, 0.52)";
+      const overlayHoverBg = "rgba(51, 65, 85, 0.64)";
+      const overlayBorderLocal = "rgba(255,255,255,0.24)";
+      const galleryPlaceholderPillBgLocal = "rgba(0, 0, 0, 0.60)";
+      const galleryPlaceholderPillHoverBg = "rgba(0, 0, 0, 0.72)";
+      const leadGenOverlayBg = overlayBg;
+      const leadGenFg = "rgba(255,255,255,0.95)";
+      const leadGenMuted = "rgba(255,255,255,0.72)";
+      const leadGenInputBg = "rgba(255,255,255,0.12)";
+      const leadGenInputBorder = "rgba(255,255,255,0.20)";
+      const leadGenPlaceholder = "rgba(255,255,255,0.58)";
+      const leadGenActionBg = galleryPlaceholderPillBgLocal;
+      const leadGenActionFg = "#ffffff";
+      const leadGenActionBorder = "rgba(255,255,255,0.22)";
+      const leadGenRing = "rgba(255,255,255,0.38)";
+      const overlayVarsInner = {
+        ["--sif-overlay-bg" as any]: overlayBg,
+        ["--sif-overlay-hover-bg" as any]: overlayHoverBg,
+        ["--sif-overlay-border" as any]: overlayBorderLocal,
+        ["--sif-lead-gen-overlay-bg" as any]: leadGenOverlayBg,
+        ["--sif-lead-gen-fg" as any]: leadGenFg,
+        ["--sif-lead-gen-muted" as any]: leadGenMuted,
+        ["--sif-lead-gen-input-bg" as any]: leadGenInputBg,
+        ["--sif-lead-gen-input-border" as any]: leadGenInputBorder,
+        ["--sif-lead-gen-placeholder" as any]: leadGenPlaceholder,
+        ["--sif-lead-gen-action-bg" as any]: leadGenActionBg,
+        ["--sif-lead-gen-action-fg" as any]: leadGenActionFg,
+        ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
+        ["--sif-lead-gen-ring" as any]: leadGenRing,
+      } as React.CSSProperties;
+      const singleModeOverlayVarsInner = {
+        ...overlayVarsInner,
+        ["--sif-overlay-bg" as any]: galleryPlaceholderPillBgLocal,
+        ["--sif-overlay-hover-bg" as any]: galleryPlaceholderPillHoverBg,
+      } as React.CSSProperties;
+      const pricingPillVarsInner = {
+        ["--sif-overlay-bg" as any]: galleryPlaceholderPillBgLocal,
+        ["--sif-overlay-hover-bg" as any]: galleryPlaceholderPillHoverBg,
+        ["--sif-pill-fg" as any]: "#ffffff",
+        ["--sif-lead-gen-overlay-bg" as any]: leadGenOverlayBg,
+        ["--sif-lead-gen-fg" as any]: leadGenFg,
+        ["--sif-lead-gen-muted" as any]: leadGenMuted,
+        ["--sif-lead-gen-input-bg" as any]: leadGenInputBg,
+        ["--sif-lead-gen-input-border" as any]: leadGenInputBorder,
+        ["--sif-lead-gen-placeholder" as any]: leadGenPlaceholder,
+        ["--sif-lead-gen-action-bg" as any]: leadGenActionBg,
+        ["--sif-lead-gen-action-fg" as any]: leadGenActionFg,
+        ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
+        ["--sif-lead-gen-ring" as any]: leadGenRing,
+      } as React.CSSProperties;
+      return {
+        overlayVars: overlayVarsInner,
+        singleModeOverlayVars: singleModeOverlayVarsInner,
+        pricingPillVars: pricingPillVarsInner,
+        galleryPlaceholderPillBg: galleryPlaceholderPillBgLocal,
+        singleModePricingPillBg: galleryPlaceholderPillBgLocal,
+        overlayBorder: overlayBorderLocal,
+      };
+    }, []);
+
   const overlayButtonClass =
     "h-8 sm:h-7 inline-flex items-center gap-1.5 rounded-xl px-3 text-[0.6875rem] font-medium leading-none text-white/95 shadow-sm backdrop-blur-md bg-[var(--sif-overlay-bg)] hover:bg-[var(--sif-overlay-hover-bg)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed";
   const overlayIconButtonClass =
     "h-8 w-8 sm:h-7 sm:w-7 inline-flex items-center justify-center rounded-full text-white/90 shadow-sm backdrop-blur-md bg-[var(--sif-overlay-bg)] hover:bg-[var(--sif-overlay-hover-bg)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors";
 
-  const pricingPillVars = {
-    ["--sif-overlay-bg" as any]: singleModePricingPillBg,
-    ["--sif-overlay-hover-bg" as any]: singleModePricingPillHoverBg,
-    ["--sif-pill-fg" as any]: "#ffffff",
-    ["--sif-lead-gen-overlay-bg" as any]: leadGenOverlayBg,
-    ["--sif-lead-gen-fg" as any]: leadGenFg,
-    ["--sif-lead-gen-muted" as any]: leadGenMuted,
-    ["--sif-lead-gen-input-bg" as any]: leadGenInputBg,
-    ["--sif-lead-gen-input-border" as any]: leadGenInputBorder,
-    ["--sif-lead-gen-placeholder" as any]: leadGenPlaceholder,
-    ["--sif-lead-gen-action-bg" as any]: leadGenActionBg,
-    ["--sif-lead-gen-action-fg" as any]: leadGenActionFg,
-    ["--sif-lead-gen-action-border" as any]: leadGenActionBorder,
-    ["--sif-lead-gen-ring" as any]: leadGenRing,
-  } as React.CSSProperties;
   const centeredPricingOverlayInset = "clamp(0.7rem, 3cqi, 1rem)";
   const centeredPricingPanelWidth = "min(calc(100% - 0.05rem), clamp(19rem, 62cqi, 32rem))";
   const centeredPricingPanelRadius = "clamp(1rem, 4cqi, 1.5rem)";
@@ -2864,6 +2944,8 @@ export function ImagePreviewExperience(props: {
 
   // Pricing pill: show only in single mode (user has chosen one image), not while picking from the 4-tile gallery.
   const shouldShowPricingPill = Boolean(hero && !showConceptPicker);
+  /** Single-image preview with tooling: bottom dock (suggestions, estimate, upload) — not concept grid. */
+  const singleModePreviewChrome = Boolean(hero && !showConceptPicker && toolingEnabled);
   const formattedPricingRange = previewPricing
     ? `${formatCurrency(previewPricing.totalMin, { locale: pricingLocale, currency: pricingCurrency })}-${formatCurrency(
         previewPricing.totalMax,
@@ -3028,10 +3110,10 @@ export function ImagePreviewExperience(props: {
     accuratePricingStatus !== "error"
   );
   const pillLabel = waitingForExactPricing
-    ? "CALCULATING PRICE"
+    ? "CALCULATING COST"
     : leadGateEnabled
-      ? (leadCaptured ? "EST. PRICING" : "Show pricing")
-      : "EST. PRICING";
+      ? (leadCaptured ? "EST PRICING" : "SHOW PRICING")
+      : "EST PRICING";
   const lockedPillPrice =
     formattedAccuratePricingRange ||
     formattedCachedHeroPricingRange ||
@@ -3048,8 +3130,8 @@ export function ImagePreviewExperience(props: {
   const shouldShowCenteredPricingFormOverlay = Boolean(
     leadGateEnabled && !leadCaptured && showCenteredPricingForm
   );
-  const shouldShowBottomControlsRow = Boolean(
-    !shouldShowCenteredPricingFormOverlay && shouldShowBottomPricingPill
+  const showBottomPreviewDock = Boolean(
+    singleModePreviewChrome && !lightboxOpen && !shouldShowCenteredPricingFormOverlay
   );
   const previewPricingPillMaxWidth =
     leadGateEnabled && !leadCaptured
@@ -3086,12 +3168,7 @@ export function ImagePreviewExperience(props: {
         autoReveal
         onClick={
           leadGateEnabled && !leadCaptured
-            ? () => {
-                setCenteredPricingError(null);
-                setCenteredPricingStep("email");
-                setShowCenteredPricingForm(true);
-                upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
-              }
+            ? openDesignEstimateLeadFlow
             : () => {
                 setOverlayPricingCollapsedPreference(false);
                 setOverlayPricingExpanded(true);
@@ -3178,7 +3255,7 @@ export function ImagePreviewExperience(props: {
 
   if (!enabled) return null;
 
-  /** Show "Back to gallery" only when a single hero is active and a gallery view exists. */
+  /** Show "Back to gallery" when a single hero is active and a multi-image run exists. */
   const showGalleryBackControl =
     !showConceptPicker && Boolean(hero) && (selectedConceptIndex !== null || hasMultiImageRun);
   const handleBackToGallery = () => {
@@ -3366,7 +3443,7 @@ export function ImagePreviewExperience(props: {
 
               {/* Top controls: compact layout so actions stay available but less visually busy */}
               {toolingEnabled && !showConceptPicker && hero ? (
-                <div className="absolute inset-x-2 top-2 z-10 flex items-start justify-between pointer-events-none">
+                <div className="absolute inset-x-2 top-2 z-[60] flex items-start justify-between pointer-events-none">
                   <div className="pointer-events-auto flex items-center gap-1.5">
                     {showGalleryBackControl ? (
                       <button
@@ -3374,10 +3451,7 @@ export function ImagePreviewExperience(props: {
                         onClick={handleBackToGallery}
                         aria-label="Back to gallery"
                         title="Back to gallery"
-                        className={cn(
-                          overlayButtonClass,
-                          "h-7 rounded-full px-2.5 text-[11px] font-medium gap-1.5"
-                        )}
+                        className={cn(overlayButtonClass, "h-7 rounded-full px-2.5 text-[11px] font-medium gap-1.5")}
                         style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
                       >
                         <ArrowLeft className="h-3.5 w-3.5" />
@@ -3394,17 +3468,7 @@ export function ImagePreviewExperience(props: {
                       leadGateEnabled && !leadCaptured ? (
                         <LeadGenPopover
                           open={showGenerateGate}
-                          onOpenChange={(nextOpen) => {
-                            setShowGenerateGate((prevOpen) => {
-                              if (prevOpen === nextOpen) return prevOpen;
-                              if (!nextOpen) {
-                                pendingActionRef.current = null;
-                                pendingGenerateModeRef.current = "manual";
-                                gateContextRef.current = "design_and_estimate";
-                              }
-                              return nextOpen;
-                            });
-                          }}
+                          onOpenChange={onGenerateGateOpenChange}
                           instanceId={instanceId}
                           sessionId={sessionId}
                           gateContext={gateContextRef.current || "regenerate_manual"}
@@ -3467,19 +3531,12 @@ export function ImagePreviewExperience(props: {
                     {/* Download and expand only in single view — not meaningful in gallery picker mode */}
                     {!showConceptPicker ? (
                       <>
-                        {leadGateEnabled ? (
+                        {/* Only mount Popover while the gate can apply — same as regenerate. If we mount after
+                            capture with `open` stuck false, Radix keeps syncing open state and can loop in focus-scope. */}
+                        {leadGateEnabled && !leadCaptured ? (
                           <LeadGenPopover
                         open={showDownloadGate}
-                        onOpenChange={(nextOpen) => {
-                          if (nextOpen && !leadGateActive) return;
-                          setShowDownloadGate((prevOpen) => {
-                            if (prevOpen === nextOpen) return prevOpen;
-                            if (!nextOpen) {
-                              pendingActionRef.current = null;
-                            }
-                            return nextOpen;
-                          });
-                        }}
+                        onOpenChange={onDownloadGateOpenChange}
                         instanceId={instanceId}
                         sessionId={sessionId}
                         gateContext="download"
@@ -3544,14 +3601,13 @@ export function ImagePreviewExperience(props: {
 	            <div
                 className={cn(
                   "flex h-full w-full min-h-0 flex-col",
-                  showConceptPicker ? "overflow-hidden" : null
+                  showConceptPicker ? "overflow-hidden items-stretch" : null
                 )}
                 data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}
               >
 	              {showConceptPicker ? (
-	                <div
-	                  className="relative flex h-full min-h-0 w-full flex-col gap-1.5 p-1.5 pr-1 isolate sm:p-2 sm:pr-1.5"
-	                >
+	                <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col px-1.5 pb-1.5 pt-0 sm:px-2 sm:pb-2">
+	                  <div className="relative isolate flex h-full min-h-0 w-full flex-1 flex-col gap-0.5 overflow-hidden">
                   {showProgressiveGalleryLoader ? (
                     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4">
                       <div
@@ -3564,53 +3620,55 @@ export function ImagePreviewExperience(props: {
                     </div>
                   ) : null}
                   {!showProgressiveGalleryLoader ? (
-                    <div className="space-y-0.5 text-center">
+                    <div className="shrink-0 space-y-0 px-0.5 pb-0.5 text-center sm:px-1">
                       <p
-                        className="text-[13px] sm:text-sm font-semibold leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                        className="text-[11px] font-semibold leading-snug text-balance sm:text-[13px] md:text-sm"
                         style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                       >
-                        Here are similar examples and price ranges. Tap one to see your exact pricing.
+                        We generated starter concepts for your project. Tap one to show pricing.
                       </p>
                       <p
-                        className="text-[10px] sm:text-[11px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
-                        style={{ color: theme.textColor, fontFamily: theme.fontFamily, opacity: 0.75 }}
+                        className="text-[9px] leading-snug text-balance opacity-75 sm:text-[10px] md:text-[11px]"
+                        style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                       >
-                        Based on real examples similar to yours
+                        These are starting concepts. You can refine them after unlocking pricing.
                       </p>
                     </div>
                   ) : null}
                   <div
-                    className="w-full min-w-0 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y"
+                    className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y px-0.5 pb-0.5 sm:px-1 sm:pb-1"
                     style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties}
                   >
-                    <div className="grid w-full min-w-0 min-h-[360px] content-start grid-cols-1 gap-1.5 py-0 min-[420px]:grid-cols-2 md:grid-cols-3">
+                    <div
+                      className="grid w-full min-w-0 content-start gap-1 sm:gap-1.5"
+                      style={{
+                        gridTemplateColumns: `repeat(${conceptGalleryGridCols}, minmax(0, 1fr))`,
+                      }}
+                    >
 	                    {Array.from({
-                        length: Math.max(
-                          1,
-                          showProgressiveGalleryLoader
-                            ? progressiveGalleryCellCount
-                            : Math.min(activeRunExpectedImageCount, conceptGalleryTargetCount)
-                        ),
+                        length: conceptGalleryCellCount,
                       }).map((_, idx) => {
                         const src = activeRun?.images?.[idx] ?? null;
                         const tilePricing = activeRun?.imagePricing?.[idx];
+                        const effectiveTilePricing = tilePricing ?? previewPricingForTileFallback;
                         const tilePriceText = formatPricingRangeText({
-                          pricing: tilePricing,
+                          pricing: effectiveTilePricing,
                           locale: pricingLocale,
                           currency: pricingCurrency,
                         });
                         const tilePriceCompactText = formatCompactPricingRangeText({
-                          pricing: tilePricing,
+                          pricing: effectiveTilePricing,
                           locale: pricingLocale,
                           currency: pricingCurrency,
                         });
-                        const tilePriceMask = splitPricingMaskSegments(tilePriceText);
                         const shouldBlurTilePrice = Boolean(leadGateEnabled && !leadCaptured);
+                        const tilePriceDisplay =
+                          tilePriceCompactText || tilePriceText || "$•••–$•••";
                         if (!src) {
                           return (
                             <div
                               key={idx}
-                              className="relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
+                              className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
                               style={{
                                 borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
                               }}
@@ -3640,20 +3698,20 @@ export function ImagePreviewExperience(props: {
 	                          });
 	                        }}
 	                        className={cn(
-                            "group relative aspect-square w-full min-h-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
+                            "group relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
                             selectedConceptIndex === idx ? "border-white/80 ring-2 ring-white/50" : "border-white/20 md:hover:border-white/50"
                           )}
 	                        style={{
 	                          borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
 	                        }}
-	                        aria-label={`Select option ${idx + 1}`}
+	                        aria-label={`Select concept ${idx + 1}`}
                           aria-pressed={selectedConceptIndex === idx}
 	                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={src}
                           alt={`Concept ${idx + 1}`}
-                          className="h-full w-full object-cover transition-transform duration-200 md:group-hover:scale-[1.02]"
+                          className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-200 md:group-hover:scale-[1.02]"
                         />
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2.5">
                           <div
@@ -3662,11 +3720,11 @@ export function ImagePreviewExperience(props: {
                           >
                             {shouldBlurTilePrice ? (
                               <span className="select-none truncate text-[11px] font-semibold text-white/90">
-                                Tap to view price
+                                Tap to show pricing
                               </span>
                             ) : (
-                              <span className="select-none truncate text-[11px] font-semibold text-white/95">
-                                {tilePriceCompactText || tilePriceText || "$•••-$•••"}
+                              <span className="select-none truncate text-[11px] font-semibold tabular-nums text-white/95">
+                                {tilePriceDisplay}
                               </span>
                             )}
                           </div>
@@ -3676,6 +3734,7 @@ export function ImagePreviewExperience(props: {
                       })}
 	                    </div>
 	                  </div>
+	                </div>
 	                </div>
 	              ) : hero ? (
 	                <div
@@ -3703,15 +3762,12 @@ export function ImagePreviewExperience(props: {
 	              )}
 	            </div>
 
-            {/* Top-left: form-step upload thumbnail OR "upload your own image" button.
-                Hidden when: (a) dedicated upload CTA step is showing below, or (b) image is generating and no thumbnail yet. */}
-            {toolingEnabled ? (
+            {/* Top-left upload: only before a hero exists. In single-image mode, upload lives in the bottom dock. */}
+            {toolingEnabled && !hero ? (
             <div
               className={cn(
                 "absolute left-3 z-20 flex items-center gap-2",
                 uploadControlPositionClass,
-                "!hidden",
-                hero ? "hidden" : null,
                 !formStepUploadThumbnail && (suppressUploadOverlay || showLoader || busy) ? "hidden" : null
               )}
             >
@@ -3726,19 +3782,10 @@ export function ImagePreviewExperience(props: {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={formStepUploadThumbnail} alt="Your uploaded photo" className="h-full w-full object-cover" />
                   </div>
-                  {leadGateEnabled ? (
+                  {leadGateEnabled && leadGateActive ? (
                     <LeadGenPopover
                       open={showUploadGate}
-                      onOpenChange={(nextOpen) => {
-                        if (nextOpen && !leadGateActive) return;
-                        setShowUploadGate((prevOpen) => {
-                          if (prevOpen === nextOpen) return prevOpen;
-                          if (!nextOpen) {
-                            pendingActionRef.current = null;
-                          }
-                          return nextOpen;
-                        });
-                      }}
+                      onOpenChange={onUploadGateOpenChange}
                       instanceId={instanceId}
                       sessionId={sessionId}
                       gateContext="upload_reference"
@@ -3784,19 +3831,10 @@ export function ImagePreviewExperience(props: {
                 </>
               ) : (
                 /* No form-step upload yet — offer the preview-level "Upload your own image" button */
-                leadGateEnabled ? (
+                leadGateEnabled && leadGateActive ? (
                   <LeadGenPopover
                     open={showUploadGate}
-                    onOpenChange={(nextOpen) => {
-                      if (nextOpen && !leadGateActive) return;
-                      setShowUploadGate((prevOpen) => {
-                        if (prevOpen === nextOpen) return prevOpen;
-                        if (!nextOpen) {
-                          pendingActionRef.current = null;
-                        }
-                        return nextOpen;
-                      });
-                    }}
+                    onOpenChange={onUploadGateOpenChange}
                     instanceId={instanceId}
                     sessionId={sessionId}
                     gateContext="upload_reference"
@@ -3850,8 +3888,8 @@ export function ImagePreviewExperience(props: {
             {showOverlayLoader ? (
               <div
                 className={cn(
-                  "absolute inset-0 flex items-center justify-center",
-                  showRefreshMask ? "z-20 bg-black/15" : null
+                  "pointer-events-none absolute inset-0 flex items-center justify-center",
+                  showRefreshMask ? "z-20" : null
                 )}
               >
                 <AdventureLoader
@@ -3867,7 +3905,7 @@ export function ImagePreviewExperience(props: {
                   tone="overlay"
                   active={busy}
                   messageOverride={cache?.message || (hero ? "Refreshing your design…" : GALLERY_LOADING_TITLE)}
-                  className="bg-slate-900/75"
+                  className="pointer-events-auto bg-slate-900/75"
                   style={{ ...overlayVars }}
                 />
               </div>
@@ -4155,14 +4193,13 @@ export function ImagePreviewExperience(props: {
               ) : null}
 	              </div>{/* end inner overflow-hidden container */}
 
-              {/* Bottom overlay: collapsible estimate bar (no budget slider). */}
-              {!lightboxOpen && shouldShowBottomControlsRow ? (
-                <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-4 sm:right-4 sm:bottom-4">
+              {/* Bottom overlay: upload + estimate only (AI ideas live in the question pane Ideas tab). */}
+              {showBottomPreviewDock ? (
+                <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-4 sm:right-4 sm:bottom-4 flex flex-col gap-2 pb-[max(0px,env(safe-area-inset-bottom))]">
                   {overlayPricingExpanded && (!leadGateEnabled || leadCaptured) && hero ? (
                     <div
                       className="ml-auto w-full rounded-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-md sm:w-[min(32rem,calc(100%-0.5rem))]"
                       style={{
-                        // Keep glass color consistent with the pill.
                         backgroundColor: singleModePricingPillBg,
                         backdropFilter: "blur(12px)",
                         WebkitBackdropFilter: "blur(12px)",
@@ -4170,8 +4207,12 @@ export function ImagePreviewExperience(props: {
                       }}
                       data-overlay-estimate-expanded
                     >
-                      <div className="relative p-3 sm:p-4">
-                        {/* subtle inner sheen + vignette (keeps same base glass color) */}
+                      <div
+                        className={cn(
+                          "relative",
+                          waitingForExactPricing ? "p-2 sm:p-2.5" : "p-3 sm:p-4"
+                        )}
+                      >
                         <div
                           aria-hidden
                           className="pointer-events-none absolute inset-0 rounded-2xl"
@@ -4181,34 +4222,60 @@ export function ImagePreviewExperience(props: {
                           }}
                         />
 
-                        <div className="relative flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 flex-1 flex-col items-center text-center">
-                            <div
-                              className="inline-flex items-center justify-center gap-2"
-                              style={{ fontFamily: pricingDisplayFont }}
-                            >
-                              <div className="text-[11px] font-semibold tracking-[0.12em] text-white/70 sm:text-[11.5px]">YOUR ESTIMATED PRICE</div>
-                              {waitingForExactPricing ? <div className="h-[1px] w-14 bg-white/22" aria-hidden /> : null}
-                              {waitingForExactPricing ? (
-                                <div className="text-[11px] font-medium tracking-[0.03em] text-white/60 sm:text-[11.5px]">
-                                  Calculating for this design
-                                </div>
-                              ) : null}
+                        {waitingForExactPricing ? (
+                          <div className="relative space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <Loader2
+                                  className="h-4 w-4 shrink-0 animate-spin text-white/85"
+                                  aria-hidden
+                                />
+                                <span
+                                  className="min-w-0 truncate text-sm font-semibold text-white sm:text-[15px]"
+                                  style={{ fontFamily: pricingDisplayFont }}
+                                >
+                                  Updating your estimate
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
+                                onClick={() => {
+                                  setOverlayPricingCollapsedPreference(true);
+                                  setOverlayPricingExpanded(false);
+                                }}
+                                aria-label="Collapse pricing"
+                                title="Collapse pricing"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </button>
                             </div>
+                            {onKeepDesigning ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onKeepDesigning();
+                                }}
+                                className="h-7 w-full rounded-full border border-white/15 bg-white/5 px-2 text-[10px] font-semibold text-white/90 hover:bg-white/10 sm:text-[11px]"
+                              >
+                                Keep designing
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="relative flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                                <div
+                                  className="inline-flex items-center justify-center gap-2"
+                                  style={{ fontFamily: pricingDisplayFont }}
+                                >
+                                  <div className="text-[11px] font-semibold tracking-[0.12em] text-white/70 sm:text-[11.5px]">
+                                    YOUR ESTIMATED PRICE
+                                  </div>
+                                </div>
 
-                            <div className="mt-1 flex flex-col items-center gap-1.5">
-                              {waitingForExactPricing ? (
-                                <>
-                                  <div className="inline-flex items-center gap-2 text-[18px] font-semibold leading-none tracking-tight text-white sm:text-[22px]">
-                                    <Loader2 className="h-5 w-5 animate-spin text-white/85" />
-                                    <span>Calculating price...</span>
-                                  </div>
-                                  <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/70">
-                                    Personalized estimate coming next
-                                  </div>
-                                </>
-                              ) : (
-                                <>
+                                <div className="mt-1 flex flex-col items-center gap-1.5">
                                   <div
                                     className="text-[32px] font-semibold tabular-nums leading-none tracking-[0.01em] text-white/95 sm:text-[40px]"
                                     style={{ fontFamily: pricingDisplayFont }}
@@ -4221,85 +4288,43 @@ export function ImagePreviewExperience(props: {
                                   >
                                     {overlayPricingRangeLabel}
                                   </div>
-                                </>
-                              )}
-                            </div>
-
-                            <div className="mt-1.5 max-w-[28rem] text-[10px] leading-snug text-white/55 sm:text-[11px]">
-                              {waitingForExactPricing
-                                ? "We are analyzing your current image and answers to generate a more precise price range."
-                                  : "Final pricing may change based on your final selections and details."}
-                            </div>
-                            {!waitingForExactPricing && previewBookingCta.primaryUrl ? (
-                              <Button
-                                asChild
-                                className="mt-3 h-10 w-full max-w-[18rem] rounded-full text-xs font-semibold shadow-sm"
-                                style={{ backgroundColor: primary, color: "#fff" }}
-                              >
-                                <a href={previewBookingCta.primaryUrl} target="_blank" rel="noopener noreferrer">
-                                  {previewBookingCta.primaryLabel}
-                                </a>
-                              </Button>
-                            ) : null}
-                          </div>
-
-                          <button
-                            type="button"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
-                            onClick={() => {
-                              setOverlayPricingCollapsedPreference(true);
-                              setOverlayPricingExpanded(false);
-                            }}
-                            aria-label="Collapse pricing"
-                            title="Collapse pricing"
-                          >
-                            <ChevronDown className="h-4 w-4" />
-                          </button>
-                        </div>
-
-                        <div className="relative mt-3 flex flex-col items-center gap-3">
-                          {waitingForExactPricing ? (
-                            <>
-                              <div className="flex flex-wrap justify-center gap-1.5">
-                                {[
-                                  "Reading your selections",
-                                  "Analyzing the image",
-                                  "Building a tighter range",
-                                ].map((label) => (
-                                  <span
-                                    key={label}
-                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
-                                  >
-                                    {label}
-                                  </span>
-                                ))}
-                              </div>
-
-                              <div className="flex w-full max-w-[18rem] flex-col gap-2">
-                                <div className="flex h-10 w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80">
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  <span>Calculating exact estimate</span>
                                 </div>
-                                {onKeepDesigning ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onKeepDesigning();
-                                    }}
-                                    className="h-9 w-full rounded-full border border-white/15 bg-white/5 px-3 text-[11px] font-semibold text-white/90 hover:bg-white/10"
+
+                                <div className="mt-1.5 max-w-[28rem] text-[10px] leading-snug text-white/55 sm:text-[11px]">
+                                  Final pricing may change based on your final selections and details.
+                                </div>
+                                {previewBookingCta.primaryUrl ? (
+                                  <Button
+                                    asChild
+                                    className="mt-3 h-10 w-full max-w-[18rem] rounded-full text-xs font-semibold shadow-sm"
+                                    style={{ backgroundColor: primary, color: "#fff" }}
                                   >
-                                    Keep designing
-                                  </button>
+                                    <a href={previewBookingCta.primaryUrl} target="_blank" rel="noopener noreferrer">
+                                      {previewBookingCta.primaryLabel}
+                                    </a>
+                                  </Button>
                                 ) : null}
-                                <div className="text-center text-[10px] text-white/60">This usually takes a moment</div>
                               </div>
-                            </>
-                          ) : (
-                            <>
+
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
+                                onClick={() => {
+                                  setOverlayPricingCollapsedPreference(true);
+                                  setOverlayPricingExpanded(false);
+                                }}
+                                aria-label="Collapse pricing"
+                                title="Collapse pricing"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </button>
+                            </div>
+
+                            <div className="relative mt-3 flex flex-col items-center gap-3">
                               <div className="flex flex-wrap justify-center gap-1.5">
                                 {[
-                                  "Tailored to your answers",
-                                  "Includes key cost factors",
+                                  "Generated from your answers",
+                                  "Unlocks pricing and editing",
                                   "No obligation",
                                 ].map((label) => (
                                   <span
@@ -4323,32 +4348,22 @@ export function ImagePreviewExperience(props: {
                                     Refine this design
                                   </button>
                                 ) : null}
-                                {onKeepDesigning ? (
-                                  <div className="text-[10px] font-semibold tracking-[0.16em] text-white/45">OR</div>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  disabled={isUploadingOwnImages || busy}
-                                  onClick={handleUploadClick}
-                                  className="text-[11px] font-medium underline-offset-2 transition-colors hover:underline"
-                                  style={{ color: theme.primaryColor || "#3b82f6" }}
-                                >
-                                  {isUploadingOwnImages ? "Uploading…" : "Try with your own photo"}
-                                </button>
                               </div>
-                            </>
-                          )}
-                        </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-stretch justify-end gap-2 sm:gap-3">{previewPricingPill}</div>
+                  <div className="flex w-full max-w-[min(32rem,calc(100%-0.5rem))] flex-wrap items-center justify-end gap-2 self-end">
+                    <div className="flex min-w-0 flex-1 justify-end gap-2 sm:gap-3">{previewPricingPill}</div>
+                  </div>
                   )}
                 </div>
               ) : null}
 
 	              {/* Side navigation arrows — outside the clipped inner container */}
-	              {hero && canPrev && (
+	              {hero && canPrev && !leadGateActive && (
 	                <button
 	                  type="button"
 	                  onClick={goPrev}
@@ -4358,7 +4373,7 @@ export function ImagePreviewExperience(props: {
 	                  ‹
 	                </button>
 	              )}
-	              {hero && canNext && (
+	              {hero && canNext && !leadGateActive && (
 	                <button
 	                  type="button"
 	                  onClick={goNext}
@@ -4385,43 +4400,6 @@ export function ImagePreviewExperience(props: {
 	              )}
 	            </div>{/* end outer stack wrapper */}
 
-              {/* Upload section below image — folds in smoothly once image is ready (no jarring layout push) */}
-              <AnimatePresence initial={false}>
-                {hero && !busy && isDominantLayout && (!leadGateEnabled || leadCaptured) && !revenuePanelActive ? (
-                  <motion.div
-                    key="upload-section"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.16, ease: "easeOut" }}
-                  >
-                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                    <button
-                      type="button"
-                      disabled={isUploadingOwnImages}
-                      onClick={handleUploadClick}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-medium transition-colors hover:bg-primary/10"
-                      style={{
-                        fontFamily: theme.fontFamily,
-                        color: theme.primaryColor || "#3b82f6",
-                      }}
-                    >
-                      {isUploadingOwnImages ? "Uploading…" : "Upload your own image!"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSkipContinue}
-                      className="inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
-                      style={{ fontFamily: theme.fontFamily }}
-                    >
-                      Skip and keep playing around
-                    </button>
-                  </div>
-                        </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
               </div>
             </div>
 	          </CardContent>

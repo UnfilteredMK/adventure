@@ -87,7 +87,7 @@ export function buildDeterministicPricedImageGridStep(params: {
     const explicitPrice = normalizeExplicitPrice(run.imagePricing?.[index]);
     const priceRange = explicitPrice ?? deriveVariantPriceRange(baseRange, imageUrl || `placeholder:${index}`, index);
     return {
-      label: `Similar project ${index + 1}`,
+      label: `Concept ${index + 1}`,
       value: imageUrl || `preview-placeholder-${index + 1}`,
       imageUrl: imageUrl || undefined,
       disabled: !imageUrl,
@@ -100,8 +100,8 @@ export function buildDeterministicPricedImageGridStep(params: {
   return {
     id: DETERMINISTIC_PRICED_IMAGE_GRID_ID,
     type: "image_choice_grid",
-    question: "Here are similar examples and price ranges",
-    humanism: "Tap one to see your exact pricing",
+    question: "We generated a few starter ideas for your project",
+    humanism: "Tap a concept to unlock pricing and keep refining it.",
     options: options as any,
     multi_select: false,
     columns: 3,
@@ -111,8 +111,8 @@ export function buildDeterministicPricedImageGridStep(params: {
         auto_advance: true,
       },
       validation: {
-        grid_mode: "priced_examples",
-        trust_line: "Based on real examples similar to yours",
+        grid_mode: "generated_concepts",
+        trust_line: "Generated from your answers and inspiration picks",
       },
     },
   } as UIStep;

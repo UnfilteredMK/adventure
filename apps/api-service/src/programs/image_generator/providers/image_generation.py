@@ -5,10 +5,12 @@ import os
 import time
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+
+from programs.image_generator.provider_request_builder import build_replicate_request
 
 
 _LOG_VERBOSE_KEY = "IMAGE_LOG_DETAILED_PAYLOADS"
@@ -44,6 +46,13 @@ def _log_provider(label: str, data: Any) -> None:
         print(f"[image_generator] {label}: (unable to serialize)", flush=True)
 
 
+def _truncate_text(value: Any, *, limit: int = 240) -> str:
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
 def _replicate_api_token() -> str:
     token = str(os.getenv("REPLICATE_API_TOKEN") or "").strip()
     if not token:
@@ -51,133 +60,45 @@ def _replicate_api_token() -> str:
     return token
 
 
-def _normalize_use_case(raw: Any) -> str:
-    v = str(raw or "").strip().lower().replace("_", "-")
-    if v in {"tryon", "try-on"}:
-        return "tryon"
-    if v == "scene-placement":
-        return "scene-placement"
-    if v == "scene-refinement":
-        return "scene-refinement"
-    if v == "scene":
-        return "scene"
-    return ""
-
-
-def _is_grok_imagine_image_model(model_id: str) -> bool:
-    mid = str(model_id or "").strip().lower()
-    return mid == "xai/grok-imagine-image" or mid.startswith("xai/grok-imagine-image:")
-
-
-def _derive_aspect_ratio(width: Optional[int], height: Optional[int]) -> Optional[str]:
-    if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
-        return None
-    from math import gcd
-
-    g = gcd(width, height)
-    ratio = f"{width // g}:{height // g}"
-    allowed = {
-        "1:1",
-        "16:9",
-        "9:16",
-        "4:3",
-        "3:4",
-        "3:2",
-        "2:3",
-        "2:1",
-        "1:2",
-        "19.5:9",
-        "9:19.5",
-        "20:9",
-        "9:20",
-        "auto",
-    }
-    if ratio in allowed:
-        return ratio
-    # Fallback to closest coarse orientation buckets supported by the model.
-    if width == height:
-        return "1:1"
-    if width > height:
-        return "16:9" if (width / height) >= 1.6 else "4:3"
-    return "9:16" if (height / width) >= 1.6 else "3:4"
-
-
-def _replicate_default_model_id(*, use_case: Optional[str] = None) -> str:
-    """
-    Pick a Replicate model based on the instance `useCase` when available.
-
-    Expected env vars (see `.env.local`):
-    - TRYON_REPLICATE_MODEL_ID
-    - SCENE_REPLICATE_MODEL_ID
-    - SCENE_PLACEMENT_REPLICATE_MODEL_ID
-    Fallback:
-    - REPLICATE_MODEL_ID / REPLICATE_MODEL / REPLICATE_MODEL_VERSION
-    """
-    uc = _normalize_use_case(use_case)
-    if uc == "tryon":
-        m = str(os.getenv("TRYON_REPLICATE_MODEL_ID") or "").strip()
-        if m:
-            return m
-    if uc == "scene":
-        m = str(os.getenv("SCENE_REPLICATE_MODEL_ID") or "").strip()
-        if m:
-            return m
-    if uc == "scene-placement":
-        m = str(os.getenv("SCENE_PLACEMENT_REPLICATE_MODEL_ID") or "").strip()
-        if m:
-            return m
-    if uc == "scene-refinement":
-        m = str(os.getenv("SCENE_REFINEMENT_REPLICATE_MODEL_ID") or "").strip()
-        if m:
-            return m
-        m = str(os.getenv("SCENE_PLACEMENT_REPLICATE_MODEL_ID") or "").strip()
-        if m:
-            return m
-
-    # Accept a few common env names to reduce friction across repos.
-    model_id = (
-        str(os.getenv("REPLICATE_MODEL_ID") or "").strip()
-        or str(os.getenv("REPLICATE_MODEL") or "").strip()
-        or str(os.getenv("REPLICATE_MODEL_VERSION") or "").strip()
-    )
-    if not model_id:
-        if uc == "tryon":
-            raise RuntimeError(
-                "No Replicate model configured for useCase='tryon'. "
-                "Set TRYON_REPLICATE_MODEL_ID (recommended) or REPLICATE_MODEL_ID."
-            )
-        if uc == "scene":
-            raise RuntimeError(
-                "No Replicate model configured for useCase='scene'. "
-                "Set SCENE_REPLICATE_MODEL_ID (recommended) or REPLICATE_MODEL_ID."
-            )
-        if uc == "scene-placement":
-            raise RuntimeError(
-                "No Replicate model configured for useCase='scene-placement'. "
-                "Set SCENE_PLACEMENT_REPLICATE_MODEL_ID (recommended) or REPLICATE_MODEL_ID."
-            )
-        if uc == "scene-refinement":
-            raise RuntimeError(
-                "No Replicate model configured for useCase='scene-refinement'. "
-                "Set SCENE_REFINEMENT_REPLICATE_MODEL_ID or SCENE_PLACEMENT_REPLICATE_MODEL_ID or REPLICATE_MODEL_ID."
-            )
-        raise RuntimeError(
-            "REPLICATE_MODEL_ID is not set (required for image generation). "
-            "Example: black-forest-labs/flux-1.1-pro"
-        )
-    return model_id
-
-
 def _is_flux_schnell_model(model_id: str) -> bool:
     return "flux-schnell" in str(model_id or "").strip().lower()
 
 
-def _is_flux_kontext_model(model_id: str) -> bool:
-    return "flux-kontext" in str(model_id or "").strip().lower()
+_REPLICATE_VERSION_CACHE_LOCK = RLock()
+_REPLICATE_VERSION_CACHE: Dict[str, Tuple[float, str]] = {}
 
 
-def _is_flux_1_1_pro_model(model_id: str) -> bool:
-    return "flux-1.1-pro" in str(model_id or "").strip().lower()
+def _replicate_version_cache_ttl_sec() -> float:
+    try:
+        return max(60.0, float(str(os.getenv("REPLICATE_MODEL_VERSION_CACHE_TTL_SEC") or "3600").strip()))
+    except Exception:
+        return 3600.0
+
+
+def _cached_replicate_version(owner_name: str) -> Optional[str]:
+    key = str(owner_name or "").strip()
+    if not key or "/" not in key:
+        return None
+    now = time.time()
+    with _REPLICATE_VERSION_CACHE_LOCK:
+        hit = _REPLICATE_VERSION_CACHE.get(key)
+        if not hit:
+            return None
+        expires_at, version_id = hit
+        if expires_at < now:
+            _REPLICATE_VERSION_CACHE.pop(key, None)
+            return None
+        return version_id if version_id else None
+
+
+def _store_replicate_version(owner_name: str, version_id: str) -> None:
+    key = str(owner_name or "").strip()
+    vid = str(version_id or "").strip()
+    if not key or not vid:
+        return
+    ttl = _replicate_version_cache_ttl_sec()
+    with _REPLICATE_VERSION_CACHE_LOCK:
+        _REPLICATE_VERSION_CACHE[key] = (time.time() + ttl, vid)
 
 
 def _replicate_create_prediction(*, model_id: str, input: Dict[str, Any]) -> Dict[str, Any]:
@@ -208,24 +129,32 @@ def _replicate_create_prediction(*, model_id: str, input: Dict[str, Any]) -> Dic
     elif _is_hex64(model_only) and ":" not in model_str:
         payloads.append({"version": model_only, "input": input})
 
-    # 2) If we were given owner/name, resolve to latest_version.id and use that.
+    # 2) If we were given owner/name, use cached version id when possible, else resolve via API.
     if "/" in model_only and not _is_hex64(model_only):
+        version_ids_ordered: list[str] = []
+        cached_vid = _cached_replicate_version(model_only)
+        if cached_vid and _is_hex64(cached_vid):
+            version_ids_ordered.append(cached_vid)
         try:
             owner, name = model_only.split("/", 1)
             meta = requests.get(
                 f"https://api.replicate.com/v1/models/{owner}/{name}",
                 headers={"Authorization": f"Token {token}", "Accept": "application/json"},
-                timeout=30,
+                timeout=15,
             )
             if meta.ok:
                 data = meta.json() if meta.content else {}
                 latest = data.get("latest_version") if isinstance(data, dict) else None
                 version_id = latest.get("id") if isinstance(latest, dict) else None
                 if isinstance(version_id, str) and _is_hex64(version_id):
-                    payloads.append({"version": version_id, "input": input})
-                    tried.append(("resolved_latest_version", version_id))
+                    _store_replicate_version(model_only, version_id)
+                    if version_id not in version_ids_ordered:
+                        version_ids_ordered.append(version_id)
         except Exception:
             pass
+        for vid in version_ids_ordered:
+            payloads.append({"version": vid, "input": input})
+            tried.append(("resolved_latest_version", vid))
 
     # 3) Last resort: try whatever the caller passed as `version` (may work in some setups).
     payloads.append({"version": model_str, "input": input})
@@ -268,15 +197,23 @@ def _replicate_get_prediction(prediction_id: str) -> Dict[str, Any]:
     return data
 
 
+def _replicate_poll_interval_sec() -> float:
+    try:
+        return max(0.05, min(2.0, float(str(os.getenv("REPLICATE_POLL_INTERVAL_SEC") or "0.2").strip())))
+    except Exception:
+        return 0.2
+
+
 def _replicate_wait_for_completion(prediction_id: str, *, timeout_sec: float) -> Dict[str, Any]:
     deadline = time.time() + max(5.0, float(timeout_sec or 0))
+    interval = _replicate_poll_interval_sec()
     last: Dict[str, Any] = {}
     while time.time() < deadline:
         last = _replicate_get_prediction(prediction_id)
         status = str(last.get("status") or "").lower()
         if status in {"succeeded", "failed", "canceled"}:
             return last
-        time.sleep(1.0)
+        time.sleep(interval)
     return {**last, "status": "timeout", "error": "Prediction timed out"}
 
 
@@ -626,121 +563,48 @@ def generate_images(
 ) -> Dict[str, Any]:
     n = max(1, min(9, int(num_outputs or 1)))
     prompt = str(prompt or "").strip()
-
-    model = str(model_id or "").strip() or _replicate_default_model_id(use_case=use_case)
+    model = str(model_id or "").strip()
+    if not model:
+        raise RuntimeError("model_id is required before calling generate_images")
     timeout_sec = float(os.getenv("REPLICATE_TIMEOUT_SEC") or "60")
-    ratio = str(aspect_ratio or "").strip() or _derive_aspect_ratio(width, height) or None
-    primary_reference = next((x for x in (reference_images or []) if isinstance(x, str) and x.strip()), None)
-    primary_edit_image = (
-        scene_image.strip()
-        if isinstance(scene_image, str) and scene_image.strip()
-        else (primary_reference.strip() if isinstance(primary_reference, str) and primary_reference.strip() else None)
+    provider_request = build_replicate_request(
+        prompt=prompt,
+        model_id=model,
+        num_outputs=n,
+        output_format=output_format,
+        negative_prompt=negative_prompt,
+        aspect_ratio=aspect_ratio,
+        width=width,
+        height=height,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        prompt_strength=prompt_strength,
+        image_prompt_strength=image_prompt_strength,
+        safety_tolerance=safety_tolerance,
+        prompt_upsampling=prompt_upsampling,
+        go_fast=go_fast,
+        reference_images=reference_images,
+        scene_image=scene_image,
+        product_image=product_image,
     )
+    inp = provider_request["input"] if isinstance(provider_request.get("input"), dict) else {}
 
-    # Minimal cross-model input. Replicate models differ; some reject unknown keys.
-    # Build a strict payload for known strict schemas, otherwise use broad compatibility keys.
-    if _is_grok_imagine_image_model(model):
-        # xai/grok-imagine-image schema:
-        # - prompt (required)
-        # - image (optional; when present, model edits/inpaints)
-        # - aspect_ratio (optional; ignored in edit mode)
-        inp: Dict[str, Any] = {"prompt": prompt}
-        edit_image: Optional[str] = None
-        if isinstance(scene_image, str) and scene_image.strip():
-            edit_image = scene_image.strip()
-        elif reference_images and isinstance(reference_images, list):
-            edit_image = next((x for x in reference_images if isinstance(x, str) and x.strip()), None)
-        if edit_image:
-            inp["image"] = edit_image
-        else:
-            ratio = _derive_aspect_ratio(width, height)
-            if ratio:
-                inp["aspect_ratio"] = ratio
-    elif _is_flux_schnell_model(model):
-        inp = {
-            "prompt": prompt,
-            "num_outputs": max(1, min(4, n)),
-            "aspect_ratio": ratio or "1:1",
-            "num_inference_steps": max(1, min(4, int(num_inference_steps or 4))),
-            "output_format": str(output_format or "webp").strip() or "webp",
-            "disable_safety_checker": False,
-        }
-        if isinstance(go_fast, bool):
-            inp["go_fast"] = go_fast
-    elif _is_flux_kontext_model(model):
-        inp = {"prompt": prompt}
-        if primary_edit_image:
-            inp["input_image"] = primary_edit_image
-        if ratio and not primary_edit_image:
-            inp["aspect_ratio"] = ratio
-        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
-            inp["safety_tolerance"] = safety_tolerance
-        if isinstance(prompt_upsampling, bool):
-            inp["prompt_upsampling"] = prompt_upsampling
-        fmt = str(output_format or "").strip()
-        if fmt:
-            inp["output_format"] = fmt
-    elif _is_flux_1_1_pro_model(model):
-        inp = {"prompt": prompt}
-        inp["num_outputs"] = max(1, min(4, n))
-        if ratio:
-            inp["aspect_ratio"] = ratio
-        if ratio == "custom":
-            if isinstance(width, int) and width > 0:
-                inp["width"] = width
-            if isinstance(height, int) and height > 0:
-                inp["height"] = height
-        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
-            inp["safety_tolerance"] = safety_tolerance
-        if isinstance(prompt_upsampling, bool):
-            inp["prompt_upsampling"] = prompt_upsampling
-        fmt = str(output_format or "").strip()
-        if fmt:
-            inp["output_format"] = fmt
-    else:
-        inp = {"prompt": prompt}
-        inp["num_outputs"] = n
-        if negative_prompt and str(negative_prompt).strip():
-            inp["negative_prompt"] = str(negative_prompt).strip()
-        if ratio:
-            inp["aspect_ratio"] = ratio
-        if isinstance(width, int) and width > 0:
-            inp["width"] = width
-        if isinstance(height, int) and height > 0:
-            inp["height"] = height
-        if isinstance(num_inference_steps, int) and num_inference_steps > 0:
-            inp["num_inference_steps"] = num_inference_steps
-        if isinstance(guidance_scale, (int, float)) and float(guidance_scale) > 0:
-            inp["guidance_scale"] = float(guidance_scale)
-        if isinstance(prompt_strength, (int, float)) and float(prompt_strength) > 0:
-            inp["prompt_strength"] = float(prompt_strength)
-        if isinstance(image_prompt_strength, (int, float)) and float(image_prompt_strength) > 0:
-            inp["image_prompt_strength"] = float(image_prompt_strength)
-        if isinstance(safety_tolerance, int) and safety_tolerance > 0:
-            inp["safety_tolerance"] = safety_tolerance
-        if isinstance(prompt_upsampling, bool):
-            inp["prompt_upsampling"] = prompt_upsampling
-        if isinstance(go_fast, bool):
-            inp["go_fast"] = go_fast
-        if reference_images and isinstance(reference_images, list) and reference_images:
-            # Some models expect `image` or `input_image`.
-            first = next((x for x in reference_images if isinstance(x, str) and x.strip()), None)
-            if first:
-                inp["image"] = first
-                inp["input_image"] = first
-
-        # Scene-placement / multi-image best-effort for non-grok models.
-        if isinstance(scene_image, str) and scene_image.strip():
-            scene_u = scene_image.strip()
-            inp.setdefault("image", scene_u)
-            inp.setdefault("input_image", scene_u)
-            inp["scene_image"] = scene_u
-            inp["background_image"] = scene_u
-        if isinstance(product_image, str) and product_image.strip():
-            prod_u = product_image.strip()
-            inp["product_image"] = prod_u
-            inp["subject_image"] = prod_u
-            inp["overlay_image"] = prod_u
+    print(
+        "[image_generator] provider_request",
+        {
+            "provider": "replicate",
+            "modelId": model,
+            "useCase": _truncate_text(use_case, limit=40) or None,
+            "numOutputs": n,
+            "referenceImagesCount": len(reference_images or []),
+            "hasSceneImage": bool(str(scene_image or "").strip()),
+            "hasProductImage": bool(str(product_image or "").strip()),
+            "inputKeys": sorted(list(inp.keys())),
+            "promptPreview": _truncate_text(prompt, limit=220),
+            "negativePromptPreview": _truncate_text(negative_prompt, limit=220) or None,
+        },
+        flush=True,
+    )
 
     _log_provider("replicate_request_payload", inp)
     created = _replicate_create_prediction(model_id=model, input=inp)

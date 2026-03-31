@@ -59,13 +59,12 @@ export async function prefetchFormDemoInstance(
   let selectedSubcategory: any | null = null;
   let selectedProspect: any | null = null;
   let demoTemplateConfig: any | null = null;
-  let demoPromptId: any | null = null;
 
 	  if (supabaseAdmin) {
 	    if (demoType === "industry") {
 	      const { data: initialSubcategoryMatches, error: subcatError } = await supabaseAdmin
 	        .from("categories_subcategories")
-	        .select("id, slug, subcategory, demo_template_config, demo_prompt_id")
+	        .select("id, slug, subcategory, demo_template_config")
 	        .eq("slug", cleanedSlug)
 	        .limit(1);
 	      let subcategoryMatches = initialSubcategoryMatches;
@@ -73,7 +72,7 @@ export async function prefetchFormDemoInstance(
       if ((!subcategoryMatches || subcategoryMatches.length === 0) && !subcatError && cleanedSlug) {
         const { data: altMatches } = await supabaseAdmin
           .from("categories_subcategories")
-          .select("id, slug, subcategory, demo_template_config, demo_prompt_id")
+          .select("id, slug, subcategory, demo_template_config")
           .ilike("subcategory", `%${cleanedSlug.replace(/-/g, " ")}%`)
           .limit(1);
         if (altMatches && altMatches.length > 0) {
@@ -86,7 +85,6 @@ export async function prefetchFormDemoInstance(
       }
 
       demoTemplateConfig = selectedSubcategory?.demo_template_config || null;
-      demoPromptId = selectedSubcategory?.demo_prompt_id || null;
     } else {
       const { data: prospect, error: pErr } = await supabaseAdmin
         .from("prospects")
@@ -112,7 +110,6 @@ export async function prefetchFormDemoInstance(
       slug: cleanedSlug,
       subcategory: selectedSubcategory || null,
       prospect: selectedProspect || null,
-      demo_prompt_id: demoPromptId,
     },
   } as any;
 

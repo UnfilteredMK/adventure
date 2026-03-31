@@ -2,6 +2,39 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CreditService } from '../../../../lib/credit-service';
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/server/logger';
+import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } from '@/lib/ai-form/utils/reference-images';
+import { mergeInstanceContextFromDb } from '@/lib/server/merge-instance-context-from-db';
+
+type ReferenceMode = "guide_only" | "edit_target";
+
+function normalizeRequestedOutputs(raw: unknown): number {
+	const n = Number(raw);
+	if (!Number.isFinite(n)) return 1;
+	return Math.max(1, Math.min(9, Math.floor(n)));
+}
+
+function supportsMultiOutput(modelId: string): boolean {
+	const model = String(modelId || '').trim().toLowerCase();
+	if (!model) return true;
+	if (model.includes('flux-kontext')) return false;
+	if (model.includes('nano-banana')) return false;
+	if (model.includes('grok-imagine-image')) return false;
+	if (model.includes('flux-1.1-pro')) return false;
+	return true;
+}
+
+function resolveEffectiveNumOutputs(requested: number, modelId: string): number {
+	const normalizedRequested = normalizeRequestedOutputs(requested);
+	if (normalizedRequested <= 1) return 1;
+	return supportsMultiOutput(modelId) ? normalizedRequested : 1;
+}
+
+function normalizeReferenceMode(raw: unknown): ReferenceMode | undefined {
+	const v = String(raw || "").trim().toLowerCase();
+	if (v === "guide_only") return "guide_only";
+	if (v === "edit_target") return "edit_target";
+	return undefined;
+}
 
 function normalizeServiceUrl(raw: unknown): string {
 	let s = String(raw || "").trim();
@@ -38,6 +71,25 @@ function imageRefSignatures(raw: unknown): string[] {
 	return Array.from(out);
 }
 
+function previewText(value: unknown, limit = 220): string | null {
+	const text = String(value || "").trim();
+	if (!text) return null;
+	return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function summarizeImageList(images: string[]): { count: number; schemes: Record<string, number> } {
+	return {
+		count: images.length,
+		schemes: referenceImageSchemeCounts(images),
+	};
+}
+
+function objectOrEmpty(raw: unknown): Record<string, any> {
+	if (!raw || typeof raw !== "object") return {};
+	if (Array.isArray(raw)) return {};
+	return raw as Record<string, any>;
+}
+
 // Scene generation / editing
 // - If an input image is provided: do Flux Kontext scene EDITING (single input image)
 // - If no input image is provided: do text-to-image to generate an initial scene (no uploads required)
@@ -69,11 +121,6 @@ export async function POST(request: NextRequest) {
 			}
 		});
 
-		// Validate required fields
-		if (!body.prompt) {
-			logger.error('❌ [SCENE API] Missing prompt');
-			return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
-		}
 		if (!body.instanceId) {
 			logger.error('❌ [SCENE API] Missing instanceId');
 			return NextResponse.json({ error: 'Instance ID is required' }, { status: 400 });
@@ -98,54 +145,94 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		// Determine if we're doing editing (image provided) or initial generation (no image).
-		// Editing uses Flux Kontext Pro and supports ONE input image.
-		const incomingRefs: string[] = Array.isArray(body.referenceImages)
-			? (body.referenceImages as string[]).filter(Boolean)
-			: [];
-		// Prefer the most "uploaded"/primary image first so edits adhere to it.
-		// NOTE: Flux Kontext scene editing supports a single input image, so we will pick one deterministically.
-		const orderedCandidates = [body.userImage, body.sceneImage, body.productImage, ...incomingRefs].filter(
-			Boolean
-		) as string[];
-		const allImages = Array.from(new Set(orderedCandidates));
+		// Determine whether this scene request is a guide-only concept generation run
+		// or a true edit anchored to an uploaded image.
+		const incomingRefs = normalizeReferenceImages(body.referenceImages, { allowData: true, max: 8 });
+		const normalizePrimary = (raw: unknown): string | null => {
+			if (!isImageRefLike(raw, true)) return null;
+			const value = String(raw).trim();
+			return value || null;
+		};
+		const userImage = normalizePrimary(body.userImage);
+		const sceneImage = normalizePrimary(body.sceneImage);
+		const productImage = normalizePrimary(body.productImage);
+		const referenceMode = normalizeReferenceMode(body.referenceMode);
+		const guideOnlyInitialScene =
+			referenceMode === "guide_only" && generationIntent === "initial";
+		const primaryCandidates = [userImage, sceneImage, productImage].filter(Boolean) as string[];
+		// guide_only only means "style refs are not the anchor"; explicit uploads are still edit targets.
+		const primaryImage =
+			guideOnlyInitialScene && primaryCandidates.length === 0
+				? null
+				: primaryCandidates[0] ?? null;
+		const referenceImages = primaryImage
+			? Array.from(new Set([...primaryCandidates.slice(1), ...incomingRefs]))
+			: Array.from(new Set(incomingRefs));
+		const allImages = [primaryImage, ...referenceImages].filter(Boolean) as string[];
+		const isEdit = Boolean(primaryImage);
 
-		const isEdit = allImages.length > 0;
+		logger.info('[SCENE API] resolved image inputs', {
+			instanceId: body.instanceId,
+			generationIntent,
+			referenceMode: referenceMode || null,
+			guideOnlyInitialScene,
+			isEdit,
+			primaryCandidates: {
+				hasUserImage: Boolean(userImage),
+				hasSceneImage: Boolean(sceneImage),
+				hasProductImage: Boolean(productImage),
+				incomingReferenceImagesCount: incomingRefs.length,
+			},
+			selectedPrimarySource: primaryImage === userImage
+				? 'userImage'
+				: primaryImage === sceneImage
+					? 'sceneImage'
+					: primaryImage === productImage
+						? 'productImage'
+						: primaryImage
+							? 'referenceImages'
+							: null,
+			selectedPrimaryPreview: previewText(primaryImage, 120),
+			referenceImages: summarizeImageList(referenceImages),
+			allImages: summarizeImageList(allImages),
+		});
 
 		if (isEdit && allImages.length > 1) {
 			logger.warn(
 				'⚠️ [SCENE API] Multiple input images provided; selecting the first to maximize adherence:',
 				{
 					imageCount: allImages.length,
-					selectedImageSource: body.userImage
+					selectedImageSource: userImage
 						? 'userImage'
-						: body.sceneImage
+						: sceneImage
 							? 'sceneImage'
-							: body.productImage
+							: productImage
 								? 'productImage'
 								: 'referenceImages'
 				}
 			);
 		}
 
-		const primaryImage = isEdit ? allImages[0] : null;
-
 		// Default model:
-		// - editing: FLUX Kontext Pro (needs an input image)
-		// - initial: FLUX 1.1 Pro (text-to-image, no uploads required)
+		// - editing: FLUX Kontext Pro (single-image edit)
+		// - initial multi-output concept gallery: FLUX Schnell
+		// - initial single-output: FLUX 1.1 Pro
+		const requestedNumOutputs = normalizeRequestedOutputs(body.numOutputs || body.gallery_max_images || 4);
 		const modelId =
 			body.modelId ||
 			(generationIntent === "small_improvement" || generationIntent === "small-improvement"
-				? 'black-forest-labs/flux-kontext-pro'
+				? (isEdit ? 'black-forest-labs/flux-kontext-pro' : 'black-forest-labs/flux-1.1-pro')
 				: isEdit
 					? 'black-forest-labs/flux-kontext-pro'
-					: 'black-forest-labs/flux-1.1-pro');
+					: requestedNumOutputs > 1
+						? 'black-forest-labs/flux-schnell'
+						: 'black-forest-labs/flux-1.1-pro');
 
 		// Number of outputs
 		const numOutputs =
 			generationIntent === "small_improvement" || generationIntent === "small-improvement"
 				? 1
-				: body.numOutputs || body.gallery_max_images || 4;
+				: resolveEffectiveNumOutputs(requestedNumOutputs, modelId);
 
 		// Supabase setup
 		const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -155,15 +242,28 @@ export async function POST(request: NextRequest) {
 		}
 		const supabase = createClient(supabaseUrl, supabaseKey);
 
-		// Load instance for account id and credit price
+		// Load full instance row (same as pricing). Avoid selecting ad-hoc columns that may not exist on older DBs.
 		const { data: instance, error: instanceError } = await supabase
 			.from('instances')
-			.select('account_id, credit_price')
+			.select('*')
 			.eq('id', body.instanceId)
 			.single();
 		if (instanceError || !instance) {
+			logger.error('[SCENE API] instance lookup failed', {
+				instanceId: body.instanceId,
+				code: (instanceError as any)?.code,
+				message: instanceError?.message,
+			});
 			return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
 		}
+
+		const mergedInstanceContext = await mergeInstanceContextFromDb({
+			supabase,
+			instance: instance as Record<string, any>,
+			stepDataSoFar: objectOrEmpty(body.stepDataSoFar),
+			instanceContext: objectOrEmpty(body.instanceContext),
+		});
+
 		const accountId = (instance as any).account_id;
 		if (!accountId) {
 			return NextResponse.json({ error: 'Invalid instance configuration' }, { status: 400 });
@@ -200,14 +300,9 @@ export async function POST(request: NextRequest) {
 			}
 		}
 
-		// Build reference images:
-		// - editing: Flux scene editing uses a SINGLE input image
-		// - initial: no referenceImages
-		const referenceImages: string[] | undefined = allImages.length > 1 ? allImages.slice(1) : undefined;
-
-		const guidanceScale = body.guidanceScale ?? (isEdit ? 5.5 : 6.0);
-		const numInferenceSteps = body.numInferenceSteps ?? (isEdit ? 25 : 18);
-		const promptUpsampling = body.promptUpsampling ?? (isEdit ? true : undefined);
+		const guidanceScale = body.guidanceScale ?? (modelId.includes('flux-schnell') ? 4.25 : isEdit ? 5.5 : 6.0);
+		const numInferenceSteps = body.numInferenceSteps ?? (modelId.includes('flux-schnell') ? 6 : isEdit ? 25 : 18);
+		const promptUpsampling = body.promptUpsampling ?? (modelId.includes('flux-schnell') ? undefined : isEdit ? true : undefined);
 		const safetyTolerance =
 			typeof body.safetyTolerance === 'number'
 				? Math.min(body.safetyTolerance, isEdit ? 2 : 6)
@@ -227,6 +322,7 @@ export async function POST(request: NextRequest) {
 		const upstreamPayload = {
 			...body,
 			instanceId: body.instanceId,
+			instanceContext: mergedInstanceContext,
 			modelId,
 			numOutputs,
 			aspectRatio: computedAspect || (isEdit ? 'match_input_image' : '1:1'),
@@ -234,8 +330,28 @@ export async function POST(request: NextRequest) {
 			numInferenceSteps,
 			safetyTolerance,
 			promptUpsampling,
-			referenceImages: [primaryImage, ...(referenceImages || [])].filter(Boolean),
+			referenceImages: [primaryImage, ...referenceImages].filter(Boolean),
 		};
+
+		logger.info('[SCENE API] upstream payload summary', {
+			instanceId: body.instanceId,
+			useCase: 'scene',
+			modelId,
+			numOutputs,
+			guidanceScale,
+			numInferenceSteps,
+			promptUpsampling: promptUpsampling ?? null,
+			safetyTolerance: safetyTolerance ?? null,
+			aspectRatio: upstreamPayload.aspectRatio,
+			generationIntent,
+			hasPrompt: Boolean(body.prompt),
+			promptPreview: previewText(body.prompt, 180),
+			answeredQACount: Array.isArray(body.answeredQA) ? body.answeredQA.length : 0,
+			stepDataKeys: body.stepDataSoFar && typeof body.stepDataSoFar === 'object'
+				? Object.keys(body.stepDataSoFar).slice(0, 20)
+				: [],
+			referenceImages: summarizeImageList((upstreamPayload.referenceImages || []).filter((img: unknown): img is string => typeof img === 'string' && !!img.trim())),
+		});
 
 			let upstream: any = null;
 			let lastError: any = null;
@@ -256,12 +372,40 @@ export async function POST(request: NextRequest) {
 					const json = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
 					if (!resp.ok) {
 						lastError = { status: resp.status, details: json ?? text.slice(0, 2000) };
+						logger.warn('[SCENE API] upstream request failed', {
+							instanceId: body.instanceId,
+							endpoint,
+							status: resp.status,
+							errorPreview: previewText(JSON.stringify(lastError), 280),
+						});
 						continue;
 					}
 					upstream = json;
+					logger.info('[SCENE API] upstream response summary', {
+						instanceId: body.instanceId,
+						endpoint,
+						ok: upstream?.ok !== false,
+						status: upstream?.status || null,
+						predictionId: upstream?.predictionId || upstream?.id || null,
+						modelId: upstream?.modelId || modelId,
+						outputCount: Array.isArray(upstream?.images)
+							? upstream.images.length
+							: Array.isArray(upstream?.output)
+								? upstream.output.length
+								: upstream?.output
+									? 1
+									: 0,
+						error: upstream?.error || null,
+						message: previewText(upstream?.message, 220),
+					});
 					break;
 				} catch (e) {
 					lastError = e instanceof Error ? e.message : String(e);
+					logger.warn('[SCENE API] upstream fetch exception', {
+						instanceId: body.instanceId,
+						endpoint,
+						error: previewText(lastError, 280),
+					});
 				}
 			}
 
@@ -277,6 +421,15 @@ export async function POST(request: NextRequest) {
 		const filteredImages = upstreamImages.filter((img: string) =>
 			imageRefSignatures(img).every((sig) => !inputSignatures.has(sig))
 		);
+
+		logger.info('[SCENE API] output filtering summary', {
+			instanceId: body.instanceId,
+			isEdit,
+			upstreamImagesCount: upstreamImages.length,
+			filteredImagesCount: filteredImages.length,
+			inputImagesCount: inputImages.length,
+			inputSignaturesCount: inputSignatures.size,
+		});
 
 		if (upstreamImages.length === 0) {
 			return NextResponse.json(

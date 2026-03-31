@@ -4,7 +4,7 @@ import React, { useMemo } from "react";
 import { ImagePreviewExperience } from "../../../image-preview-experience/ImagePreviewExperience";
 import { cn } from "@/lib/utils";
 interface PreviewSectionProps {
-  adventureInputMode: "questions" | "prompt" | "budget" | "uploads";
+  adventureInputMode: "questions" | "ideas" | "prompt" | "budget" | "uploads";
   answeredQuestionCount: number;
   autoGenerationCounterScope: string;
   config?: any;
@@ -15,6 +15,8 @@ interface PreviewSectionProps {
   previewMaxPx: number | null;
   previewHasImage: boolean;
   previewRefreshNonce: number;
+  /** Bumps when the question pane Back control should return the preview from single-hero to concept grid (step 0). */
+  stepNavReturnToGalleryNonce?: number;
   pendingPreviewSceneUploadUrl?: string | null;
   promptDraft: string;
   promptSubmitCount: number;
@@ -31,6 +33,7 @@ interface PreviewSectionProps {
   useMobilePreviewLayout: boolean;
   usePreviewDominantLayout: boolean;
   onKeepDesigning?: () => void;
+  onPreviewSurfaceModeChange?: (mode: "gallery" | "single" | "empty") => void;
 }
 
 export function PreviewSection({
@@ -44,6 +47,7 @@ export function PreviewSection({
   isRefinementUploadStep,
   previewMaxPx,
   previewRefreshNonce,
+  stepNavReturnToGalleryNonce = 0,
   pendingPreviewSceneUploadUrl,
   promptDraft,
   promptSubmitCount,
@@ -60,13 +64,19 @@ export function PreviewSection({
   useMobilePreviewLayout,
   usePreviewDominantLayout,
   onKeepDesigning,
+  onPreviewSurfaceModeChange,
 }: PreviewSectionProps) {
   const stepDataSoFar = useMemo(() => {
     const base = { ...(stateStepData || {}) };
     if (previewRefreshNonce > 0) base["__previewRefreshNonce"] = previewRefreshNonce;
     if (pendingPreviewSceneUploadUrl) base["step-refinement-upload-scene-image"] = pendingPreviewSceneUploadUrl;
-    if (adventureInputMode === "prompt" && promptDraft.trim()) {
-      base["step-promptInput"] = promptDraft.trim();
+    const trimmedPrompt = promptDraft.trim();
+    const includePromptForPreview =
+      Boolean(trimmedPrompt) &&
+      (adventureInputMode === "prompt" ||
+        (adventureInputMode === "ideas" && promptSubmitCount > 0));
+    if (includePromptForPreview) {
+      base["step-promptInput"] = trimmedPrompt;
       base["__promptSubmitNonce"] = promptSubmitCount;
     }
     return base;
@@ -129,6 +139,8 @@ export function PreviewSection({
             toolingEnabled={toolingEnabled}
             disableConceptPicker={disableConceptPicker}
             onKeepDesigning={onKeepDesigning}
+            onPreviewSurfaceModeChange={onPreviewSurfaceModeChange}
+            stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}
           />
         </div>
       </div>

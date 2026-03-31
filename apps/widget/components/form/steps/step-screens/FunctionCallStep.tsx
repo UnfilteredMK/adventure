@@ -81,7 +81,7 @@ export function FunctionCallStep({
     >
       {actionsVariant === "icon_only" ? (
         <div className="flex h-full min-h-0 items-start gap-3 min-w-0">
-          {canGoBack && onBack ? (
+          {onBack ? (
             <Button
               onClick={onBack}
               variant="outline"
@@ -272,7 +272,7 @@ export function FunctionCallStep({
         </div>
 
         <div className="flex min-w-0 justify-center gap-2 pt-2 shrink-0">
-            {canGoBack && onBack && (
+            {onBack && (
               <Button
                 onClick={onBack}
                 variant="outline"

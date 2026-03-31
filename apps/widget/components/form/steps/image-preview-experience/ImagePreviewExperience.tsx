@@ -38,6 +38,10 @@ export interface ImagePreviewExperienceProps {
   disableConceptPicker?: boolean;
   highConversionBuyerUI?: boolean;
   onKeepDesigning?: () => void;
+  /** Fires when the canvas switches between concept grid, single hero, or no image (matches `data-preview-mode`). */
+  onPreviewSurfaceModeChange?: (mode: "gallery" | "single" | "empty") => void;
+  /** Incremented by the form Back control on step 0 to mirror in-canvas "Back to gallery". */
+  stepNavReturnToGalleryNonce?: number;
 }
 
 export function ImagePreviewExperience({

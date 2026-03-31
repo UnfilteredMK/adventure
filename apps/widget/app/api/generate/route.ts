@@ -3,6 +3,7 @@ import { CreditService } from '../../../lib/credit-service';
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/server/logger';
 import { isImageRefLike, normalizeReferenceImages, referenceImageSchemeCounts } from '@/lib/ai-form/utils/reference-images';
+import { mergeInstanceContextFromDb } from '@/lib/server/merge-instance-context-from-db';
 
 type UseCase = 'scene' | 'tryon' | 'try-on' | 'scene-placement' | 'scene-refinement' | 'drilldown';
 type GenerationIntent = "initial" | "regenerate" | "small_improvement" | "budget_tier_shift";
@@ -103,6 +104,12 @@ interface ResolvedImages {
 	hasInputImage: boolean;
 }
 
+function objectOrEmpty(raw: unknown): Record<string, any> {
+	if (!raw || typeof raw !== "object") return {};
+	if (Array.isArray(raw)) return {};
+	return raw as Record<string, any>;
+}
+
 function normalizeReferenceMode(raw: unknown): ReferenceMode | undefined {
 	const v = String(raw || "").trim().toLowerCase();
 	if (v === "guide_only") return "guide_only";
@@ -144,6 +151,7 @@ function resolveImages(body: any, useCase: UseCase): ResolvedImages {
 			ordered = [userImage, productImage, ...incomingRefs].filter(Boolean) as string[];
 			break;
 		case 'scene-placement':
+		case 'scene-refinement':
 			ordered = [sceneImage, productImage, ...incomingRefs].filter(Boolean) as string[];
 			break;
 		case 'drilldown':
@@ -197,8 +205,8 @@ function resolveModelDefaults(
 		const modelId = needsMultiOutput && baseModelId?.includes('flux-1.1-pro')
 			? 'black-forest-labs/flux-schnell'
 			: baseModelId;
-		const guidanceScale = modelId.includes('flux-schnell') ? 3.5 : (body.guidanceScale ?? rec.guidanceScale ?? 6.0);
-		const numInferenceSteps = modelId.includes('flux-schnell') ? 4 : (body.numInferenceSteps ?? rec.numInferenceSteps ?? 20);
+		const guidanceScale = modelId.includes('flux-schnell') ? 4.25 : (body.guidanceScale ?? rec.guidanceScale ?? 6.0);
+		const numInferenceSteps = modelId.includes('flux-schnell') ? 6 : (body.numInferenceSteps ?? rec.numInferenceSteps ?? 20);
 		const outputFormat = modelId.includes('flux-schnell') ? 'webp' : (body.outputFormat || rec.outputFormat || undefined);
 		return {
 			modelId,
@@ -292,8 +300,8 @@ function resolveModelDefaults(
 			: hasInputImage
 				? 'black-forest-labs/flux-kontext-pro'
 				: 'black-forest-labs/flux-1.1-pro';
-	const sceneGuidance = sceneModelId.includes('flux-schnell') ? 3.5 : (hasInputImage ? 5.5 : 6.0);
-	const sceneSteps = sceneModelId.includes('flux-schnell') ? 4 : (hasInputImage ? 25 : 18);
+	const sceneGuidance = sceneModelId.includes('flux-schnell') ? 4.25 : (hasInputImage ? 5.5 : 6.0);
+	const sceneSteps = sceneModelId.includes('flux-schnell') ? 6 : (hasInputImage ? 25 : 18);
 	const sceneFormat = sceneModelId.includes('flux-schnell') ? 'webp' : 'png';
 	return {
 		modelId: body.modelId || sceneModelId,
@@ -374,12 +382,25 @@ export async function POST(request: NextRequest) {
 
 		const { data: instance, error: instanceError } = await supabase
 			.from('instances')
-			.select('account_id, credit_price')
+			.select('*')
 			.eq('id', body.instanceId)
 			.single();
 		if (instanceError || !instance) {
+			logger.error('[GENERATE] instance lookup failed', {
+				instanceId: body.instanceId,
+				code: (instanceError as any)?.code,
+				message: instanceError?.message,
+			});
 			return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
 		}
+
+		const mergedInstanceContext = await mergeInstanceContextFromDb({
+			supabase,
+			instance: instance as Record<string, any>,
+			stepDataSoFar: objectOrEmpty(body.stepDataSoFar),
+			instanceContext: objectOrEmpty(body.instanceContext),
+		});
+
 		const accountId = (instance as any).account_id;
 		if (!accountId) {
 			return NextResponse.json({ error: 'Invalid instance configuration' }, { status: 400 });
@@ -449,6 +470,7 @@ export async function POST(request: NextRequest) {
 		const upstreamPayload = {
 			...body,
 			instanceId: body.instanceId,
+			instanceContext: mergedInstanceContext,
 			useCase,
 			modelId: effectiveModelId,
 			numOutputs,
@@ -460,7 +482,9 @@ export async function POST(request: NextRequest) {
 			promptUpsampling: defaults.promptUpsampling,
 			referenceImages: hasInputImage ? [targetImage, ...referenceImages].filter(Boolean) : referenceImages,
 			userImage: body.userImage || (useCase === 'tryon' ? targetImage : undefined),
-			sceneImage: body.sceneImage || ((useCase === 'scene' || useCase === 'scene-placement') ? targetImage : undefined),
+			sceneImage:
+				body.sceneImage ||
+				(useCase === 'scene' || useCase === 'scene-placement' || useCase === 'scene-refinement' ? targetImage : undefined),
 			productImage: body.productImage || (useCase === 'tryon' ? referenceImages[0] : undefined),
 			selectedImage: body.selectedImage || (useCase === 'drilldown' ? targetImage : undefined),
 			budgetRange: body.budgetRange,

@@ -2598,7 +2598,12 @@ export interface TemplateCategory {
 }
 
 export type Suggestion = {
+  /** Chip label; IDEAS chips use full `prompts.suggestion_label` (also mirrored on `suggestionLabel`) */
   text: string;
+  /** `prompts.suggestion_label` when loaded from DB (IDEAS / preview suggestions) */
+  suggestionLabel?: string | null;
+  /** Row id from `prompts` when loaded from DB */
+  promptId?: string;
   category?: string;
   subcategory?: string;
   prompt?: string;

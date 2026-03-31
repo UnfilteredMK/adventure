@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StepDefinition } from "@/types/ai-form";
-import { deriveBudgetSliderRange, roundBudgetStep } from "../utils/budget";
-import {
-  DETERMINISTIC_BUDGET_ID,
-  DETERMINISTIC_PRODUCT_IMAGE_ID,
-  DETERMINISTIC_SCENE_IMAGE_ID,
-  DETERMINISTIC_USER_IMAGE_ID,
-  PRICING_ESTIMATE_KEY,
-} from "../constants";
+import { DETERMINISTIC_BUDGET_ID, PRICING_ESTIMATE_KEY } from "../constants";
 import { isQuestionStepForAskedIds } from "../utils/step-classification";
 import { normalizePricingEstimate } from "../utils/pricing-estimate";
+import {
+  buildDeterministicBudgetStep,
+  buildDeterministicUploadSteps,
+  normalizeDeterministicUseCase,
+} from "../utils/deterministic-adventure-steps";
 
 export function useStepEngineBudget(args: {
   config: any;
@@ -38,112 +36,21 @@ export function useStepEngineBudget(args: {
     [stateStepData]
   );
 
-  const optionalSceneImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_SCENE_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: { required: false, maxFiles: 1, accept: "image/*", uploadRole: "sceneImage", camera: true },
-      copy: {
-        headline: "Have a photo handy?",
-        subtext: "Optional - upload one for tailored results, or skip and we'll generate concept ideas.",
-      },
-    }),
-    []
-  );
-  const requiredSceneImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_SCENE_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: { required: true, maxFiles: 1, accept: "image/*", uploadRole: "sceneImage", camera: true },
-      copy: {
-        headline: "Upload a photo of the space",
-        subtext: "Upload (or take) a photo of the room/area so we can generate the preview.",
-      },
-    }),
-    []
-  );
-  const requiredUserImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_USER_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: { required: true, maxFiles: 1, accept: "image/*", uploadRole: "userImage", camera: true },
-      copy: {
-        headline: "Upload a photo of the person",
-        subtext: "Upload (or take) a photo so we can generate the try-on preview.",
-      },
-    }),
-    []
-  );
-  const requiredProductImageStep: StepDefinition = useMemo(
-    () => ({
-      id: DETERMINISTIC_PRODUCT_IMAGE_ID,
-      componentType: "upload",
-      intent: "collect_context",
-      data: { required: true, maxFiles: 1, accept: "image/*", uploadRole: "productImage", camera: false },
-      copy: {
-        headline: "Upload a photo of the product",
-        subtext: "Upload a clear product photo so we can place it accurately in the preview.",
-      },
-    }),
-    []
-  );
-
   const normalizedUseCase = useMemo((): "tryon" | "scene-placement" | "scene" => {
-    const raw = String(config?.useCase || "")
-      .trim()
-      .toLowerCase()
-      .replace(/_/g, "-")
-      .replace(/\s+/g, "-");
-    if (raw === "tryon" || raw === "try-on") return "tryon";
-    if (raw === "scene-placement") return "scene-placement";
-    if (raw === "scene") return "scene";
-    return "scene";
+    return normalizeDeterministicUseCase(config?.useCase);
   }, [config?.useCase]);
 
   const desiredDeterministicUploadSteps = useMemo(() => {
-    if (normalizedUseCase === "tryon") return [requiredUserImageStep, requiredProductImageStep];
-    if (normalizedUseCase === "scene-placement") return [requiredSceneImageStep, requiredProductImageStep];
-    return [optionalSceneImageStep];
-  }, [normalizedUseCase, optionalSceneImageStep, requiredProductImageStep, requiredSceneImageStep, requiredUserImageStep]);
+    return buildDeterministicUploadSteps(normalizedUseCase);
+  }, [normalizedUseCase]);
 
   const deterministicBudgetStep: StepDefinition = useMemo(() => {
-    const cfg = (config as any)?.previewPricing;
-    const seededRange =
-      pricingSeed?.servicePriceRange ??
-      pricingSeed?.imagePriceRange ??
-      (typeof pricingSeed?.totalMin === "number" && typeof pricingSeed?.totalMax === "number"
-        ? { low: pricingSeed.totalMin, high: pricingSeed.totalMax }
-        : null);
-    const apiMin = Number(seededRange?.low ?? budgetApiRange?.min);
-    const apiMax = Number(seededRange?.high ?? budgetApiRange?.max);
-    const hasApiBounds = Number.isFinite(apiMin) && Number.isFinite(apiMax) && apiMin > 0 && apiMax > 0;
-    const cfgMin = Number(cfg?.totalMin);
-    const cfgMax = Number(cfg?.totalMax);
-    const currency =
-      typeof pricingSeed?.currency === "string" && pricingSeed.currency.trim()
-        ? pricingSeed.currency.trim().toUpperCase()
-        : typeof budgetApiRange?.currency === "string" && budgetApiRange.currency.trim()
-          ? budgetApiRange.currency.trim().toUpperCase()
-        : "USD";
-    const defaultMin = normalizedUseCase === "tryon" ? 500 : 2000;
-    const defaultMax = normalizedUseCase === "tryon" ? 10000 : 50000;
-    const derived = deriveBudgetSliderRange(cfgMin, cfgMax, defaultMin, defaultMax);
-    const min = hasApiBounds ? Math.min(apiMin, apiMax) : derived.min;
-    const max = hasApiBounds ? Math.max(apiMin, apiMax) : derived.max;
-    const step = hasApiBounds ? Math.max(100, roundBudgetStep(max - min)) : derived.step;
-    return {
-      id: DETERMINISTIC_BUDGET_ID,
-      componentType: "slider",
-      intent: "collect_context",
-      data: { required: true, min, max, step: Math.max(100, step), currency, unit: "$", unitType: "currency", format: "currency" },
-      copy: {
-        headline: "What budget range should we design around?",
-        subtext: "Move the slider to set your target spend so pricing and image quality stay aligned.",
-      },
-    };
+    return buildDeterministicBudgetStep({
+      budgetApiRange,
+      config,
+      pricingSeed,
+      useCase: normalizedUseCase,
+    });
   }, [budgetApiRange, config, normalizedUseCase, pricingSeed]);
 
   const budgetSliderConfig = useMemo(() => {

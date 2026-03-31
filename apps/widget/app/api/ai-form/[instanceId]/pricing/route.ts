@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { logger } from "@/lib/server/logger";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { extractAIFormConfig } from "@/lib/ai-form/config/extract-ai-form-config";
+import { mergeInstanceContextFromDb, normalizeOptionalString } from "@/lib/server/merge-instance-context-from-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -233,33 +234,6 @@ function parsePricingEstimate(
   return null;
 }
 
-function pickServiceIds(stepDataSoFar: Record<string, any>): string[] {
-  const candidates = [
-    stepDataSoFar?.service_primary,
-    stepDataSoFar?.["step-service-primary"],
-    stepDataSoFar?.serviceId,
-    stepDataSoFar?.service_id,
-    stepDataSoFar?.subcategoryId,
-    stepDataSoFar?.subcategory_id,
-  ];
-  const ids: string[] = [];
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim()) ids.push(c.trim());
-    else if (Array.isArray(c)) {
-      for (const v of c) {
-        if (typeof v === "string" && v.trim()) ids.push(v.trim());
-      }
-    }
-  }
-  return Array.from(new Set(ids)).slice(0, 20);
-}
-
-function normalizeOptionalString(v: unknown): string | null {
-  if (typeof v !== "string") return null;
-  const s = v.trim();
-  return s ? s : null;
-}
-
 function extractNameFromMaybeObject(value: unknown): string | null {
   if (!value) return null;
   if (typeof value === "string") return normalizeOptionalString(value);
@@ -276,16 +250,6 @@ function hasServiceContext(context: Record<string, any> | null | undefined): boo
   const industryName = extractNameFromMaybeObject((context as any).industry);
   const serviceName = extractNameFromMaybeObject((context as any).service);
   return Boolean(industryName || serviceName);
-}
-
-function buildServiceSummaryFallback(params: { industry?: string | null; services?: string[] | null }): string | null {
-  const industry = normalizeOptionalString(params.industry ?? null);
-  const services = Array.isArray(params.services) ? params.services.map((s) => normalizeOptionalString(s)).filter(Boolean) : [];
-  if (!industry && services.length === 0) return null;
-  const parts: string[] = [];
-  if (industry) parts.push(`Industry: ${industry}.`);
-  if (services.length > 0) parts.push(`Services: ${services.join(", ")}.`);
-  return parts.join(" ");
 }
 
 function extractUpstreamError(json: any, rawText: string): string | null {
@@ -395,52 +359,18 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     return NextResponse.json({ error: "Instance not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
-  // Merge in instance summaries so upstream can price without UUID resolution.
-  const companySummary = typeof (instance as any)?.company_summary === "string" ? String((instance as any).company_summary).trim() : null;
-  const instanceServiceSummary =
-    typeof (instance as any)?.service_summary === "string" ? String((instance as any).service_summary).trim() : null;
   const aiFormConfig = extractAIFormConfig((instance as any)?.config);
   const configIndustry = normalizeOptionalString(aiFormConfig.industry);
   const configServices = Array.isArray(aiFormConfig.services)
     ? aiFormConfig.services.map((s: any) => (typeof s === "string" ? s.trim() : "")).filter(Boolean)
     : [];
 
-  const selectedServiceIds = pickServiceIds(stepDataSoFar);
-  const serviceSummarySnippets: string[] = [];
-  if (selectedServiceIds.length > 0) {
-    try {
-      const { data: rows } = await supabase
-        .from("categories_subcategories")
-        .select("id, service_summary")
-        .in("id", selectedServiceIds)
-        .limit(50);
-      if (Array.isArray(rows)) {
-        for (const row of rows) {
-          const svc = typeof (row as any)?.service_summary === "string" ? String((row as any).service_summary).trim() : "";
-          if (svc) serviceSummarySnippets.push(svc);
-        }
-      }
-    } catch {}
-  }
-  const derivedServiceSummary = [companySummary, instanceServiceSummary, ...serviceSummarySnippets]
-    .map((s) => (typeof s === "string" ? s.trim() : ""))
-    .filter(Boolean)
-    .slice(0, 6)
-    .join("\n\n") || null;
-
-  const mergedContext: Record<string, any> = { ...instanceContext };
-  if ("businessContext" in mergedContext) delete mergedContext.businessContext;
-  if ((mergedContext.companySummary == null || mergedContext.companySummary === "") && companySummary) mergedContext.companySummary = companySummary;
-  if ((mergedContext.serviceSummary == null || mergedContext.serviceSummary === "") && derivedServiceSummary) {
-    mergedContext.serviceSummary = derivedServiceSummary;
-  }
-  // Ensure we always provide some service context to upstream when possible.
-  if (mergedContext.industry == null && configIndustry) mergedContext.industry = { name: configIndustry };
-  if (mergedContext.service == null && configServices.length > 0) mergedContext.service = { name: configServices[0] };
-  if (!normalizeOptionalString(mergedContext.serviceSummary) && !normalizeOptionalString(mergedContext.service_summary)) {
-    const fallbackSummary = buildServiceSummaryFallback({ industry: configIndustry, services: configServices });
-    if (fallbackSummary) mergedContext.serviceSummary = fallbackSummary;
-  }
+  const mergedContext = await mergeInstanceContextFromDb({
+    supabase,
+    instance: instance as Record<string, any>,
+    stepDataSoFar,
+    instanceContext,
+  });
 
   const schemaVersion =
     typeof body?.formState?.schemaVersion === "string"
@@ -568,7 +498,7 @@ export async function POST(request: NextRequest, { params }: { params: { instanc
     },
   };
 
-  // AI pricing with image analysis can take 20-30+ seconds; avoid premature timeouts
+  // Heuristic pricing is fast; enable PRICING_USE_VLM on the API for slower vision-based estimates
   const fetchTimeoutMs = 35000;
   const candidatePaths = [
     // Preferred (matches FastAPI path-param shape)

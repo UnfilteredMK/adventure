@@ -1,15 +1,11 @@
-"""
-Intelligent model selection based on task requirements.
-
-Instead of hardcoding model choices per API route, this module examines
-the input signals (number of images, use case, transformation type) and
-returns the optimal model + parameters.
-"""
+"""Compatibility wrappers around the simplified image model catalog."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
+
+from programs.image_generator.model_catalog import resolve_model_entry
 
 
 @dataclass
@@ -67,55 +63,6 @@ class RoutingPolicy:
         return out
 
 
-# ---- Model presets ----
-
-FLUX_PRO = ModelRecommendation(
-    model_id="black-forest-labs/flux-1.1-pro",
-    guidance_scale=6.0,
-    num_inference_steps=18,
-    max_reference_images=0,
-    aspect_ratio="1:1",
-    output_format="png",
-)
-
-FLUX_KONTEXT = ModelRecommendation(
-    model_id="black-forest-labs/flux-kontext-pro",
-    guidance_scale=5.5,
-    num_inference_steps=25,
-    max_reference_images=1,
-    aspect_ratio="match_input_image",
-    output_format="png",
-    prompt_upsampling=True,
-)
-
-NANO_BANANA = ModelRecommendation(
-    model_id="google/nano-banana",
-    guidance_scale=6.0,
-    num_inference_steps=18,
-    max_reference_images=4,
-    output_format="jpg",
-)
-
-GROK_IMAGINE_IMAGE = ModelRecommendation(
-    model_id="xai/grok-imagine-image",
-    guidance_scale=6.0,
-    num_inference_steps=18,
-    max_reference_images=1,
-    # Ignored for image-edit mode; retained for text-to-image fallback.
-    aspect_ratio="1:1",
-    output_format="jpg",
-)
-
-FLUX_SCHNELL = ModelRecommendation(
-    model_id="black-forest-labs/flux-schnell",
-    guidance_scale=3.5,
-    num_inference_steps=4,
-    max_reference_images=0,
-    aspect_ratio="1:1",
-    output_format="webp",
-)
-
-
 def _normalize_use_case(raw: str) -> str:
     return str(raw or "").strip().lower().replace("_", "-")
 
@@ -126,11 +73,7 @@ def select_routing_policy(
     is_edit: bool = False,
 ) -> RoutingPolicy:
     """
-    Service-side route intent policy for image generation.
-
-    The field names intentionally mirror Switchboard request concepts
-    (provider/priorities/traits/requiredTags) so this policy can be reused when
-    we route through Switchboard.
+    Compatibility policy object derived from the simplified model table.
     """
     uc = _normalize_use_case(use_case)
 
@@ -179,20 +122,27 @@ def select_routing_policy(
             go_fast=False,
         )
 
-    # Default scene
+    entry = resolve_model_entry(
+        use_case=uc,
+        has_reference_images=is_edit,
+        has_scene_image=is_edit,
+    )
+    traits = entry.traits
+    if uc == "scene":
+        traits = ("high_prompt_adherence", "landscape_preservation" if is_edit else "landscape_generation")
     return RoutingPolicy(
         provider="replicate",
-        priorities=("highest_quality", "highest_reliability", "lowest_cost"),
-        traits=("high_prompt_adherence", "landscape_preservation" if is_edit else "landscape_generation"),
-        required_tags=("landscapes",),
-        notes=(
+        priorities=entry.priorities,
+        traits=traits,
+        required_tags=entry.required_tags,
+        notes=entry.notes or (
             "Preserve scene structure/materials from the uploaded image."
             if is_edit
             else "Prioritize photorealistic landscape/scene coherence."
         ),
-        prompt_strength=0.66 if is_edit else None,
-        image_prompt_strength=0.86 if is_edit else None,
-        go_fast=False,
+        prompt_strength=entry.prompt_strength,
+        image_prompt_strength=entry.image_prompt_strength,
+        go_fast=entry.go_fast,
     )
 
 
@@ -205,48 +155,25 @@ def select_model(
     has_user_image: bool = False,
     is_thumbnail: bool = False,
 ) -> ModelRecommendation:
-    """
-    Select the best model and parameters for the given task.
-
-    Priority logic:
-    1. Thumbnails/option images -> Schnell (fast, cheap)
-    2. Try-on (user + product) -> Nano Banana (multi-image)
-    3. Scene-placement (scene + product) -> Nano Banana (multi-image)
-    4. Drilldown -> Kontext Pro (reference-preserving edit)
-    5. Scene with references -> Kontext Pro (preserve uploaded scene)
-    6. Scene without references -> Flux 1.1 Pro (text-to-image)
-    """
-    if is_thumbnail:
-        return FLUX_SCHNELL
-
-    uc = _normalize_use_case(use_case)
-
-    if uc in ("tryon", "try-on"):
-        if has_user_image and has_product_image:
-            return NANO_BANANA
-        if num_input_images >= 2:
-            return NANO_BANANA
-        if num_input_images == 1:
-            return FLUX_KONTEXT
-        return FLUX_PRO
-
-    if uc == "scene-placement":
-        # Scene placement is an inpainting/edit-heavy path.
-        # xai/grok-imagine-image supports native `image` editing and is preferred here.
-        return GROK_IMAGINE_IMAGE
-
-    if uc == "scene-refinement":
-        return GROK_IMAGINE_IMAGE
-
-    if uc == "drilldown":
-        if num_input_images >= 1:
-            return FLUX_KONTEXT
-        return FLUX_PRO
-
-    # Default "scene" use case
-    if num_input_images >= 1:
-        return FLUX_KONTEXT
-    return FLUX_PRO
+    """Resolve the active image model from the simplified model table."""
+    entry = resolve_model_entry(
+        use_case=_normalize_use_case(use_case),
+        has_reference_images=max(0, int(num_input_images or 0)) > 0,
+        has_scene_image=bool(has_scene_image),
+        has_product_image=bool(has_product_image),
+        has_user_image=bool(has_user_image),
+        is_thumbnail=bool(is_thumbnail),
+    )
+    return ModelRecommendation(
+        model_id=entry.model_id,
+        guidance_scale=entry.guidance_scale,
+        num_inference_steps=entry.num_inference_steps,
+        max_reference_images=entry.max_reference_images,
+        aspect_ratio=entry.aspect_ratio,
+        output_format=entry.output_format,
+        prompt_upsampling=entry.prompt_upsampling,
+        safety_tolerance=entry.safety_tolerance,
+    )
 
 
 __all__ = ["ModelRecommendation", "RoutingPolicy", "select_model", "select_routing_policy"]

@@ -2,6 +2,8 @@
  * Shared refinement-library seeding and lazy repair (designer instance seed + widget repair).
  */
 
+import { buildSuggestionLabel } from "./suggestion-label";
+
 export const REFINEMENT_OPTION_GENERATED_FOR = "refinement_option";
 export const REFINEMENT_OPTION_MODEL_ID = "black-forest-labs/flux-schnell";
 export const REFINEMENT_LIBRARY_TARGET_COMPONENTS = 10;
@@ -535,6 +537,8 @@ async function persistGeneratedRefinementBatch(params: {
       .insert({
         account_id: null,
         prompt: promptText,
+        subcategory_id: params.subcategoryId,
+        suggestion_label: buildSuggestionLabel(promptText, option.label),
         variables: null,
       })
       .select("id")

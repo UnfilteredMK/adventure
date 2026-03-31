@@ -24,6 +24,16 @@ if (!supabaseUrl || !supabaseServiceKey) {
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+function buildSuggestionLabel(fullPrompt, preferredShort, maxLen = 50) {
+  const pref = String(preferredShort || '').trim();
+  if (pref) {
+    return pref.length <= maxLen ? pref : `${pref.slice(0, Math.max(0, maxLen - 1))}…`;
+  }
+  const p = String(fullPrompt || '').trim();
+  if (!p) return '';
+  return p.length <= maxLen ? p : `${p.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
 // Sample data for different niches
 const sampleData = {
   categories: [
@@ -369,7 +379,9 @@ async function createSampleData() {
             .from('prompts')
             .insert({
               prompt: prompt,
-              variables: null
+              subcategory_id: subcategoryId,
+              variables: null,
+              suggestion_label: buildSuggestionLabel(prompt),
             })
             .select()
             .single();

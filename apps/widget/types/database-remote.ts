@@ -156,7 +156,6 @@ export type Database = {
           content: string | null
           created_at: string
           credit_price: number
-          demo_prompt_id: string | null
           demo_template_config: Json | null
           demo_theme_key: string | null
           description: string | null
@@ -196,7 +195,6 @@ export type Database = {
           content?: string | null
           created_at?: string
           credit_price?: number
-          demo_prompt_id?: string | null
           demo_template_config?: Json | null
           demo_theme_key?: string | null
           description?: string | null
@@ -236,7 +234,6 @@ export type Database = {
           content?: string | null
           created_at?: string
           credit_price?: number
-          demo_prompt_id?: string | null
           demo_template_config?: Json | null
           demo_theme_key?: string | null
           description?: string | null
@@ -282,13 +279,6 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "categories_subcategories_demo_prompt_id_fkey"
-            columns: ["demo_prompt_id"]
-            isOneToOne: false
-            referencedRelation: "prompts"
             referencedColumns: ["id"]
           },
         ]
@@ -694,6 +684,8 @@ export type Database = {
           created_at: string
           id: string
           prompt: string
+          subcategory_id: string | null
+          suggestion_label: string | null
           updated_at: string
           variables: Json | null
         }
@@ -702,6 +694,8 @@ export type Database = {
           created_at?: string
           id?: string
           prompt: string
+          subcategory_id?: string | null
+          suggestion_label?: string | null
           updated_at?: string
           variables?: Json | null
         }
@@ -710,6 +704,8 @@ export type Database = {
           created_at?: string
           id?: string
           prompt?: string
+          subcategory_id?: string | null
+          suggestion_label?: string | null
           updated_at?: string
           variables?: Json | null
         }
@@ -719,6 +715,13 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompts_subcategory_id_fkey"
+            columns: ["subcategory_id"]
+            isOneToOne: false
+            referencedRelation: "categories_subcategories"
             referencedColumns: ["id"]
           },
         ]

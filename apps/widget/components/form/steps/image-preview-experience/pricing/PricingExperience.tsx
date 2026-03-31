@@ -88,23 +88,6 @@ function withAlpha(color: string | undefined, alpha: number): string {
   return `color-mix(in srgb, ${c} ${pct}%, transparent)`;
 }
 
-function maskedLockedParts(lockedPrice?: string, fallbackPrice?: string): { prefix: string; masked: string } {
-  const raw = String(lockedPrice || fallbackPrice || '').trim();
-  if (raw) return { prefix: '', masked: raw };
-  return { prefix: '', masked: 'XXXXX' };
-}
-
-function splitLockedPriceMask(lockedPrice?: string, fallbackPrice?: string): {
-  prefix: string;
-  blur: string;
-} | null {
-  const raw = String(lockedPrice || fallbackPrice || '').trim();
-  if (!raw) return null;
-  const m = raw.match(/^(\D*\d)(.*)$/);
-  if (!m) return { prefix: raw, blur: '' };
-  return { prefix: m[1], blur: m[2] || '' };
-}
-
 export interface PricingPillProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   label?: string;
   termsHref?: string;
@@ -122,7 +105,45 @@ export interface PricingPillProps extends Omit<React.ButtonHTMLAttributes<HTMLBu
   helperText?: string;
 }
 
-// Keep locked state easy to scan: lock + "Show pricing" + masked value.
+/** Locked pill: only the first `$` stays sharp; the rest (including a second `$` in a range) is blurred. */
+function LockedPriceValueBlurred({
+  text,
+  className,
+  style,
+}: {
+  text: string;
+  className: string;
+  style: React.CSSProperties;
+}) {
+  const blurStyle: React.CSSProperties = { filter: "blur(7px)", WebkitFilter: "blur(7px)" };
+  const first = text.indexOf("$");
+  if (first < 0) {
+    return (
+      <span className={cn(className, "inline-block min-w-0 max-w-full truncate")} style={{ ...style, ...blurStyle }}>
+        {text}
+      </span>
+    );
+  }
+  const before = text.slice(0, first);
+  const after = text.slice(first + 1);
+  return (
+    <span className={cn(className, "inline-flex max-w-full min-w-0 items-center justify-center gap-0")} style={style}>
+      {before ? (
+        <span className="min-w-0 shrink truncate" style={blurStyle}>
+          {before}
+        </span>
+      ) : null}
+      <span className="shrink-0" style={{ filter: "none", WebkitFilter: "none" }}>
+        $
+      </span>
+      <span className="min-w-0 max-w-full truncate" style={blurStyle}>
+        {after}
+      </span>
+    </span>
+  );
+}
+
+// Keep locked state easy to scan: reveal action + masked value.
 const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(function PricingPill(
   {
     label,
@@ -147,15 +168,14 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
 ) {
   const effectiveDisabled = Boolean(disabled || (loading && revealed));
   const accent = typeof accentColor === 'string' && accentColor.trim().length > 0 ? accentColor.trim() : null;
-  const lockedMask = maskedLockedParts(lockedPrice, price);
-  const lockedRangeMask = splitLockedPriceMask(lockedPrice, price);
 
   void termsHref;
   void allowToggle;
   void autoReveal;
 
   const rawLabel = (label && String(label).trim()) ? String(label).trim() : 'Show pricing';
-  const pillLabel = rawLabel === 'Show pricing' ? 'SHOW PRICING' : rawLabel;
+  const pillLabel = rawLabel.toLowerCase() === 'show pricing' ? 'SHOW PRICING' : rawLabel;
+  const lockedLabelIsAllCaps = pillLabel === pillLabel.toUpperCase() && /[A-Z]/.test(pillLabel);
   const pricingFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
   const base = accent || '#0f172a';
   const tagBg = withAlpha(accent || base, 1);
@@ -251,16 +271,23 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             <span className={labelRowClass}>
               {revealed ? (
                 <span className={cn(labelTextClass, "block min-w-0 truncate text-center")}>{pillLabel}</span>
-              ) : pillLabel === 'SHOW PRICING' ? (
+              ) : pillLabel === "SHOW PRICING" ? (
                 <span
-                  className={cn(lockedLabelTextClass, "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible text-center")}
+                  className={cn(
+                    lockedLabelTextClass,
+                    "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible text-center"
+                  )}
                   style={lockedLabelStyle}
                 >
                   <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
                   <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
                 </span>
+              ) : lockedLabelIsAllCaps ? (
+                <span className={cn(lockedLabelTextClass, "block min-w-0 truncate text-center")} style={lockedLabelStyle}>
+                  {pillLabel}
+                </span>
               ) : (
-                <span className={cn(lockedLabelTextClass, "block min-w-0 truncate text-center")} style={lockedLabelStyle}>{pillLabel}</span>
+                <span className={cn(labelTextClass, "block min-w-0 truncate text-center font-medium")}>{pillLabel}</span>
               )}
               {helperLabel ? (
                 <span
@@ -287,27 +314,13 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             style={{ fontFamily: pricingFont }}
           >
             {revealed ? (
-              loading ? (
-                <span className="text-white/90 min-w-0">Calculating exact price…</span>
-              ) : (
-                <span className="min-w-0">{price}</span>
-              )
+              <span className="min-w-0">{price}</span>
             ) : (
-              <span className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em]")} style={lockedValueStyle}>
-                {lockedRangeMask ? (
-                  <span className="inline-flex items-center whitespace-nowrap leading-none">
-                    <span>{lockedRangeMask.prefix}</span>
-                    <span className={cn("opacity-95", lockedRangeMask.blur ? "blur-[0.26em]" : null)}>{lockedRangeMask.blur}</span>
-                  </span>
-                ) : (
-                  <>
-                    {lockedMask.prefix ? <span className="text-white/95 leading-none">{lockedMask.prefix}</span> : null}
-                    <span className={cn("inline-flex items-center leading-none", lockedMask.prefix && "-ml-[0.02em]")}>
-                      <span className="inline-block px-[0.03em] blur-[0.26em] opacity-95 leading-none">{lockedMask.masked}</span>
-                    </span>
-                  </>
-                )}
-              </span>
+              <LockedPriceValueBlurred
+                text={lockedPrice || price || "$•••–$•••"}
+                className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em] select-none")}
+                style={lockedValueStyle}
+              />
             )}
           </div>
         </div>

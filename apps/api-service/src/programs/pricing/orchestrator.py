@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -16,6 +17,12 @@ from programs.pricing.service_calibration import (
 
 
 _CURRENCY_RE = re.compile(r"(?i)\b(usd|cad|aud|gbp|eur)\b")
+
+
+def _pricing_vlm_enabled() -> bool:
+    """Replicate vision pricing is slow (often 10–60s). Off by default; set PRICING_USE_VLM=true to enable."""
+    raw = str(os.getenv("PRICING_USE_VLM", "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 _DRIVER_DEFINITIONS: dict[str, dict[str, object]] = {
     "hardscape": {
@@ -524,7 +531,7 @@ def _estimate_current_range(
     quantity_hints: Dict[str, int],
     apply_starter_floor: bool,
 ) -> tuple[PriceRange, str, str]:
-    if preview_url:
+    if preview_url and _pricing_vlm_enabled():
         try:
             vlm_result = estimate_pricing_with_vlm(payload, preview_image_url=preview_url, calibration=calibration)
             raw_range = _normalize_range(int(vlm_result["rangeLow"]), int(vlm_result["rangeHigh"]))

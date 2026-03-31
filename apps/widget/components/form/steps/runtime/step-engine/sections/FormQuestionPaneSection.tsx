@@ -9,7 +9,11 @@ import { Slider as SliderPrimitive } from "@/components/ui/slider";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
-import { ArrowLeft, ArrowUp, ImagePlus } from "lucide-react";
+import { ArrowLeft, ArrowUp, ImagePlus, Sparkles } from "lucide-react";
+import { usePreviewSuggestions } from "@/components/form/state/PreviewSuggestionsContext";
+import type { Suggestion } from "@/types";
+import { PreviewIdeasChips } from "../../../preview-ideas/PreviewIdeasChips";
+import { OPEN_DESIGN_ESTIMATE_GATE_EVENT } from "../../../image-preview-experience/gallery/preview-cache-bridge";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 import { layoutDebugClassName, withLayoutDebugStyle } from "../debug-layout";
 
@@ -30,8 +34,9 @@ interface FormQuestionSectionProps {
   isRefinementUploadStep: boolean;
   leadCapturedForUI: boolean;
   leadGateLocksQuestionArea: boolean;
-  adventureInputMode: "questions" | "prompt" | "budget" | "uploads";
-  setAdventureInputMode: (mode: "questions" | "prompt" | "budget" | "uploads") => void;
+  adventureInputMode: "questions" | "ideas" | "prompt" | "budget" | "uploads";
+  setAdventureInputMode: (mode: "questions" | "ideas" | "prompt" | "budget" | "uploads") => void;
+  onApplyIdeaSuggestion: (suggestion: Suggestion) => void;
   budgetSliderConfig: { min: number; max: number; step: number; currency: string };
   budgetValue: number | null;
   onBudgetChange: (value: number) => void;
@@ -41,6 +46,8 @@ interface FormQuestionSectionProps {
   onRegeneratePreview: (uploadedUrl?: string) => void;
   previewEnabled: boolean;
   previewHasImage: boolean;
+  /** From preview canvas: Ideas chrome only when `single` (hero), not concept grid. */
+  previewSurfaceMode?: "gallery" | "single" | "empty";
   questionContentRef: React.RefObject<HTMLDivElement>;
   questionScale: number;
   questionViewportRef: React.RefObject<HTMLDivElement>;
@@ -88,6 +95,7 @@ export function FormQuestionSection({
   leadGateLocksQuestionArea,
   adventureInputMode,
   setAdventureInputMode,
+  onApplyIdeaSuggestion,
   budgetSliderConfig,
   budgetValue,
   onBudgetChange,
@@ -97,6 +105,7 @@ export function FormQuestionSection({
   onRegeneratePreview,
   previewEnabled,
   previewHasImage,
+  previewSurfaceMode = "empty",
   questionContentRef,
   questionScale,
   questionViewportRef,
@@ -118,9 +127,14 @@ export function FormQuestionSection({
   layoutDebugEnabled = false,
 }: FormQuestionSectionProps) {
   const uploadsInputRef = useRef<HTMLInputElement>(null);
-  // Only show prompt/budget/uploads bar AFTER lead capture (pricing opt-in) is completed.
+  const { suggestions: ideasSuggestions, loading: ideasLoading } = usePreviewSuggestions();
+  /** Hide toolbar only in concept-gallery mode; allow `empty` until preview reports surface (avoids missing toolbar). */
   const showPromptControls = Boolean(
-    previewEnabled && previewHasImage && !isRefinementUploadStep && leadCapturedForUI && !hideQuestionPane
+    previewEnabled &&
+      previewHasImage &&
+      previewSurfaceMode !== "gallery" &&
+      !isRefinementUploadStep &&
+      !hideQuestionPane
   );
   const usePreviewPaneLayout = Boolean(
     usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage && !forceExpandedStepLayout
@@ -133,10 +147,14 @@ export function FormQuestionSection({
   const rendererStepType = String((stepForRenderer as any)?.type || (stepForRenderer as any)?.componentType || "").toLowerCase();
   const rendererAllowsInternalScroll = rendererStepType === "image_choice_grid";
   const promptText = promptDraft.trim();
-  const canGoBack = (state?.currentStepIndex || 0) > 0;
+  /** Always offer Back when `handleBack` is wired; behavior for step 0 is handled in StepEngine (e.g. return to concept grid). */
+  const canGoBack = true;
   const primary = theme.primaryColor || "#3b82f6";
   const textMuted = theme.textColor ? hexToRgba(theme.textColor, 0.65) : undefined;
+  /** Pricing/lead modal not finished — lock Prompt/Budget/Uploads, idea chips, and Guided (unless still on questionnaire). */
+  const designToolsNeedLead = Boolean(showPromptControls && !leadCapturedForUI);
   const canUseBudgetMode = Boolean(showPromptControls && leadCapturedForUI);
+  const guidedTabDisabled = Boolean(designToolsNeedLead && adventureInputMode !== "questions");
   const pricingLocale =
     typeof navigator !== "undefined"
       ? ((navigator.languages && navigator.languages[0]) || navigator.language || undefined)
@@ -247,86 +265,133 @@ export function FormQuestionSection({
     handlePromptSubmit(currentUploadedReferenceUrl || undefined);
   }, [currentUploadedReferenceUrl, handlePromptSubmit, promptText]);
 
-  const inputModeToggle = showPromptControls ? (
+  const requestPreviewLeadGate = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent(OPEN_DESIGN_ESTIMATE_GATE_EVENT, { detail: { sessionId } })
+    );
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!designToolsNeedLead) return;
+    if (adventureInputMode === "prompt" || adventureInputMode === "budget" || adventureInputMode === "uploads") {
+      setAdventureInputMode("ideas");
+    }
+  }, [designToolsNeedLead, adventureInputMode, setAdventureInputMode]);
+
+  const modeTabClass = (active: boolean, equalWidth: boolean) =>
+    cn(
+      "inline-flex min-w-0 items-center justify-center gap-0.5 rounded-full text-xs font-medium transition-colors",
+      equalWidth ? "w-full" : "w-auto shrink-0",
+      useCompactNav
+        ? cn(
+            "h-[clamp(18px,2.4vh,24px)] text-[clamp(9px,1.3vh,11px)]",
+            equalWidth ? "px-1" : "px-2"
+          )
+        : cn("h-6", equalWidth ? "px-1.5" : "px-2.5"),
+      active ? "bg-primary/10 text-foreground" : ""
+    );
+
+  const primaryModeToggle = showPromptControls ? (
       <div
         className={layoutDebugClassName(
           layoutDebugEnabled,
           cn(
-            "inline-flex items-center gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5 shrink-0 max-w-full",
+            "flex w-full min-w-0 max-w-full items-stretch gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5",
             useCompactNav && "h-[clamp(20px,2.8vh,28px)]"
           )
         )}
         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
       >
-	        <button
-	          type="button"
-	          onClick={() => setAdventureInputMode("questions")}
-	          className={cn(
-	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
-	            adventureInputMode === "questions" ? "bg-primary/10 text-foreground" : ""
-	          )}
+        <button
+          type="button"
+          onClick={() => setAdventureInputMode("ideas")}
+          className={modeTabClass(adventureInputMode === "ideas", false)}
+          style={
+            adventureInputMode !== "ideas"
+              ? { color: textMuted || "var(--form-text-color)" }
+              : undefined
+          }
+          title="Explore AI-suggested upgrades and styles"
+        >
+          <Sparkles className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
+          <span className="whitespace-nowrap">Ideas</span>
+        </button>
+        <div
+          className={layoutDebugClassName(
+            layoutDebugEnabled,
+            "grid min-w-0 flex-1 grid-cols-4 gap-0.5"
+          )}
+        >
+        <button
+          type="button"
+          disabled={guidedTabDisabled}
+          title={
+            guidedTabDisabled
+              ? "Finish the pricing step on the preview image to unlock"
+              : undefined
+          }
+          onClick={() => setAdventureInputMode("questions")}
+          className={cn(
+            modeTabClass(adventureInputMode === "questions", true),
+            guidedTabDisabled ? "opacity-45" : null
+          )}
           style={
             adventureInputMode !== "questions"
               ? { color: textMuted || "var(--form-text-color)" }
               : undefined
           }
         >
-          Guided
-	        </button>
-	        <button
-	          type="button"
-	          onClick={() => setAdventureInputMode("prompt")}
-	          className={cn(
-	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
-	            adventureInputMode === "prompt" ? "bg-primary/10 text-foreground" : ""
-	          )}
+          <span className="truncate">Guided</span>
+        </button>
+        <button
+          type="button"
+          disabled={designToolsNeedLead}
+          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
+          onClick={() => setAdventureInputMode("prompt")}
+          className={cn(modeTabClass(adventureInputMode === "prompt", true), designToolsNeedLead ? "opacity-45" : null)}
           style={
             adventureInputMode !== "prompt"
               ? { color: textMuted || "var(--form-text-color)" }
               : undefined
           }
-	        >
-	          Prompt
-	        </button>
-	        <button
-	          type="button"
-	          disabled={!canUseBudgetMode}
-	          onClick={() => setAdventureInputMode("budget")}
-	          className={cn(
-	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
-	            adventureInputMode === "budget" ? "bg-primary/10 text-foreground" : "",
-	            !canUseBudgetMode ? "opacity-50 cursor-not-allowed" : ""
-	          )}
-	          style={
-	            adventureInputMode !== "budget"
-	              ? { color: textMuted || "var(--form-text-color)" }
-	              : undefined
-	          }
-	        >
-	          Budget
-	        </button>
-	        <button
-	          type="button"
-	          onClick={() => setAdventureInputMode("uploads")}
-	          className={cn(
-	            "inline-flex items-center rounded-full text-xs font-medium transition-colors shrink-0 min-w-0",
-	            useCompactNav ? "h-[clamp(18px,2.4vh,24px)] px-[clamp(6px,1.5vw,10px)] text-[clamp(9px,1.3vh,11px)]" : "h-6 px-2.5",
-	            adventureInputMode === "uploads" ? "bg-primary/10 text-foreground" : ""
-	          )}
-	          style={
-	            adventureInputMode !== "uploads"
-	              ? { color: textMuted || "var(--form-text-color)" }
-	              : undefined
-	          }
-	        >
-	          Uploads
-	        </button>
-	      </div>
+        >
+          <span className="truncate">Prompt</span>
+        </button>
+        <button
+          type="button"
+          disabled={designToolsNeedLead}
+          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
+          onClick={() => setAdventureInputMode("budget")}
+          className={cn(modeTabClass(adventureInputMode === "budget", true), designToolsNeedLead ? "opacity-45" : null)}
+          style={
+            adventureInputMode !== "budget"
+              ? { color: textMuted || "var(--form-text-color)" }
+              : undefined
+          }
+        >
+          <span className="truncate">Budget</span>
+        </button>
+        <button
+          type="button"
+          disabled={designToolsNeedLead}
+          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
+          onClick={() => setAdventureInputMode("uploads")}
+          className={cn(modeTabClass(adventureInputMode === "uploads", true), designToolsNeedLead ? "opacity-45" : null)}
+          style={
+            adventureInputMode !== "uploads"
+              ? { color: textMuted || "var(--form-text-color)" }
+              : undefined
+          }
+        >
+          <span className="truncate">Uploads</span>
+        </button>
+        </div>
+      </div>
 	  ) : undefined;
-  const sharedQuestionControls = showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
+
+  const sharedQuestionControls =
+    showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
     <div
       className={layoutDebugClassName(
         layoutDebugEnabled,
@@ -341,26 +406,37 @@ export function FormQuestionSection({
         className={layoutDebugClassName(
           layoutDebugEnabled,
           cn(
-            "min-h-8 w-full min-w-0 items-center gap-2",
-            useCompactNav ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "flex justify-center"
+            "flex w-full min-w-0 flex-col gap-0",
           )
         )}
         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
       >
-        {useCompactNav ? <div aria-hidden="true" className="min-w-0" /> : null}
-        <div className="flex min-w-0 items-center justify-center overflow-hidden">
-          {inputModeToggle}
-        </div>
-        <div
-          className={cn(
-            "flex min-w-0 items-center",
-            useCompactNav ? "justify-end" : "justify-center"
-          )}
-        >
-          {showEasePrompt && adventureInputMode === "questions" ? (
-            <EaseFeedbackPrompt visible={true} onSelect={handleEaseFeedback} layoutDebugEnabled={layoutDebugEnabled} />
-          ) : null}
-        </div>
+        {showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
+          <div
+            className={layoutDebugClassName(
+              layoutDebugEnabled,
+              cn(
+                "min-h-8 w-full min-w-0 items-center gap-2",
+                useCompactNav ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "flex justify-center"
+              )
+            )}
+          >
+            {useCompactNav ? <div aria-hidden="true" className="min-w-0" /> : null}
+            <div className="relative z-10 flex min-w-0 items-center justify-center overflow-visible">
+              {primaryModeToggle}
+            </div>
+            <div
+              className={cn(
+                "relative z-0 flex min-w-0 items-center",
+                useCompactNav ? "justify-end" : "justify-center"
+              )}
+            >
+              {showEasePrompt && adventureInputMode === "questions" ? (
+                <EaseFeedbackPrompt visible={true} onSelect={handleEaseFeedback} layoutDebugEnabled={layoutDebugEnabled} />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   ) : null;
@@ -385,8 +461,7 @@ export function FormQuestionSection({
                       ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
                       : "min-h-0 flex-1"
                   )
-                : "flex-1",
-              usePreviewPaneLayout && !showQuestionPaneUnderPreview ? "max-h-0" : null
+                : "flex-1"
             )
           )}
           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
@@ -539,6 +614,35 @@ export function FormQuestionSection({
                           </div>
                         </div>
                       </motion.div>
+	                    ) : adventureInputMode === "ideas" && showPromptControls ? (
+	                      <motion.div
+	                        key="ideas-input-mode"
+	                        initial={{ opacity: 0, x: 16 }}
+	                        animate={{ opacity: 1, x: 0 }}
+	                        exit={{ opacity: 0, x: -16 }}
+	                        transition={{ duration: 0.18, ease: "easeOut" }}
+	                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col overflow-hidden")}
+	                        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
+	                      >
+	                        <div
+	                          className={layoutDebugClassName(
+	                            layoutDebugEnabled,
+	                            cn(
+	                              "flex w-full min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
+	                              usePreviewPaneLayout ? "px-2 py-2" : "px-2.5 py-2 sm:px-3"
+	                            )
+	                          )}
+	                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
+	                        >
+	                          <PreviewIdeasChips
+	                            suggestions={ideasSuggestions}
+	                            loading={ideasLoading}
+	                            onApply={onApplyIdeaSuggestion}
+	                            onRequestLeadGate={designToolsNeedLead ? requestPreviewLeadGate : undefined}
+	                            compact={compactPreviewActive}
+	                          />
+	                        </div>
+	                      </motion.div>
 	                    ) : adventureInputMode === "prompt" && showPromptControls ? (
 	                      <motion.div
 	                        key="prompt-input-mode"

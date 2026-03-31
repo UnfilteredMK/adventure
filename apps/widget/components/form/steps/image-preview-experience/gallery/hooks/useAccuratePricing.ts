@@ -40,8 +40,6 @@ type UseAccuratePricingOptions = {
   setLiveBudget: React.Dispatch<React.SetStateAction<number | null>>;
   liveBudgetDirty: boolean;
   setLiveBudgetDirty: React.Dispatch<React.SetStateAction<boolean>>;
-  pendingExactPricingReveal: boolean;
-  setPendingExactPricingReveal: React.Dispatch<React.SetStateAction<boolean>>;
   currentHeroRef: React.MutableRefObject<string | null>;
   heroForPricingRef: React.MutableRefObject<string | null>;
   pendingBudgetRefineRef: React.MutableRefObject<boolean>;
@@ -78,8 +76,6 @@ export function useAccuratePricing({
   setLiveBudget,
   liveBudgetDirty,
   setLiveBudgetDirty,
-  pendingExactPricingReveal,
-  setPendingExactPricingReveal,
   currentHeroRef,
   heroForPricingRef,
   pendingBudgetRefineRef,
@@ -209,8 +205,6 @@ export function useAccuratePricing({
       }
     } catch {
       if (currentHeroRef.current === heroAtFetchStart) setAccuratePricingStatus("error");
-    } finally {
-      setPendingExactPricingReveal(false);
     }
   }, [
     accuratePricingStatus,

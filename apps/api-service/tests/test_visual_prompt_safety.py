@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import inspect
+
 from programs.common.visual_text_safety import sanitize_visual_context_text
-from programs.image_generator.image_prompt_library import build_option_image_prompt, get_negative_prompt
-from programs.image_generator.prompt_builder import build_image_prompt_text
-from programs.price_ladder_gallery.orchestrator import VARIANT_SLOTS, _build_slot_prompt
+from programs.image_generator.dspy.scene_prompt import ScenePromptSignature
+from programs.image_generator.helpers.prompt_templates import (
+    build_option_image_prompt,
+    get_negative_prompt,
+)
+from programs.image_generator.orchestrator import _extract_scene_inputs
+from programs.pricing.price_ladder_gallery import VARIANT_SLOTS, _build_slot_prompt
 from programs.subcategory_catalog.orchestrator import _resolve_strings
 
 
@@ -12,23 +18,13 @@ def test_sanitize_visual_context_text_removes_before_after_phrase() -> None:
     assert sanitize_visual_context_text(text) == "AI visualization for House Flips services."
 
 
-def test_scene_prompt_builder_avoids_comparison_language() -> None:
-    payload = {
-        "useCase": "scene",
-        "instanceContext": {
-            "service": {"name": "Before/After House Flips"},
-            "serviceSummary": "AI visualization for Before/After House Flips services.",
-        },
-    }
+def test_scene_prompt_signature_avoids_comparison_language() -> None:
+    instructions = inspect.getdoc(ScenePromptSignature).lower()
 
-    spec = build_image_prompt_text(payload)
-    prompt = str(spec.get("prompt") or "").lower()
-    negative_prompt = str(spec.get("negativePrompt") or "").lower()
-
-    assert "before/after" not in prompt
-    assert "before and after" not in prompt
-    assert "single finished scene" in prompt
-    assert "split screen" in negative_prompt
+    assert "before/after" not in instructions
+    assert "before and after" not in instructions
+    assert "single finished image" in instructions
+    assert "comparison layout" in instructions
 
 
 def test_negative_prompt_library_blocks_comparison_layouts() -> None:
@@ -81,7 +77,7 @@ def test_subcategory_context_resolution_sanitizes_comparison_terms() -> None:
     assert subcategory_name == "House Flips"
 
 
-def test_scene_edit_prompt_builder_avoids_before_after_language() -> None:
+def test_scene_edit_inputs_avoid_before_after_language() -> None:
     payload = {
         "useCase": "scene",
         "generationIntent": "initial",
@@ -97,16 +93,14 @@ def test_scene_edit_prompt_builder_avoids_before_after_language() -> None:
         },
     }
 
-    spec = build_image_prompt_text(payload)
-    prompt = str(spec.get("prompt") or "").lower()
-    negative_prompt = str(spec.get("negativePrompt") or "").lower()
+    inputs = _extract_scene_inputs(payload)
+    reference_adherence = str(inputs.get("reference_adherence") or "").lower()
 
-    assert "before/after" not in prompt
-    assert "before state" not in prompt
-    assert "after state" not in prompt
-    assert "single finished scene" in prompt
-    assert "no numbers" in prompt
-    assert "digits" in negative_prompt
+    assert "before/after" not in reference_adherence
+    assert "before state" not in reference_adherence
+    assert "after state" not in reference_adherence
+    assert "source space" in reference_adherence
+    assert "fully completed result" in reference_adherence
 
 
 def test_price_ladder_slot_prompt_requires_single_standalone_realistic_image() -> None:

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { SquareImage } from "./SquareImage";
+import { AdaptiveImage } from "./AdaptiveImage";
 import { DesignSettings } from "../../../types";
 import { Skeleton } from "../../ui/skeleton";
 import { Copy, Sparkles, ArrowRight, ImageIcon, ChevronDown } from "lucide-react";
@@ -67,51 +67,70 @@ export function MultiColumnGallery({
     ? `${galleryConfig.imageBorderWidth}px ${galleryConfig.imageBorderStyle} ${galleryConfig.imageBorderColor}`
     : "2px solid transparent";
 
-  // Container styles - vertical stack of rows
-  const containerStyles = useMemo(() => ({
-    backgroundColor: galleryConfig.backgroundColor,
-    fontFamily: config.gallery_font_family || 'inherit',
-    fontSize: config.gallery_font_size,
-    padding: 0,
-    width: '100%',
-    height: '100%',
-    minHeight: 0,
-    maxHeight: '100%',
-    overflowY: 'auto' as const,
-    overflowX: 'hidden' as const,
-    WebkitOverflowScrolling: 'touch' as const,
-    overscrollBehavior: 'contain' as const,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    gap: galleryConfig.spacing,
-  }), [galleryConfig, config]);
+  const tileBoxShadow = useMemo(() => {
+    switch (galleryConfig.galleryShadowStyle) {
+      case "none":
+        return "none";
+      case "subtle":
+        return "0 1px 3px rgba(0,0,0,0.06)";
+      case "large":
+        return "0 12px 28px rgba(0,0,0,0.12)";
+      case "glow":
+        return "0 0 24px rgba(59,130,246,0.22)";
+      case "medium":
+      default:
+        return "0 4px 14px rgba(0,0,0,0.08)";
+    }
+  }, [galleryConfig.galleryShadowStyle]);
 
-  // Row styles - 1fr 1fr grid, full width and height
-  const rowStyles = useMemo(() => ({
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr', // Equal columns
-    width: '100%',
-    height: 'auto', // Height determined by square images
-    gap: galleryConfig.spacing, // Spacing between images
-    justifyItems: 'stretch', // Images stretch to fill their grid cell width
-    alignItems: 'center', // Center images vertically
-    flexShrink: 0
-  }), [galleryConfig.spacing]);
+  // Scroll shell: fixed gallery height; inner grid fills and splits space evenly (2×N).
+  const scrollShellStyles = useMemo(
+    () => ({
+      backgroundColor: galleryConfig.backgroundColor,
+      fontFamily: config.gallery_font_family || "inherit",
+      fontSize: config.gallery_font_size,
+      padding: 0,
+      width: "100%",
+      height: "100%",
+      minHeight: 0,
+      maxHeight: "100%",
+      overflowY: "auto" as const,
+      overflowX: "hidden" as const,
+      WebkitOverflowScrolling: "touch" as const,
+      overscrollBehavior: "contain" as const,
+    }),
+    [galleryConfig.backgroundColor, config.gallery_font_family, config.gallery_font_size]
+  );
 
-  // Image wrapper styles - ALWAYS SQUARE, no exceptions
-  const imageWrapperStyles = useMemo(() => ({
-    width: '100%', // Fill the 1fr column width
-    aspectRatio: '1 / 1', // ALWAYS SQUARE - height = width
-    position: 'relative' as const,
-    borderRadius: galleryConfig.imageBorderRadius,
-    overflow: 'hidden',
-    backgroundColor: tileBg,
-    border: imageBorder,
-    justifySelf: 'center', // Center in grid cell horizontally
-    alignSelf: 'center', // Center in grid cell vertically
-    flexShrink: 0 // Never shrink - maintain square
-  }), [galleryConfig, tileBg, imageBorder]);
+  const gridStyles = useMemo(() => {
+    const count = isLoading || isGenerating ? galleryConfig.maxImages : imageSlots.length;
+    const rowCount = Math.max(1, Math.ceil(Math.max(1, count) / 2));
+    return {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))`,
+      gap: galleryConfig.spacing,
+      width: "100%",
+      height: "100%",
+      minHeight: 0,
+      boxSizing: "border-box" as const,
+    } as const;
+  }, [galleryConfig.maxImages, galleryConfig.spacing, imageSlots.length, isGenerating, isLoading]);
+
+  const imageWrapperStyles = useMemo(
+    () => ({
+      width: "100%",
+      height: "100%",
+      minHeight: 0,
+      position: "relative" as const,
+      borderRadius: galleryConfig.imageBorderRadius,
+      overflow: "hidden",
+      backgroundColor: tileBg,
+      border: imageBorder,
+      boxShadow: tileBoxShadow,
+    }),
+    [galleryConfig.imageBorderRadius, imageBorder, tileBg, tileBoxShadow]
+  );
 
   // Ensure hooks run before any early returns (React rule of hooks)
   React.useEffect(() => {
@@ -145,61 +164,40 @@ export function MultiColumnGallery({
 
   if (isLoading || isGenerating) {
     return (
-      <div style={containerStyles}>
-        {Array.from({ length: galleryConfig.maxImages }).map((_, index) => (
-          <div
-            key={`loading-${index}`}
-            className="relative"
-            style={imageWrapperStyles}
-          >
-            {isGenerating ? (
-              <div className="absolute inset-0 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-gray-500 dark:border-t-gray-400 rounded-full animate-spin"></div>
+      <div ref={rootRef} className="relative h-full min-h-0 w-full" style={scrollShellStyles}>
+        <div className="h-full min-h-0" style={gridStyles}>
+          {Array.from({ length: galleryConfig.maxImages }).map((_, index) => (
+            <div key={`loading-${index}`} className="relative min-h-0" style={imageWrapperStyles}>
+              {isGenerating ? (
+                <div className="absolute inset-0 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse">
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-gray-500 dark:border-t-gray-400 rounded-full animate-spin"></div>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <Skeleton className="absolute inset-0" />
-            )}
-          </div>
-        ))}
+              ) : (
+                <Skeleton className="absolute inset-0" />
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
-  // Group images into rows of 2
-  const rows = [];
-  for (let i = 0; i < imageSlots.length; i += 2) {
-    rows.push(imageSlots.slice(i, i + 2));
-  }
-
-  // Percentage-based vertical margin for first and last rows
-  const topBottomGapPercent = 0.75; // subtle 0.75% of image size
-
   return (
-    <div ref={rootRef} className="relative h-full min-h-0 w-full" style={containerStyles}>
-      {rows.map((rowSlots, rowIndex) => (
-        <div key={`row-${rowIndex}`} style={{
-          ...rowStyles,
-          marginTop: rowIndex === 0 ? `${topBottomGapPercent}%` : 0,
-          marginBottom: rowIndex === rows.length - 1 ? `${topBottomGapPercent}%` : 0
-        }}>
-          {rowSlots.map((slot) => (
-            <div
-              key={slot.id}
-              className="relative group"
-              style={imageWrapperStyles}
-            >
+    <div ref={rootRef} className="relative h-full min-h-0 w-full" style={scrollShellStyles}>
+      <div className="h-full min-h-0" style={gridStyles}>
+        {imageSlots.map((slot) => (
+          <div key={slot.id} className="relative group min-h-0" style={imageWrapperStyles}>
           {slot.hasImage ? (
             <>
-              <SquareImage
+              <AdaptiveImage
                 src={slot.image!}
                 alt={`Generated image ${slot.id + 1}`}
-                sizePercent={100}
                 borderRadius={galleryConfig.imageBorderRadius}
-                border={imageBorder}
                 backgroundColor={tileBg}
-                objectFit={"cover"}
+                fit="cover"
+                fillContainer
                 onClick={() => {
                   if (isSampleGallery && !hasUserGenerated && slot.prompt) {
                     onPromptClick(slot.prompt);
@@ -212,7 +210,7 @@ export function MultiColumnGallery({
               {/* Prompt overlay */}
               {showPrompts && slot.prompt && (
                 <div
-                  className={`absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent transition-opacity duration-200 pointer-events-none ${
+                  className={`absolute inset-0 z-[1] bg-gradient-to-t from-black/70 via-transparent to-transparent transition-opacity duration-200 pointer-events-none ${
                     isSampleGallery && !hasUserGenerated
                       ? "opacity-100"
                       : // For user-generated galleries, keep a small prompt snippet always visible.
@@ -275,7 +273,7 @@ export function MultiColumnGallery({
             </>
           ) : slot.showPlaceholder ? (
             <div 
-              className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 transition-colors duration-200 group/placeholder cursor-pointer w-full h-full aspect-square"
+              className="absolute inset-0 flex min-h-0 flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 transition-colors duration-200 group/placeholder cursor-pointer w-full h-full"
               onClick={onPlaceholderClick}
               style={{
                 backgroundColor: galleryConfig.backgroundColor === 'transparent' ? 'rgba(0,0,0,0.02)' : galleryConfig.backgroundColor,
@@ -286,7 +284,6 @@ export function MultiColumnGallery({
                           galleryConfig.galleryShadowStyle === 'medium' ? '0 4px 6px rgba(0,0,0,0.1)' :
                           galleryConfig.galleryShadowStyle === 'large' ? '0 10px 15px rgba(0,0,0,0.1)' :
                           galleryConfig.galleryShadowStyle === 'glow' ? '0 0 20px rgba(59,130,246,0.3)' : '0 4px 6px rgba(0,0,0,0.1)',
-                aspectRatio: '1 / 1'
               }}
             >
               <div className="w-12 h-12 mb-2 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
@@ -305,10 +302,9 @@ export function MultiColumnGallery({
               )}
             </div>
           ) : null}
-            </div>
-          ))}
-        </div>
-      ))}
+          </div>
+        ))}
+      </div>
       {/* Scroll hint overlay */}
       {showScrollHint && (
         <div className="pointer-events-none sticky left-0 right-0 bottom-0 w-full">

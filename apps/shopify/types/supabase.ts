@@ -229,7 +229,6 @@ export type Database = {
           content: string | null
           created_at: string
           credit_price: number
-          demo_prompt_id: string | null
           demo_template_config: Json | null
           demo_theme_key: string | null
           description: string | null
@@ -269,7 +268,6 @@ export type Database = {
           content?: string | null
           created_at?: string
           credit_price?: number
-          demo_prompt_id?: string | null
           demo_template_config?: Json | null
           demo_theme_key?: string | null
           description?: string | null
@@ -309,7 +307,6 @@ export type Database = {
           content?: string | null
           created_at?: string
           credit_price?: number
-          demo_prompt_id?: string | null
           demo_template_config?: Json | null
           demo_theme_key?: string | null
           description?: string | null
@@ -355,13 +352,6 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "categories_subcategories_demo_prompt_id_fkey"
-            columns: ["demo_prompt_id"]
-            isOneToOne: false
-            referencedRelation: "prompts"
             referencedColumns: ["id"]
           },
         ]

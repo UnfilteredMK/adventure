@@ -36,7 +36,6 @@ export default async function AdventurePage({ params, searchParams }: Props) {
       initialInstanceData={prefetched.instance}
       initialDesignConfig={prefetched.designConfig}
       designSource="widget"
-      disableLegacyBudgetUploadSteps
     />
   );
 }

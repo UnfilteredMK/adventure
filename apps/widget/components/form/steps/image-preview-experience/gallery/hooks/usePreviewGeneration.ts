@@ -190,6 +190,7 @@ export function usePreviewGeneration({
       })();
 
       const hasExistingPreview = Boolean(baseReferenceImage);
+      const useCase = normalizeUseCase((config as any)?.useCase);
       const isBudgetDrivenRegeneration = Boolean(pendingBudgetRefineRef.current);
       const isBudgetTierShift = Boolean(pendingBudgetTierShiftRef.current);
       const generationSignatureAtStart = safeJsonStringify({
@@ -200,6 +201,8 @@ export function usePreviewGeneration({
       const activeAnchorImage = (baseReferenceImage || stepSceneUpload || storedUploads?.[0] || null) as string | null;
       const originalUploadedAnchorImage = (stepSceneUpload || stepUserUpload || storedUploads?.[0] || null) as string | null;
       const runAnchorImage = isBudgetDrivenRegeneration ? (originalUploadedAnchorImage || activeAnchorImage) : activeAnchorImage;
+      const shouldUseOptionCardImagesAsGenerationRefs =
+        hasExistingPreview || useCase !== "scene" || Boolean(runAnchorImage);
       const primaryReferenceImage = runAnchorImage;
       const referenceImagesForRequest = (
         hasExistingPreview
@@ -211,12 +214,15 @@ export function usePreviewGeneration({
           : [
               ...(primaryReferenceImage ? [primaryReferenceImage] : []),
               ...storedUploads.filter((u) => u && u !== primaryReferenceImage),
-              ...selectedOptionReferenceImages.filter((u) => u && u !== primaryReferenceImage),
+              ...(
+                shouldUseOptionCardImagesAsGenerationRefs
+                  ? selectedOptionReferenceImages.filter((u) => u && u !== primaryReferenceImage)
+                  : []
+              ),
             ]
       )
         .filter(isValidUrlLikeImage)
         .slice(0, 6);
-      const useCase = normalizeUseCase((config as any)?.useCase);
       const canUseScenePlacementForRefinement =
         hasExistingPreview &&
         (useCase === "scene" || useCase === "scene-placement") &&
@@ -245,21 +251,19 @@ export function usePreviewGeneration({
       const guideOnlyInitialSceneRun =
         useCase === "scene" && generationIntent === "initial" && !hasExistingPreview && referenceImagesForRequest.length > 0;
       const sceneImageForRequest =
-        guideOnlyInitialSceneRun
-          ? undefined
-          : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
-            ? runAnchorImage
-            : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && stepSceneUpload
-              ? stepSceneUpload
-              : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && primaryReferenceImage
-                ? primaryReferenceImage
-                : effectiveUseCase === "scene-placement" && runAnchorImage
-                  ? runAnchorImage
-                  : effectiveUseCase === "scene-placement" && stepSceneUpload
-                    ? stepSceneUpload
-                    : effectiveUseCase === "scene-placement" && primaryReferenceImage
-                      ? primaryReferenceImage
-                      : undefined;
+        (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && runAnchorImage
+          ? runAnchorImage
+          : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && stepSceneUpload
+            ? stepSceneUpload
+            : (effectiveUseCase === "scene" || effectiveUseCase === "scene-refinement") && primaryReferenceImage
+              ? primaryReferenceImage
+              : effectiveUseCase === "scene-placement" && runAnchorImage
+                ? runAnchorImage
+                : effectiveUseCase === "scene-placement" && stepSceneUpload
+                  ? stepSceneUpload
+                  : effectiveUseCase === "scene-placement" && primaryReferenceImage
+                    ? primaryReferenceImage
+                    : undefined;
       const lastGeneratedSignature = latestRun?.contextSignature ?? cacheGeneratedForContextSignature ?? null;
       if (reason === "auto" && generationSignatureAtStart && lastGeneratedSignature && generationSignatureAtStart === lastGeneratedSignature && runs.length > 0) {
         inFlightRef.current = false;
@@ -281,20 +285,41 @@ export function usePreviewGeneration({
           (effectiveStepDataSoFar as any)?.["step_service_primary"] ??
           (effectiveStepDataSoFar as any)?.["step_service"];
         const selectedServiceId = Array.isArray(serviceIdRaw) ? String(serviceIdRaw[0] || "") : String(serviceIdRaw || "");
+        const catalogMeta = selectedServiceId
+          ? (() => {
+              const cat = loadServiceCatalog(sessionId);
+              return (cat?.byServiceId?.[selectedServiceId] ?? null) as {
+                serviceName?: string | null;
+                serviceSummary?: string | null;
+                industryId?: string | null;
+                industryName?: string | null;
+              } | null;
+            })()
+          : null;
         const perServiceSummary =
-          selectedServiceId
-            ? (() => {
-                const cat = loadServiceCatalog(sessionId);
-                const meta: any = cat?.byServiceId?.[selectedServiceId];
-                return typeof meta?.serviceSummary === "string" ? meta.serviceSummary : null;
-              })()
+          catalogMeta && typeof catalogMeta.serviceSummary === "string" ? catalogMeta.serviceSummary : null;
+        const perServiceName =
+          catalogMeta && typeof catalogMeta.serviceName === "string" && catalogMeta.serviceName.trim()
+            ? catalogMeta.serviceName.trim()
             : null;
         const combinedServiceSummary =
           [formCtx.serviceSummary, perServiceSummary].filter((s) => typeof s === "string" && String(s).trim()).join("\n\n") || null;
-        const instanceContext = {
+        const instanceContext: Record<string, unknown> = {
           businessContext: (config as any)?.businessContext ?? formCtx.businessContext,
           serviceSummary: combinedServiceSummary,
         };
+        if (selectedServiceId || perServiceName) {
+          instanceContext.service = {
+            ...(selectedServiceId ? { id: selectedServiceId } : {}),
+            ...(perServiceName ? { name: perServiceName } : {}),
+          };
+        }
+        if (catalogMeta?.industryName || catalogMeta?.industryId) {
+          instanceContext.industry = {
+            ...(catalogMeta.industryId ? { id: catalogMeta.industryId } : {}),
+            ...(catalogMeta.industryName ? { name: catalogMeta.industryName } : {}),
+          };
+        }
 
         const ensureUrlLikeImage = async (src: string): Promise<string> => {
           if (!src || typeof src !== "string") return src;
@@ -339,8 +364,7 @@ export function usePreviewGeneration({
           typeof refinementNotesRaw === "string" && refinementNotesRaw.trim() ? refinementNotesRaw.trim() : undefined;
         const hasDirectImageInput = Boolean(userImage || productImage || sceneImage);
         const shouldGenerateConceptGallery =
-          generationIntent === "initial" &&
-          (!hasDirectImageInput || ((normalizedUseCase === "scene" || normalizedUseCase === "scene-refinement") && Boolean(sceneImage)));
+          generationIntent === "initial" && !hasDirectImageInput;
         const numOutputs = shouldGenerateConceptGallery ? conceptGalleryTargetCount : 1;
         const initialBatchSize = shouldGenerateConceptGallery ? Math.min(2, numOutputs) : numOutputs;
         const generationMessage =
@@ -359,7 +383,7 @@ export function usePreviewGeneration({
           askedStepIds,
           instanceContext: { ...instanceContext },
         };
-        if (guideOnlyInitialSceneRun) requestBodyBase.referenceMode = "guide_only";
+        if (guideOnlyInitialSceneRun && !sceneImage) requestBodyBase.referenceMode = "guide_only";
         if (refinementNotes) requestBodyBase.refinementNotes = refinementNotes;
         if (originalReferenceImage) requestBodyBase.originalReferenceImage = originalReferenceImage;
         if (budgetForRequest !== null) requestBodyBase.budgetRange = budgetForRequest;
@@ -379,8 +403,11 @@ export function usePreviewGeneration({
           if (normalizedUseCase === "scene-placement" && productImage) requestBodyBase.productImage = productImage;
           requestBodyBase.referenceImages = Array.from(new Set([sceneImage, ...(productImage ? [productImage] : []), ...uniqueRefs])).slice(0, 6);
         } else {
-          if (!guideOnlyInitialSceneRun && sceneImage) requestBodyBase.sceneImage = sceneImage;
-          if (uniqueRefs.length > 0) requestBodyBase.referenceImages = uniqueRefs.slice(0, 6);
+          if (sceneImage) requestBodyBase.sceneImage = sceneImage;
+          const refsMinusAnchor = sceneImage
+            ? uniqueRefs.filter((u: string) => u && u !== sceneImage)
+            : uniqueRefs;
+          if (refsMinusAnchor.length > 0) requestBodyBase.referenceImages = refsMinusAnchor.slice(0, 6);
         }
 
         const buildBaseCache = (base?: PreviewCacheV3 | null): PreviewCacheV3 =>
@@ -616,7 +643,8 @@ export function usePreviewGeneration({
         let initialImagePricing: (CachedPricing | undefined)[] | undefined;
         try {
           const pricedHero = firstBatch.images[0] ?? null;
-          if (pricedHero) {
+          // Lead-gated flows fetch pricing once after capture; skip here to avoid duplicate slow upstream calls.
+          if (pricedHero && !leadGateActive) {
             const priced = await requestAccuratePricing({
               answeredQA,
               askedStepIds,
@@ -734,6 +762,7 @@ export function usePreviewGeneration({
       hero,
       heroForPricingRef,
       instanceId,
+      leadGateActive,
       pendingBudgetRefineRef,
       pendingBudgetTierShiftRef,
       refreshRegenAllowance,

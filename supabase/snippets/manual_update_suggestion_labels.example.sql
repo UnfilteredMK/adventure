@@ -1,0 +1,12 @@
+-- Optional: run in the SQL editor after migrations add `prompts.suggestion_label`.
+-- Replace labels with short chip copy; full refinement stays in `prompts.prompt`.
+--
+-- Example (uncomment and set ids from your prompts table):
+-- UPDATE public.prompts
+-- SET suggestion_label = 'Make the backsplash pop'
+-- WHERE id = '00000000-0000-0000-0000-000000000000';
+--
+-- Example by pattern on existing prompt text:
+-- UPDATE public.prompts
+-- SET suggestion_label = left(trim(prompt), 48) || '…'
+-- WHERE suggestion_label IS NULL AND length(trim(prompt)) > 50;

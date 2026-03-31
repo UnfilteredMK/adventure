@@ -21,7 +21,7 @@ export function useStepNavigation(args: {
   isStructuralStep: (step: any) => boolean;
   goToPreviousStep: () => Promise<void> | void;
   goToStep: (stepIndex: number) => void;
-  setAdventureInputMode: (mode: "questions" | "prompt" | "budget" | "uploads") => void;
+  setAdventureInputMode: (mode: "questions" | "ideas" | "prompt" | "budget" | "uploads") => void;
 }) {
   const {
     state,

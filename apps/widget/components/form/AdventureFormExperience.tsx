@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { StepEngine } from './steps/runtime/StepEngine';
 import { FormThemeProvider } from './demo/FormThemeProvider';
-import type { FlowPlan, StepDefinition, UIStep, AIFormConfig, StepState } from '@/types/ai-form';
+import type { FlowPlan, AIFormConfig, StepState } from '@/types/ai-form';
 import { DesignSettings, defaultDesignSettings } from '@/types/design';
 import { useDemoTheme } from '@/components/widget/demo/DemoThemeContext';
 import { applyThemeToConfig, getPresetByKey, themeForSlugOrName } from '@/lib/demo-themes';
@@ -17,6 +17,7 @@ import { getOrCreateSessionId, hasSessionStarted, markSessionStarted, clearSessi
 import { withWidgetDesignDefaults } from "@/lib/widget-design-defaults";
 import { extractAIFormConfig } from "@/lib/ai-form/config/extract-ai-form-config";
 import { ExperienceStateProvider } from "./state/ExperienceState";
+import { PreviewSuggestionsProvider } from "./state/PreviewSuggestionsContext";
 import { BrandHeader } from "@/components/widget/BrandHeader";
 import {
   buildLocalSkeletonFlow,
@@ -626,7 +627,8 @@ export function AdventureFormExperience({
             isPlayground && injected ? ({ ...(nextDesign as any), ...(injected as any) } as DesignSettings) : nextDesign;
           setDesignConfig(useWidgetDefaults ? withWidgetDesignDefaults(mergedNext as any, (instance as any)?.name) : mergedNext);
 
-          setFormConfig(extractAIFormConfig((instance as any)?.config));
+          const extractedFormConfig = extractAIFormConfig((instance as any)?.config);
+          setFormConfig(extractedFormConfig);
 
           const hasCatalogServiceOptions = serviceOptions.length > 0;
           const hasSingleCatalogService = serviceOptions.length === 1;
@@ -652,6 +654,8 @@ export function AdventureFormExperience({
           const steps = buildLocalSkeletonFlow({
             serviceOptions,
             selectedServiceId: prefillService,
+            useCase: extractedFormConfig?.useCase,
+            previewPricing: extractedFormConfig?.previewPricing,
           });
 
           try {
@@ -1182,6 +1186,7 @@ export function AdventureFormExperience({
   return (
     <FormThemeProvider config={resolvedDesign}>
       <ExperienceStateProvider>
+        <PreviewSuggestionsProvider instanceId={instanceId}>
         <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
           {dspyMeta?.lintFailed && (
             <div className="fixed bottom-4 right-4 z-50 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-700 shadow-sm">
@@ -1218,6 +1223,7 @@ export function AdventureFormExperience({
             />
           </div>
         </div>
+        </PreviewSuggestionsProvider>
       </ExperienceStateProvider>
     </FormThemeProvider>
   );

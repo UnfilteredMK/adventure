@@ -2,6 +2,11 @@
 
 export const PREVIEW_CACHE_UPDATED_EVENT = "sif_preview_cache_updated";
 
+/** Dispatched from the question toolbar (e.g. idea chips) to open the preview centered lead/pricing flow. */
+export const OPEN_DESIGN_ESTIMATE_GATE_EVENT = "sif_open_design_estimate_gate";
+
+export type OpenDesignEstimateGateDetail = { sessionId: string };
+
 export type PreviewPriceSnapshot = {
   totalMin: number;
   totalMax: number;

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { ImageStorage } from '@/storage/image-storage';
 import { getStorageConfigFromEnv } from '@/storage/config';
+import { buildSuggestionLabel } from '@adventure/refinement-server';
 import { IMAGE_STORAGE_PREFIXES } from '@/storage/prefixes';
 
 export const dynamic = 'force-dynamic';
@@ -210,7 +211,9 @@ export async function POST(request: NextRequest) {
             .from('prompts')
             .insert({
               prompt: prompt,
-              variables: null
+              subcategory_id: subcategoryId,
+              suggestion_label: buildSuggestionLabel(prompt),
+              variables: null,
             })
             .select()
             .single();

@@ -1,3 +1,4 @@
+import { buildSuggestionLabel } from "@adventure/refinement-server";
 import type { Json } from "@/types/database";
 import { IMAGES_BUCKET, IMAGE_STORAGE_PREFIXES } from "@/storage/prefixes";
 
@@ -307,6 +308,11 @@ export async function persistGeneratedCatalogImages(params: {
       .insert({
         account_id: params.scope === "account" ? params.accountId || null : null,
         prompt: promptText,
+        subcategory_id: params.subcategoryId,
+        suggestion_label: buildSuggestionLabel(
+          promptText,
+          String(option.label || option.value || "").trim() || null
+        ),
         variables: null,
       })
       .select("id")

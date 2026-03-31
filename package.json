@@ -22,6 +22,7 @@
     "lint:shopify": "npm -w apps/shopify run lint",
     "supabase:gen:types": "set -a && . env/.env.shared.local && set +a && npx --yes supabase@2.30.4 gen types typescript --project-id $(node -e \"console.log(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.split('.')[0])\") --schema public,graphql_public > supabase/types.ts",
     "db:update": "node scripts/update-supabase.js",
+    "scripts:fill-suggestion-labels": "node ./apps/widget/scripts/fill-prompt-suggestion-labels.mjs",
     "sort:configs": "node scripts/sort-configs.js",
     "env:doctor": "node scripts/vercel-env-manager.js doctor",
     "env:diff": "node scripts/vercel-env-manager.js diff",

@@ -18,7 +18,8 @@
     "lint": "next lint",
     "gen:types": "npm --prefix ../.. run supabase:gen:types",
     "db:update": "node ../../scripts/update-supabase.js",
-    "sort:configs": "node ../../scripts/sort-configs.js"
+    "sort:configs": "node ../../scripts/sort-configs.js",
+    "scripts:fill-suggestion-labels": "node ./scripts/fill-prompt-suggestion-labels.mjs"
   },
   "dependencies": {
     "@adventure/ai-form-ui-contract": "file:../../shared/api/ai-form-ui-contract",

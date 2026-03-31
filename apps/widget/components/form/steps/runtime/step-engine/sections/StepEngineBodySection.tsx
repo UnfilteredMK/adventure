@@ -29,7 +29,9 @@ export function StepEngineBodySection(props: any) {
     isRefinementUploadStep,
     previewMaxPx,
     previewHasImage,
+    previewSurfaceMode,
     previewRefreshNonce,
+    stepNavReturnToGalleryNonce,
     pendingPreviewSceneUploadUrl,
     promptDraft,
     promptSubmitCount,
@@ -53,6 +55,7 @@ export function StepEngineBodySection(props: any) {
     effectiveLeadCompleteForPreviewFlow,
     leadGateLocksQuestionArea,
     setAdventureInputMode,
+    onApplyIdeaSuggestion,
     budgetSliderConfig,
     budgetValue,
     handleBudgetChange,
@@ -76,6 +79,7 @@ export function StepEngineBodySection(props: any) {
     effectiveCurrentStep,
     guidedThumbnailMode,
     onKeepDesigning,
+    onPreviewSurfaceModeChange,
   } = props;
 
   return (
@@ -113,6 +117,7 @@ export function StepEngineBodySection(props: any) {
                 previewMaxPx={previewMaxPx}
                 previewHasImage={previewHasImage}
                 previewRefreshNonce={previewRefreshNonce}
+                stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}
                 pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
                 promptDraft={promptDraft}
                 promptSubmitCount={promptSubmitCount}
@@ -129,6 +134,7 @@ export function StepEngineBodySection(props: any) {
                 useMobilePreviewLayout={useMobilePreviewLayout}
                 usePreviewDominantLayout={previewLayoutActive}
                 onKeepDesigning={onKeepDesigning}
+                onPreviewSurfaceModeChange={onPreviewSurfaceModeChange}
               />
             </div>
           ) : null}
@@ -171,6 +177,7 @@ export function StepEngineBodySection(props: any) {
                 leadGateLocksQuestionArea={leadGateLocksQuestionArea}
                 adventureInputMode={adventureInputMode}
                 setAdventureInputMode={setAdventureInputMode}
+                onApplyIdeaSuggestion={onApplyIdeaSuggestion}
                 budgetSliderConfig={budgetSliderConfig}
                 budgetValue={budgetValue}
                 onBudgetChange={handleBudgetChange}
@@ -180,6 +187,7 @@ export function StepEngineBodySection(props: any) {
                 onRegeneratePreview={onRegeneratePreview}
                 previewEnabled={previewEnabled}
                 previewHasImage={previewHasImage}
+                previewSurfaceMode={previewSurfaceMode}
                 questionContentRef={questionContentRef}
                 questionScale={questionScale}
                 questionViewportRef={questionViewportRef}

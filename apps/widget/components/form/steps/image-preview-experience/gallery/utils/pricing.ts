@@ -107,17 +107,6 @@ export function readConfirmationScheduleUrlFromSteps(steps: any[] | undefined): 
   return null;
 }
 
-export function splitPricingMaskSegments(rangeText: string | null): {
-  prefix: string;
-  blur: string;
-} | null {
-  if (!rangeText) return null;
-  const raw = String(rangeText).trim();
-  const m = raw.match(/^(\D*\d)(.*)$/);
-  if (!m) return { prefix: raw, blur: "" };
-  return { prefix: m[1], blur: m[2] || "" };
-}
-
 export function isPricingComparableUseCase(raw?: string | null): boolean {
   const v = String(raw || "").trim().toLowerCase();
   return v === "scene" || v === "scene-placement" || v === "scene-refinement";

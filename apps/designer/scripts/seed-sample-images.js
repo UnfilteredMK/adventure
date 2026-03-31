@@ -15,6 +15,17 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+/** Match shared `buildSuggestionLabel`: short chip text from full prompt. */
+function buildSuggestionLabel(fullPrompt, preferredShort, maxLen = 50) {
+  const pref = String(preferredShort || '').trim();
+  if (pref) {
+    return pref.length <= maxLen ? pref : `${pref.slice(0, Math.max(0, maxLen - 1))}…`;
+  }
+  const p = String(fullPrompt || '').trim();
+  if (!p) return '';
+  return p.length <= maxLen ? p : `${p.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
 // Sample images mapping
 const sampleImages = {
   'bathroom': [
@@ -94,7 +105,9 @@ async function seedSampleImages() {
           .from('prompts')
           .insert({
             prompt: image.prompt,
-            variables: null
+            subcategory_id: subcategoryId,
+            variables: null,
+            suggestion_label: buildSuggestionLabel(image.prompt),
           })
           .select()
           .single();

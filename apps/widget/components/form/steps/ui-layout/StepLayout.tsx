@@ -51,7 +51,8 @@ export function StepLayout({
   children,
   onComplete,
   onBack,
-  canGoBack = false,
+  /** @deprecated Visibility is tied to `onBack`; kept for call-site compatibility. */
+  canGoBack: _canGoBackUnused = false,
   isLoading = false,
   canContinue = true,
   continueLabel,
@@ -174,7 +175,7 @@ export function StepLayout({
             )
           )}
         >
-          {canGoBack && onBack ? (
+          {onBack ? (
             <Button
               type="button"
               onClick={onBack}
@@ -470,7 +471,7 @@ export function StepLayout({
             )}
             style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
           >
-            {canGoBack && onBack ? (
+            {onBack ? (
               <Button
                 type="button"
                 onClick={onBack}

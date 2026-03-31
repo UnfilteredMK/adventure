@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from programs.common.visual_text_safety import ANTI_COMPARISON_NEGATIVE_TERMS, ANTI_TEXT_OVERLAY_NEGATIVE_TERMS
 from programs.form_pipeline.context_builder import build_context
-from programs.image_generator.prompt_builder import build_image_prompt_text, extract_reference_images
 from programs.image_generator.providers.image_generation import generate_images
+from programs.image_generator.request_context import extract_reference_images
 from programs.pricing.orchestrator import estimate_pricing
 from programs.pricing.service_calibration import (
     PriceRange,
@@ -514,6 +514,8 @@ def _resolve_slot_prices(payload: Dict[str, Any]) -> dict[str, Dict[str, Any]]:
 
 
 def _build_base_prompt_spec(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from programs.image_generator.orchestrator import build_image_prompt
+
     reference_mode = _normalize_reference_mode(payload.get("referenceMode") or payload.get("reference_mode"))
     reference_images, scene_image, _ = extract_reference_images(payload)
     prompt_payload = dict(payload)
@@ -532,7 +534,14 @@ def _build_base_prompt_spec(payload: Dict[str, Any]) -> Dict[str, Any]:
         prompt_payload["referenceImages"] = reference_images[:1]
         prompt_payload["reference_images"] = reference_images[:1]
 
-    return build_image_prompt_text(prompt_payload)
+    prompt_result = build_image_prompt(prompt_payload)
+    prompt_spec = prompt_result.get("prompt") if isinstance(prompt_result, dict) else None
+    if not isinstance(prompt_spec, dict):
+        error_message = "DSPy prompt generation failed for price ladder gallery."
+        if isinstance(prompt_result, dict):
+            error_message = str(prompt_result.get("message") or prompt_result.get("error") or error_message)
+        raise RuntimeError(error_message)
+    return prompt_spec
 
 
 def _resolve_gallery_model_id(payload: Dict[str, Any], base_spec: Dict[str, Any], *, style_refs: List[str], scene_anchor: Optional[str]) -> str:

@@ -277,7 +277,9 @@ def _convert_option_images_for_steps(
     agg: Dict[str, int] = {"stepsConverted": 0, "optionsAttempted": 0, "cacheHits": 0, "succeeded": 0, "failed": 0}
 
     try:
-        from programs.image_generator.image_prompt_library import build_option_image_prompt as _build_opt_prompt
+        from programs.image_generator.helpers.prompt_templates import (
+            build_option_image_prompt as _build_opt_prompt,
+        )
     except Exception:
         _build_opt_prompt = None
 

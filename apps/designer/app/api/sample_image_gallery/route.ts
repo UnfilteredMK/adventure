@@ -1,3 +1,4 @@
+import { buildSuggestionLabel } from '@adventure/refinement-server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
@@ -141,7 +142,8 @@ export async function POST(request: NextRequest) {
         id,
         image_url,
         metadata,
-        prompt_id
+        prompt_id,
+        subcategory_id
       `)
       .in('id', imagesToAdd);
 
@@ -161,7 +163,16 @@ export async function POST(request: NextRequest) {
           .from('prompts')
           .insert({
             prompt: image.metadata.prompt_text,
-            variables: null
+            subcategory_id: image.subcategory_id ?? null,
+            suggestion_label: buildSuggestionLabel(
+              String(image.metadata.prompt_text || ''),
+              typeof image.metadata?.option_label === 'string'
+                ? image.metadata.option_label
+                : typeof image.metadata?.title === 'string'
+                  ? image.metadata.title
+                  : null
+            ),
+            variables: null,
           })
           .select()
           .single();
