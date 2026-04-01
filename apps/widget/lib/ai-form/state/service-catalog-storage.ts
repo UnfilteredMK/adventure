@@ -11,6 +11,8 @@ export type ServiceCatalogItem = {
   heroCtaUrl?: string | null;
   heroCtaText?: string | null;
   subcategoryComponents?: RefinementComponent[];
+  /** Preset labels for the first scope question (from categories_subcategories.subcategory_scope). */
+  subcategoryScope?: string[];
   styleQuestion?: string | null;
   styleOptions?: Array<{
     label: string;
@@ -95,6 +97,14 @@ export function saveServiceCatalog(sessionId: string, items: ServiceCatalogItem[
           ? { heroCtaText: String((item as any).heroCtaText).trim() }
           : {}),
         ...(subcategoryComponents.length > 0 ? { subcategoryComponents } : {}),
+        ...(Array.isArray((item as any)?.subcategoryScope) && (item as any).subcategoryScope.length > 0
+          ? {
+              subcategoryScope: (item as any).subcategoryScope
+                .map((s: any) => (typeof s === "string" ? s.trim() : ""))
+                .filter(Boolean)
+                .slice(0, 16),
+            }
+          : {}),
         styleQuestion: typeof (item as any)?.styleQuestion === "string" ? String((item as any).styleQuestion).trim() || null : null,
         styleOptions: Array.isArray((item as any)?.styleOptions)
           ? (item as any).styleOptions

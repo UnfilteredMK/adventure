@@ -249,6 +249,7 @@ export type Database = {
           status: string
           subcategory_components: Json | null
           subcategory: string
+          subcategory_scope: string[]
           updated_at: string
           use_cases: Json | null
           user_id: string | null
@@ -270,6 +271,7 @@ export type Database = {
           status?: string
           subcategory_components?: Json | null
           subcategory: string
+          subcategory_scope?: string[]
           updated_at?: string
           use_cases?: Json | null
           user_id?: string | null
@@ -291,6 +293,7 @@ export type Database = {
           status?: string
           subcategory_components?: Json | null
           subcategory?: string
+          subcategory_scope?: string[]
           updated_at?: string
           use_cases?: Json | null
           user_id?: string | null

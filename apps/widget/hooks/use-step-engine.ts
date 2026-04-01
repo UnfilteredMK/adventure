@@ -76,7 +76,16 @@ function sanitizeAndOrderLocalSkeletonSteps(
   for (const p of planSteps) {
     const existing = byId.get(p.id);
     if (existing) {
-      out.push(existing);
+      // Prefer the flow-plan step so DB-driven scope options replace stale persisted copies (same id).
+      const existingMeta = (existing as any).__telemetry;
+      const incomingMeta = (p as any).__telemetry;
+      out.push({
+        ...(p as any),
+        __telemetry: existingMeta?.batchId || existingMeta?.modelRequestId ? existingMeta : incomingMeta,
+      } as StepDefinition | UIStep);
+      used.add(p.id);
+    } else {
+      out.push(p);
       used.add(p.id);
     }
   }

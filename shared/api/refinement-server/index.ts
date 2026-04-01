@@ -26,3 +26,10 @@ export {
   type RefinementPlannerComponent,
   type StoredSubcategoryComponent,
 } from "./refinement-library-seed";
+
+export {
+  ensureSubcategoryScopeForSubcategory,
+  persistSubcategoryScopeRow,
+  suggestSubcategoryScopeOptions,
+  type EnsureSubcategoryScopeResult,
+} from "./subcategory-scope-seed";

@@ -78,14 +78,14 @@ export async function GET(
       // Look up subcategory by slug
       let { data: subcategoryMatches, error: subcatError } = await supabaseAdmin
         .from('categories_subcategories')
-        .select('id, slug, subcategory, demo_template_config')
+        .select('id, slug, subcategory, demo_template_config, subcategory_components, subcategory_scope')
         .eq('slug', cleanedSlug)
         .limit(1);
 
       if ((!subcategoryMatches || subcategoryMatches.length === 0) && !subcatError && cleanedSlug) {
         const { data: altMatches } = await supabaseAdmin
           .from('categories_subcategories')
-          .select('id, slug, subcategory, demo_template_config')
+          .select('id, slug, subcategory, demo_template_config, subcategory_components, subcategory_scope')
           .ilike('subcategory', `%${cleanedSlug.replace(/-/g, ' ')}%`)
           .limit(1);
         if (altMatches && altMatches.length > 0) {

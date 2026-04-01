@@ -183,6 +183,7 @@ export type Database = {
           slug: string | null
           status: string
           subcategory: string
+          subcategory_scope: string[]
           twitter_image_url: string | null
           updated_at: string
           use_cases: Json | null
@@ -222,6 +223,7 @@ export type Database = {
           slug?: string | null
           status?: string
           subcategory: string
+          subcategory_scope?: string[]
           twitter_image_url?: string | null
           updated_at?: string
           use_cases?: Json | null
@@ -261,6 +263,7 @@ export type Database = {
           slug?: string | null
           status?: string
           subcategory?: string
+          subcategory_scope?: string[]
           twitter_image_url?: string | null
           updated_at?: string
           use_cases?: Json | null

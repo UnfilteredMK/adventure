@@ -12,6 +12,7 @@ import {
 } from "@/lib/subcategory-image-catalog";
 import {
   ensureRefinementLibraryForSubcategory,
+  ensureSubcategoryScopeForSubcategory,
   resolveDspyServiceBaseUrls,
 } from "@adventure/refinement-server";
 
@@ -177,6 +178,9 @@ export async function POST(request: NextRequest) {
       refinementSeededSubcategories: 0,
       refinementSkippedExisting: 0,
       refinementStoredImages: 0,
+      scopePersistedSubcategories: 0,
+      scopeSkippedExisting: 0,
+      scopeSuggestCalls: 0,
       skippedCustom: 0,
     };
 
@@ -364,6 +368,47 @@ export async function POST(request: NextRequest) {
           logSeed("refinement_stored_success", {
             instanceId,
             storedRefinements: n,
+            subcategoryId,
+          });
+        }
+      }
+
+      const { data: scopeRow, error: scopeRowError } = await admin
+        .from("categories_subcategories")
+        .select("subcategory_components, subcategory_scope")
+        .eq("id", subcategoryId)
+        .maybeSingle();
+      if (scopeRowError) {
+        logSeed("subcategory_scope_row_error", { error: scopeRowError.message, instanceId, subcategoryId });
+      } else {
+        const scopeResult = await ensureSubcategoryScopeForSubcategory({
+          baseUrls,
+          categoryName,
+          companySummary: (instance as any)?.company_summary ?? null,
+          existingSubcategoryScope: (scopeRow as any)?.subcategory_scope ?? null,
+          log: logSeed,
+          serviceSummary,
+          subcategoryComponents: (scopeRow as any)?.subcategory_components ?? (subcategory as any)?.subcategory_components,
+          subcategoryId,
+          subcategoryName,
+          supabase: admin,
+        });
+        if (scopeResult.skipped) {
+          summary.scopeSkippedExisting += 1;
+        } else if (scopeResult.plannerCalled) {
+          summary.scopeSuggestCalls += 1;
+        }
+        if (scopeResult.ok && !scopeResult.skipped && Array.isArray(scopeResult.scopes) && scopeResult.scopes.length > 0) {
+          summary.scopePersistedSubcategories += 1;
+          logSeed("subcategory_scope_done", { instanceId, scopesCount: scopeResult.scopes.length, subcategoryId });
+        } else if (!scopeResult.ok && scopeResult.error && scopeResult.error !== "no_components") {
+          summary.failures.push({
+            error: scopeResult.error || "subcategory_scope_failed",
+            subcategoryId,
+          });
+          logSeed("subcategory_scope_failed", {
+            error: scopeResult.error,
+            instanceId,
             subcategoryId,
           });
         }

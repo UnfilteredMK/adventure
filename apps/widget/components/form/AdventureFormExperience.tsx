@@ -58,6 +58,7 @@ type BootstrapServiceOption = {
   heroCtaUrl?: string | null;
   heroCtaText?: string | null;
   subcategoryComponents?: Array<{ key: string; label: string; priority: number }>;
+  subcategoryScope?: string[];
   styleQuestion?: string | null;
   styleOptions?: Array<{
     label: string;
@@ -106,6 +107,7 @@ function inferBootstrapServiceOptions({
           ...(typeof meta?.heroCtaUrl === "string" && meta.heroCtaUrl.trim() ? { heroCtaUrl: meta.heroCtaUrl.trim() } : {}),
           ...(typeof meta?.heroCtaText === "string" && meta.heroCtaText.trim() ? { heroCtaText: meta.heroCtaText.trim() } : {}),
           subcategoryComponents: Array.isArray(meta?.subcategoryComponents) ? meta.subcategoryComponents : undefined,
+          subcategoryScope: Array.isArray(meta?.subcategoryScope) ? meta.subcategoryScope : undefined,
           styleQuestion: typeof meta?.styleQuestion === "string" ? meta.styleQuestion : null,
           styleOptions: Array.isArray(meta?.styleOptions) ? meta.styleOptions : undefined,
         } satisfies BootstrapServiceOption;
@@ -159,6 +161,49 @@ function inferBootstrapServiceOptions({
   }
 
   return [];
+}
+
+function coerceSubcategoryScopeStringsFromRow(row: any): string[] | undefined {
+  const raw = row?.subcategory_scope;
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of raw) {
+    const s = typeof x === "string" ? x.trim() : "";
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s.slice(0, 200));
+    if (out.length >= 16) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function coerceSubcategoryComponentsFromRow(row: any): Array<{ key: string; label: string; priority: number }> | undefined {
+  const raw = row?.subcategory_components;
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: Array<{ key: string; label: string; priority: number }> = [];
+  for (const [index, entry] of raw.entries()) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = typeof (entry as any).key === "string" ? (entry as any).key.trim() : "";
+    if (!key) continue;
+    const dk = key.toLowerCase();
+    if (seen.has(dk)) continue;
+    seen.add(dk);
+    const label =
+      typeof (entry as any).label === "string" && (entry as any).label.trim()
+        ? (entry as any).label.trim()
+        : key;
+    const pr = Number((entry as any).priority);
+    out.push({
+      key,
+      label,
+      priority: Number.isFinite(pr) ? pr : index + 1,
+    });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function normalizeUseCase(raw?: any): "tryon" | "scene-placement" | "scene" | undefined {
@@ -518,6 +563,11 @@ export function AdventureFormExperience({
                       : Array.isArray(o?.subcategory_components)
                         ? o.subcategory_components
                         : undefined,
+                    subcategoryScope: Array.isArray(o?.subcategoryScope)
+                      ? o.subcategoryScope
+                      : Array.isArray(o?.subcategory_scope)
+                        ? o.subcategory_scope
+                        : undefined,
                     styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
                     styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
                   }))
@@ -746,6 +796,8 @@ export function AdventureFormExperience({
           const subcatId = subcat?.id ? String(subcat.id) : "";
           const subcatName = subcat?.subcategory ? String(subcat.subcategory) : "";
           if (subcatId && subcatName) {
+            const subcategoryScope = coerceSubcategoryScopeStringsFromRow(subcat);
+            const subcategoryComponents = coerceSubcategoryComponentsFromRow(subcat);
             serviceOptions = [
               {
                 value: subcatId,
@@ -753,6 +805,8 @@ export function AdventureFormExperience({
                 serviceName: subcatName,
                 industryId: null,
                 industryName: null,
+                ...(subcategoryComponents?.length ? { subcategoryComponents } : {}),
+                ...(subcategoryScope?.length ? { subcategoryScope } : {}),
               },
             ];
           }

@@ -32,6 +32,66 @@ function coerceSubcategoryComponents(
   return items;
 }
 
+function coerceSubcategoryScope(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of raw) {
+    const s = typeof x === "string" ? x.trim() : "";
+    if (s.length < 1) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s.slice(0, 200));
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
+/** SEO columns from 20251005 — local DBs without that migration would 42703 the whole select. */
+const CATEGORIES_SUBCAT_SELECT_WITH_HERO =
+  "id, subcategory, category_id, service_summary, subcategory_components, subcategory_scope, hero_cta_url, hero_cta_text, categories(name)";
+const CATEGORIES_SUBCAT_SELECT_BASE =
+  "id, subcategory, category_id, service_summary, subcategory_components, subcategory_scope, categories(name)";
+const CATEGORIES_SUBCAT_SELECT_MINIMAL =
+  "id, subcategory, category_id, service_summary, subcategory_components, categories(name)";
+
+async function fetchCategoriesSubcategoriesForWidget(
+  supabase: ReturnType<typeof createClient>,
+  ids: string[],
+): Promise<{ data: any[] | null; error: { message?: string; code?: string } | null }> {
+  if (ids.length === 0) return { data: [], error: null };
+  const trySelect = async (cols: string) =>
+    supabase.from("categories_subcategories").select(cols).in("id", ids).limit(60);
+
+  let res = await trySelect(CATEGORIES_SUBCAT_SELECT_WITH_HERO);
+  if (!res.error) return res;
+
+  const err0 = res.error as any;
+  const msg0 = String(err0?.message || "");
+  const undefinedCol = err0?.code === "42703" || /does not exist/i.test(msg0);
+
+  if (undefinedCol) {
+    res = await trySelect(CATEGORIES_SUBCAT_SELECT_BASE);
+    if (!res.error) {
+      logger.warn("[widget] categories_subcategories: using select without hero_cta_*", { firstError: msg0 });
+      return res;
+    }
+    const err1 = res.error as any;
+    const msg1 = String(err1?.message || "");
+    if (err1?.code === "42703" || /does not exist/i.test(msg1)) {
+      res = await trySelect(CATEGORIES_SUBCAT_SELECT_MINIMAL);
+      if (!res.error) {
+        logger.warn("[widget] categories_subcategories: using minimal select (subcategory_scope or other col missing)", {
+          firstError: msg0,
+          secondError: msg1,
+        });
+      }
+    }
+  }
+  return res;
+}
+
 function coerceHeroCtaText(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const t = raw.trim();
@@ -261,6 +321,7 @@ export async function GET(
         label: string;
         priority: number;
       }>;
+      subcategoryScope?: string[];
       styleQuestion?: string | null;
       styleOptions?: Array<{
         label: string;
@@ -287,13 +348,7 @@ export async function GET(
           .map((r: any) => r?.category_subcategory_id)
           .filter(Boolean) as string[];
         if (ids.length > 0) {
-          const { data: subcats, error: subcatsError } = await supabase
-            .from("categories_subcategories")
-            .select(
-              "id, subcategory, category_id, service_summary, subcategory_components, hero_cta_url, hero_cta_text, categories(name)",
-            )
-            .in("id", ids)
-            .limit(60);
+          const { data: subcats, error: subcatsError } = await fetchCategoriesSubcategoriesForWidget(supabase, ids);
           if (subcatsError) {
             logger.warn("[widget] Failed to read categories_subcategories for serviceOptions", {
               instanceId,
@@ -311,6 +366,7 @@ export async function GET(
               heroCtaUrl: string | null;
               heroCtaText: string | null;
               subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
+              subcategoryScope: string[];
             }
           >(
             (Array.isArray(subcats) ? subcats : []).map((s: any) => {
@@ -320,12 +376,13 @@ export async function GET(
               const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
               const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
+              const subcategoryScope = coerceSubcategoryScope((s as any)?.subcategory_scope);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { serviceName, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents }];
+              return [String(s.id), { serviceName, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents, subcategoryScope }];
             })
           );
           serviceOptions = ids
@@ -338,6 +395,7 @@ export async function GET(
                 heroCtaUrl: null as string | null,
                 heroCtaText: null as string | null,
                 subcategoryComponents: [],
+                subcategoryScope: [] as string[],
               };
               const rawLabel = meta.serviceName || "Service";
               const cleanedLabel =
@@ -352,6 +410,7 @@ export async function GET(
                 ...(meta.heroCtaUrl != null ? { heroCtaUrl: meta.heroCtaUrl } : {}),
                 ...(meta.heroCtaText != null ? { heroCtaText: meta.heroCtaText } : {}),
                 ...(meta.subcategoryComponents.length > 0 ? { subcategoryComponents: meta.subcategoryComponents } : {}),
+                ...(meta.subcategoryScope.length > 0 ? { subcategoryScope: meta.subcategoryScope } : {}),
               };
             })
             .slice(0, 40);
@@ -379,13 +438,10 @@ export async function GET(
 
       if (candidateIds.length > 0) {
         try {
-          const { data: subcats, error: subcatsError } = await supabase
-            .from("categories_subcategories")
-            .select(
-              "id, subcategory, category_id, service_summary, subcategory_components, hero_cta_url, hero_cta_text, categories(name)",
-            )
-            .in("id", candidateIds)
-            .limit(60);
+          const { data: subcats, error: subcatsError } = await fetchCategoriesSubcategoriesForWidget(
+            supabase,
+            candidateIds,
+          );
           if (subcatsError) {
             logger.warn("[widget] Failed to resolve fallback services from categories_subcategories", {
               instanceId,
@@ -404,6 +460,7 @@ export async function GET(
               heroCtaUrl: string | null;
               heroCtaText: string | null;
               subcategoryComponents: Array<{ key: string; label: string; priority: number }>;
+              subcategoryScope: string[];
             }
           >(
             (Array.isArray(subcats) ? subcats : []).map((s: any) => {
@@ -415,12 +472,13 @@ export async function GET(
               const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
               const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
+              const subcategoryScope = coerceSubcategoryScope((s as any)?.subcategory_scope);
               const cat = (s as any)?.categories;
               const industryName =
                 cat && typeof cat === "object" && typeof (cat as any).name === "string"
                   ? String((cat as any).name)
                   : null;
-              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents }];
+              return [String(s.id), { label: cleanedLabel, industryId, industryName, serviceSummary, heroCtaUrl, heroCtaText, subcategoryComponents, subcategoryScope }];
             }),
           );
 
@@ -437,6 +495,7 @@ export async function GET(
               ...(meta?.heroCtaUrl != null ? { heroCtaUrl: meta.heroCtaUrl } : {}),
               ...(meta?.heroCtaText != null ? { heroCtaText: meta.heroCtaText } : {}),
               ...(meta?.subcategoryComponents?.length ? { subcategoryComponents: meta.subcategoryComponents } : {}),
+              ...(meta?.subcategoryScope?.length ? { subcategoryScope: meta.subcategoryScope } : {}),
             };
           });
         } catch (e) {

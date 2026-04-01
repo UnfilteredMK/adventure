@@ -546,6 +546,18 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             return JSONResponse(status_code=status, content=planned)
         return planned
 
+    @compat_router.post("/subcategory-scope/suggest")
+    @router.post("/subcategory-scope/suggest")
+    async def subcategory_scope_suggest(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
+        from programs.subcategory_scope_suggester.orchestrator import suggest_subcategory_scope  # noqa: E402
+
+        suggested = suggest_subcategory_scope(payload)
+        if not suggested.get("ok"):
+            error = str(suggested.get("error") or "").strip().lower()
+            status = HTTP_400_BAD_REQUEST if error == "missing_service_context" else 500
+            return JSONResponse(status_code=status, content=suggested)
+        return suggested
+
     @compat_router.post("/option-images/regenerate")
     @router.post("/option-images/regenerate")
     async def option_images_regenerate(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:

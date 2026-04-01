@@ -3,14 +3,18 @@ import { buildDeterministicStyleStep } from "../../../static/deterministic-style
 import { buildDeterministicBudgetStep, buildDeterministicUploadSteps } from "./deterministic-adventure-steps";
 
 export const LOCAL_SKELETON_FLOW_MODE = "local_skeleton";
-export const LOCAL_SKELETON_VERSION = "local-skeleton-v2";
+export const LOCAL_SKELETON_VERSION = "local-skeleton-v5";
 export const LOCAL_SCOPE_STEP_ID = "step-project-scope";
+/** Refinement checklist when both DB scope presets and components exist (second scope step). */
+export const LOCAL_PARTS_STEP_ID = "step-project-parts";
 
 export type LocalSkeletonServiceOption = {
   value?: string | null;
   label?: string | null;
   serviceName?: string | null;
   serviceSummary?: string | null;
+  /** Preset strings from categories_subcategories.subcategory_scope (first scope question). */
+  subcategoryScope?: string[] | null;
   subcategoryComponents?: Array<{ key?: string | null; label?: string | null; priority?: number | null }>;
   styleQuestion?: string | null;
   styleOptions?: Array<{
@@ -20,6 +24,47 @@ export type LocalSkeletonServiceOption = {
     description?: string | null;
   }>;
 };
+
+function normalizeSubcategoryScopeStrings(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of raw) {
+    const s = typeof x === "string" ? x.trim() : "";
+    if (s.length < 1) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s.slice(0, 200));
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function scopePresetValue(label: string, index: number): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return slug || `scope_${index}`;
+}
+
+type ChoiceOpt = { label: string; value: string };
+
+function stepHasOtherOption(opts: ChoiceOpt[]): boolean {
+  return opts.some((o) => {
+    const v = String(o?.value || "").toLowerCase();
+    const l = String(o?.label || "").toLowerCase();
+    return v === "other" || l === "other";
+  });
+}
+
+/** Matches generate-steps `sanitizeMiniStep`: append Other when there is room and it is not already listed. */
+function withOtherChoiceOption(opts: ChoiceOpt[]): ChoiceOpt[] {
+  if (opts.length === 0 || opts.length >= 12 || stepHasOtherOption(opts)) return opts;
+  return [...opts, { label: "Other", value: "other" }];
+}
 
 function normalizeServiceLabel(serviceOption: LocalSkeletonServiceOption | null | undefined): string {
   const label =
@@ -39,7 +84,7 @@ function isGenericServiceLabel(label: string): boolean {
 
 export function resolveSelectedServiceOption(
   serviceOptions: LocalSkeletonServiceOption[],
-  selectedServiceId?: string | null
+  selectedServiceId?: string | null,
 ): LocalSkeletonServiceOption | null {
   const normalizedId = typeof selectedServiceId === "string" ? selectedServiceId.trim() : "";
   if (normalizedId) {
@@ -68,9 +113,8 @@ export function buildServiceSelectionStep(serviceOptions: LocalSkeletonServiceOp
   } as UIStep;
 }
 
-export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | null | undefined): UIStep {
-  const serviceLabel = normalizeServiceLabel(serviceOption);
-  const components = Array.isArray(serviceOption?.subcategoryComponents)
+function normalizeComponents(serviceOption: LocalSkeletonServiceOption | null | undefined) {
+  return Array.isArray(serviceOption?.subcategoryComponents)
     ? serviceOption.subcategoryComponents
         .map((component) => ({
           key: String(component?.key || "").trim(),
@@ -80,28 +124,67 @@ export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | 
         .filter((component) => component.key && component.label)
         .sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
     : [];
+}
 
-  if (components.length > 0) {
-    const scopeQuestion = isGenericServiceLabel(serviceLabel)
-      ? "Which parts of this project should we focus on?"
-      : `What parts of your ${serviceLabel.toLowerCase()} are in scope?`;
-    return {
-      id: LOCAL_SCOPE_STEP_ID,
-      type: components.length > 6 ? "chips_multi" : "multiple_choice",
-      question: scopeQuestion,
-      humanism: "Select everything you'd like us to focus on.",
-      options: components.slice(0, 12).map((component) => ({
-        label: component.label,
-        value: component.key,
-      })),
-      multi_select: true,
-      min_selections: 1,
-      columns: components.length > 6 ? 1 : 2,
-      metricGain: 0.14,
-      blueprint: { presentation: { continue_label: "Continue" } },
-    } as UIStep;
-  }
+function buildPresetScopeStep(
+  serviceOption: LocalSkeletonServiceOption | null | undefined,
+  presets: string[],
+): UIStep {
+  const serviceLabel = normalizeServiceLabel(serviceOption);
+  const scopeQuestion = isGenericServiceLabel(serviceLabel)
+    ? "What's the scope of this project?"
+    : `What kind of ${serviceLabel.toLowerCase()} project is this?`;
+  const presetOptions = withOtherChoiceOption(
+    presets.map((label, i) => ({
+      label,
+      value: scopePresetValue(label, i),
+    })),
+  );
+  return {
+    id: LOCAL_SCOPE_STEP_ID,
+    type: "multiple_choice",
+    question: scopeQuestion,
+    humanism: "Pick the option that fits best.",
+    options: presetOptions,
+    multi_select: false,
+    columns: presetOptions.length > 4 ? 1 : 2,
+    variant: "cards",
+    metricGain: 0.14,
+    blueprint: { presentation: { auto_advance: true, continue_label: "Continue" } },
+  } as UIStep;
+}
 
+function buildPartsScopeStep(
+  serviceOption: LocalSkeletonServiceOption | null | undefined,
+  components: ReturnType<typeof normalizeComponents>,
+  usePartsOnlyStepId: boolean,
+): UIStep {
+  const serviceLabel = normalizeServiceLabel(serviceOption);
+  const scopeQuestion = isGenericServiceLabel(serviceLabel)
+    ? "Which parts of this project should we focus on?"
+    : `What parts of your ${serviceLabel.toLowerCase()} are in scope?`;
+  const partOptions = withOtherChoiceOption(
+    components.slice(0, 12).map((component) => ({
+      label: component.label,
+      value: component.key,
+    })),
+  );
+  return {
+    id: usePartsOnlyStepId ? LOCAL_SCOPE_STEP_ID : LOCAL_PARTS_STEP_ID,
+    type: partOptions.length > 6 ? "chips_multi" : "multiple_choice",
+    question: scopeQuestion,
+    humanism: "Select everything you'd like us to focus on.",
+    options: partOptions,
+    multi_select: true,
+    min_selections: 1,
+    columns: partOptions.length > 6 ? 1 : 2,
+    metricGain: 0.14,
+    blueprint: { presentation: { continue_label: "Continue" } },
+  } as UIStep;
+}
+
+function buildGenericExtentStep(serviceOption: LocalSkeletonServiceOption | null | undefined): UIStep {
+  const serviceLabel = normalizeServiceLabel(serviceOption);
   const scaleQuestion = isGenericServiceLabel(serviceLabel)
     ? "How extensive is this project?"
     : `How big is your ${serviceLabel.toLowerCase()} project?`;
@@ -111,17 +194,48 @@ export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | 
     type: "multiple_choice",
     question: scaleQuestion,
     humanism: "Pick the option that feels closest.",
-    options: [
+    options: withOtherChoiceOption([
       { label: "A quick refresh", value: "refresh" },
       { label: "A focused update", value: "partial_update" },
       { label: "A full transformation", value: "full_project" },
-    ],
+    ]),
     multi_select: false,
     columns: 1,
     variant: "cards",
     metricGain: 0.14,
     blueprint: { presentation: { auto_advance: true, continue_label: "Continue" } },
   } as UIStep;
+}
+
+/**
+ * Deterministic scope steps for local skeleton: DB `subcategory_scope` first (when set),
+ * then refinement `subcategory_components`, else generic extent.
+ * When both presets and components exist, presets use step-project-scope and parts use step-project-parts.
+ */
+export function buildLocalScopeSteps(serviceOption: LocalSkeletonServiceOption | null | undefined): UIStep[] {
+  const presets = normalizeSubcategoryScopeStrings(serviceOption?.subcategoryScope);
+  const components = normalizeComponents(serviceOption);
+  const steps: UIStep[] = [];
+
+  if (presets.length > 0) {
+    steps.push(buildPresetScopeStep(serviceOption, presets));
+  }
+
+  if (components.length > 0) {
+    steps.push(buildPartsScopeStep(serviceOption, components, presets.length === 0));
+  }
+
+  if (presets.length === 0 && components.length === 0) {
+    steps.push(buildGenericExtentStep(serviceOption));
+  }
+
+  return steps;
+}
+
+/** @deprecated Prefer buildLocalScopeSteps — this returns only the first scope step (legacy). */
+export function buildLocalScopeStep(serviceOption: LocalSkeletonServiceOption | null | undefined): UIStep {
+  const steps = buildLocalScopeSteps(serviceOption);
+  return steps[0] ?? buildGenericExtentStep(serviceOption);
 }
 
 export function buildLocalPostServiceSteps(serviceOption: LocalSkeletonServiceOption | null | undefined): Array<StepDefinition | UIStep> {
@@ -135,14 +249,14 @@ export function buildLocalPostServiceStepsWithConfig(params: {
 }): Array<StepDefinition | UIStep> {
   const { serviceOption, useCase, previewPricing } = params;
   if (!serviceOption) return [];
-  const scopeStep = buildLocalScopeStep(serviceOption);
+  const scopeSteps = buildLocalScopeSteps(serviceOption);
   const styleStep = buildDeterministicStyleStep(serviceOption);
   const budgetStep = buildDeterministicBudgetStep({
     config: { previewPricing },
     useCase,
   });
   const uploadSteps = buildDeterministicUploadSteps(useCase);
-  return styleStep ? [scopeStep, styleStep, budgetStep, ...uploadSteps] : [scopeStep, budgetStep, ...uploadSteps];
+  return styleStep ? [...scopeSteps, styleStep, budgetStep, ...uploadSteps] : [...scopeSteps, budgetStep, ...uploadSteps];
 }
 
 export function buildLocalSkeletonFlow(params: {
@@ -162,7 +276,7 @@ export function buildLocalSkeletonFlow(params: {
         serviceOption: selectedService,
         useCase,
         previewPricing,
-      })
+      }),
     );
   }
   return steps;
