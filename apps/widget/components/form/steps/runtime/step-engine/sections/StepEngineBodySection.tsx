@@ -3,6 +3,64 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { PreviewSection } from "./PreviewSection";
 import { FormQuestionSection } from "./FormQuestionPaneSection";
+import type { DesignAdventureInputMode } from "./DesignModeToolbar";
+
+/**
+ * Fixed vh strips for Ideas + design-tool modes. Guided (`questions`) does not use this — that host is
+ * `h-auto` capped with max-height so the pane snaps to step content (see compact question host JSX).
+ */
+function getCompactQuestionHostHeightClass(opts: {
+  isMobileViewport: boolean;
+  compactLargeQuestionHost: boolean;
+  compactSingleHeroLayout: boolean;
+  adventureInputMode: DesignAdventureInputMode;
+}): string {
+  const { isMobileViewport, compactLargeQuestionHost, compactSingleHeroLayout, adventureInputMode } = opts;
+  const toolHeavyStrip =
+    adventureInputMode === "prompt" ||
+    adventureInputMode === "budget" ||
+    adventureInputMode === "uploads";
+
+  if (isMobileViewport) {
+    if (compactLargeQuestionHost) {
+      if (compactSingleHeroLayout) {
+        return toolHeavyStrip ? "h-[24vh] max-h-[24vh]" : "h-[18vh] max-h-[18vh]";
+      }
+      return toolHeavyStrip ? "h-[28vh] max-h-[28vh]" : "h-[22vh] max-h-[22vh]";
+    }
+    if (compactSingleHeroLayout) {
+      return toolHeavyStrip ? "h-[20vh] max-h-[20vh]" : "h-[14vh] max-h-[14vh]";
+    }
+    return toolHeavyStrip ? "h-[25vh] max-h-[25vh]" : "h-[19vh] max-h-[19vh]";
+  }
+  if (compactLargeQuestionHost) {
+    if (compactSingleHeroLayout) {
+      return toolHeavyStrip ? "h-[21vh] max-h-[21vh]" : "h-[15vh] max-h-[15vh]";
+    }
+    return toolHeavyStrip ? "h-[26vh] max-h-[26vh]" : "h-[20vh] max-h-[20vh]";
+  }
+  if (compactSingleHeroLayout) {
+    return toolHeavyStrip ? "h-[18vh] max-h-[18vh]" : "h-[12vh] max-h-[12vh]";
+  }
+  return toolHeavyStrip ? "h-[23vh] max-h-[23vh]" : "h-[17vh] max-h-[17vh]";
+}
+
+function compactQuestionHostClassNames(opts: {
+  isMobileViewport: boolean;
+  compactLargeQuestionHost: boolean;
+  compactSingleHeroLayout: boolean;
+  adventureInputMode: DesignAdventureInputMode;
+}): string {
+  const { adventureInputMode } = opts;
+  /** Guided: height follows the questionnaire / image rail; scroll inside host if taller than cap. */
+  if (adventureInputMode === "questions") {
+    return cn(
+      "h-auto min-h-0 shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain",
+      "max-h-[min(62dvh,560px)]"
+    );
+  }
+  return cn("overflow-hidden", getCompactQuestionHostHeightClass(opts));
+}
 
 export function StepEngineBodySection(props: any) {
   const {
@@ -82,6 +140,11 @@ export function StepEngineBodySection(props: any) {
     onPreviewSurfaceModeChange,
   } = props;
 
+  /** Single hero (not concept grid): give the preview more vertical space; keep questions in a shorter bottom strip. */
+  const compactSingleHeroLayout = Boolean(
+    compactQuestionHost && previewSurfaceMode === "single"
+  );
+
   return (
     <main className="relative flex flex-1 min-h-0 items-stretch justify-center overflow-hidden px-2 pb-0 pt-2 sm:px-3 sm:pb-3 sm:pt-3">
       <div className="mx-auto h-full min-h-0 w-full max-w-[92rem] overflow-hidden">
@@ -146,12 +209,22 @@ export function StepEngineBodySection(props: any) {
                   : compactQuestionHost
                   ? isMobileViewport
                     ? cn(
-                        "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)] overflow-hidden",
-                        compactLargeQuestionHost ? "h-[22vh] max-h-[22vh]" : "h-[19vh] max-h-[19vh]"
+                        "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)]",
+                        compactQuestionHostClassNames({
+                          isMobileViewport,
+                          compactLargeQuestionHost,
+                          compactSingleHeroLayout,
+                          adventureInputMode,
+                        })
                       )
                     : cn(
-                        "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1 overflow-hidden",
-                        compactLargeQuestionHost ? "h-[20vh] max-h-[20vh]" : "h-[17vh] max-h-[17vh]"
+                        "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1",
+                        compactQuestionHostClassNames({
+                          isMobileViewport,
+                          compactLargeQuestionHost,
+                          compactSingleHeroLayout,
+                          adventureInputMode,
+                        })
                       )
                   : "flex flex-col flex-1 min-h-0"
               )}

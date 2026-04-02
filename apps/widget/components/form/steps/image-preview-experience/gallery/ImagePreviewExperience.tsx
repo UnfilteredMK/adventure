@@ -24,7 +24,6 @@ import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structur
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 import { ArrowLeft, ChevronDown, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
-import { LeadGenPopover } from "@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover";
 import { PRICING_LEAD_COPY } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
@@ -845,6 +844,10 @@ export function ImagePreviewExperience(props: {
   const formStepUploadThumbnail = sceneUploadUrl ?? userUploadUrl ?? null;
   const [leadCaptured, setLeadCaptured] = useState<boolean>(() => loadLeadState(sessionId).leadCaptured);
   const [showCenteredPricingForm, setShowCenteredPricingForm] = useState(false);
+  /** Lead capture for locked preview actions (Try again, Download, Upload) — centered on the image, same styling as SHOW PRICING. */
+  const [showCenteredPreviewActionLeadModal, setShowCenteredPreviewActionLeadModal] = useState(false);
+  /** Ideas / question-pane gate — same centered modal + design_and_estimate completion as SHOW PRICING. */
+  const [showCenteredIdeasToolbarLeadModal, setShowCenteredIdeasToolbarLeadModal] = useState(false);
   const [centeredPricingStep, setCenteredPricingStep] = useState<"email" | "name" | "phone">("email");
   const [centeredPricingEmail, setCenteredPricingEmail] = useState<string>(() => loadLeadState(sessionId).leadEmail || "");
   const [centeredPricingName, setCenteredPricingName] = useState<string>(() => {
@@ -864,39 +867,18 @@ export function ImagePreviewExperience(props: {
   const devMode = useMemo(() => isDevModeEnabled(), []);
   const debugSessionRef = useRef<string | null>(null);
   const debugLeadCapturedRef = useRef<boolean | null>(null);
-  const [showUploadGate, setShowUploadGate] = useState(false);
-  const [showDownloadGate, setShowDownloadGate] = useState(false);
-  const [showGenerateGate, setShowGenerateGate] = useState(false);
   const [galleryLoadingMessageIndex, setGalleryLoadingMessageIndex] = useState(0);
   const pendingActionRef = useRef<null | "refresh" | "upload" | "download">(null);
   const pendingGenerateModeRef = useRef<"manual" | "auto">("manual");
   const gateContextRef = useRef<string>("design_and_estimate");
-
-  const onGenerateGateOpenChange = useCallback((nextOpen: boolean) => {
-    setShowGenerateGate((prevOpen) => {
-      if (prevOpen === nextOpen) return prevOpen;
-      if (!nextOpen) {
-        pendingActionRef.current = null;
-        pendingGenerateModeRef.current = "manual";
-        gateContextRef.current = "design_and_estimate";
-      }
-      return nextOpen;
-    });
-  }, []);
-  const onDownloadGateOpenChange = useCallback((nextOpen: boolean) => {
-    setShowDownloadGate((prevOpen) => {
-      if (prevOpen === nextOpen) return prevOpen;
-      if (!nextOpen) pendingActionRef.current = null;
-      return nextOpen;
-    });
-  }, []);
-  const onUploadGateOpenChange = useCallback((nextOpen: boolean) => {
-    setShowUploadGate((prevOpen) => {
-      if (prevOpen === nextOpen) return prevOpen;
-      if (!nextOpen) pendingActionRef.current = null;
-      return nextOpen;
-    });
-  }, []);
+  /** Set after `runGenerate` / `downloadActiveImage` exist — used by lead submit without TDZ. */
+  const postLeadUnlockActionRef = useRef<{
+    runGenerate: (reason: "auto" | "manual") => void;
+    downloadActiveImage: () => Promise<void>;
+  }>({
+    runGenerate: () => {},
+    downloadActiveImage: async () => {},
+  });
 
   const promptSubmitNonceRef = useRef<number>(0);
   const promptSubmitNonceInitializedRef = useRef(false);
@@ -946,6 +928,8 @@ export function ImagePreviewExperience(props: {
     setCenteredPricingStep("email");
     setCenteredPricingError(null);
     setShowCenteredPricingForm(false);
+    setShowCenteredPreviewActionLeadModal(false);
+    setShowCenteredIdeasToolbarLeadModal(false);
     setPendingExactPricingReveal(false);
   }, [sessionId]);
 
@@ -1045,12 +1029,33 @@ export function ImagePreviewExperience(props: {
       return;
     }
 
+    const isPreviewActionLead = showCenteredPreviewActionLeadModal;
+    const isIdeasToolbarLead = showCenteredIdeasToolbarLeadModal;
+    const actionPending = pendingActionRef.current;
+    const gateCtx = isPreviewActionLead
+      ? gateContextRef.current || "regenerate_manual"
+      : "design_and_estimate";
+    const actionSurface =
+      actionPending === "download"
+        ? "preview_download"
+        : actionPending === "upload"
+          ? formStepUploadThumbnail
+            ? "preview_change_reference"
+            : "preview_upload_reference"
+          : "preview_generate";
+
     const result = await submitCenteredPricingLead({
       email,
       name,
       phone: formattedPhone,
       isPartial: false,
-      submissionData: { gateContext: "design_and_estimate", surface: "inline_pricing", step: "phone" },
+      submissionData: isPreviewActionLead
+        ? { gateContext: gateCtx, surface: actionSurface, step: "phone" }
+        : {
+            gateContext: "design_and_estimate",
+            surface: isIdeasToolbarLead ? "ideas_toolbar" : "inline_pricing",
+            step: "phone",
+          },
     });
 
     if (!result.success) {
@@ -1065,14 +1070,38 @@ export function ImagePreviewExperience(props: {
       leadPhone: formattedPhone,
       leadCapturedAt: Date.now(),
     });
-    upsertLeadGate(sessionId, "design_and_estimate", { completedAt: Date.now() });
-    setPendingExactPricingReveal(true);
-    setAccuratePricingStatus("running");
+    upsertLeadGate(sessionId, gateCtx, { completedAt: Date.now() });
     setLeadCaptured(true);
     setShowCenteredPricingForm(false);
+    setShowCenteredPreviewActionLeadModal(false);
+    setShowCenteredIdeasToolbarLeadModal(false);
     setCenteredPricingStep("email");
+
+    if (isPreviewActionLead) {
+      const action = pendingActionRef.current;
+      const mode = pendingGenerateModeRef.current;
+      pendingActionRef.current = null;
+      pendingGenerateModeRef.current = "manual";
+      const { runGenerate: runGen, downloadActiveImage: dl } = postLeadUnlockActionRef.current;
+      if (action === "refresh") void runGen(mode);
+      else if (action === "download") void dl();
+      else if (action === "upload") uploadInputRef.current?.click();
+      return;
+    }
+
+    setPendingExactPricingReveal(true);
+    setAccuratePricingStatus("running");
     void fetchAccuratePricingRef.current?.();
-  }, [centeredPricingEmail, centeredPricingName, centeredPricingPhone, sessionId, submitCenteredPricingLead]);
+  }, [
+    centeredPricingEmail,
+    centeredPricingName,
+    centeredPricingPhone,
+    formStepUploadThumbnail,
+    sessionId,
+    showCenteredIdeasToolbarLeadModal,
+    showCenteredPreviewActionLeadModal,
+    submitCenteredPricingLead,
+  ]);
 
   const effectiveStepDataSoFar = useMemo(() => {
     const base = { ...(stepDataSoFar || {}) };
@@ -2190,22 +2219,37 @@ export function ImagePreviewExperience(props: {
   const openDesignEstimateLeadFlow = useCallback(() => {
     if (!leadGateEnabled) return;
     if (leadCaptured) return;
+    setShowCenteredPreviewActionLeadModal(false);
+    setShowCenteredIdeasToolbarLeadModal(false);
     setCenteredPricingError(null);
     setCenteredPricingStep("email");
     setShowCenteredPricingForm(true);
     upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
   }, [leadCaptured, leadGateEnabled, sessionId]);
 
+  /** Question-pane Ideas gate: same lead steps as SHOW PRICING, but centered on the preview image. */
+  const openCenteredIdeasToolbarLeadFlow = useCallback(() => {
+    if (!leadGateEnabled) return;
+    if (leadCaptured) return;
+    setShowCenteredPreviewActionLeadModal(false);
+    setShowCenteredPricingForm(false);
+    setCenteredPricingError(null);
+    setCenteredPricingStep("email");
+    setShowCenteredIdeasToolbarLeadModal(true);
+    upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
+  }, [leadCaptured, leadGateEnabled, sessionId]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onOpenGate = (e: Event) => {
-      const detail = (e as CustomEvent<{ sessionId?: string }>).detail;
+      const detail = (e as CustomEvent<{ sessionId?: string; centered?: boolean }>).detail;
       if (!detail || detail.sessionId !== sessionId) return;
-      openDesignEstimateLeadFlow();
+      if (detail.centered) openCenteredIdeasToolbarLeadFlow();
+      else openDesignEstimateLeadFlow();
     };
     window.addEventListener(OPEN_DESIGN_ESTIMATE_GATE_EVENT, onOpenGate);
     return () => window.removeEventListener(OPEN_DESIGN_ESTIMATE_GATE_EVENT, onOpenGate);
-  }, [openDesignEstimateLeadFlow, sessionId]);
+  }, [openCenteredIdeasToolbarLeadFlow, openDesignEstimateLeadFlow, sessionId]);
   const galleryLoadingMessage =
     GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
 
@@ -2668,34 +2712,54 @@ export function ImagePreviewExperience(props: {
     }
   }, [hero]);
 
+  postLeadUnlockActionRef.current = { runGenerate, downloadActiveImage };
+
   const handleRefreshClick = useCallback(() => {
     if (leadGateActive) {
       pendingActionRef.current = "refresh";
       pendingGenerateModeRef.current = "manual";
       gateContextRef.current = "regenerate_manual";
+      setShowCenteredPricingForm(false);
+      setShowCenteredIdeasToolbarLeadModal(false);
+      setCenteredPricingError(null);
+      setCenteredPricingStep("email");
+      setShowCenteredPreviewActionLeadModal(true);
+      upsertLeadGate(sessionId, "regenerate_manual", { shownAt: Date.now() });
       return;
     }
     requestManualGenerate();
-  }, [leadGateActive, requestManualGenerate]);
+  }, [leadGateActive, requestManualGenerate, sessionId]);
 
   const handleUploadClick = useCallback(() => {
     if (leadGateActive) {
       gateContextRef.current = "upload_reference";
       pendingActionRef.current = "upload";
+      setShowCenteredPricingForm(false);
+      setShowCenteredIdeasToolbarLeadModal(false);
+      setCenteredPricingError(null);
+      setCenteredPricingStep("email");
+      setShowCenteredPreviewActionLeadModal(true);
+      upsertLeadGate(sessionId, "upload_reference", { shownAt: Date.now() });
       return;
     }
     uploadInputRef.current?.click();
-  }, [leadGateActive]);
+  }, [leadGateActive, sessionId]);
 
   const handleDownloadClick = useCallback(() => {
     if (!hero) return;
     if (leadGateActive) {
       gateContextRef.current = "download";
       pendingActionRef.current = "download";
+      setShowCenteredPricingForm(false);
+      setShowCenteredIdeasToolbarLeadModal(false);
+      setCenteredPricingError(null);
+      setCenteredPricingStep("email");
+      setShowCenteredPreviewActionLeadModal(true);
+      upsertLeadGate(sessionId, "download", { shownAt: Date.now() });
       return;
     }
     void downloadActiveImage();
-  }, [downloadActiveImage, hero, leadGateActive]);
+  }, [downloadActiveImage, hero, leadGateActive, sessionId]);
 
   // Let the parent know whether a real preview image is currently visible.
   useEffect(() => {
@@ -2851,14 +2915,13 @@ export function ImagePreviewExperience(props: {
   // Neutral glass palette for all overlay controls (pills + lead popover).
   const primary = theme.primaryColor || "#3b82f6";
   const pricingDisplayFont = "'DM Mono', 'JetBrains Mono', 'IBM Plex Mono', monospace";
-  /** Stable identities — passed to LeadGenPopover `contentStyle`; new objects each render can thrash Radix focus-scope. */
+  /** Stable identities for overlay controls; new objects each render can thrash nested focus scopes. */
   const {
     overlayVars,
     singleModeOverlayVars,
     pricingPillVars,
     galleryPlaceholderPillBg,
     singleModePricingPillBg,
-    overlayBorder,
   } = useMemo(() => {
       const overlayBg = "rgba(51, 65, 85, 0.52)";
       const overlayHoverBg = "rgba(51, 65, 85, 0.64)";
@@ -2916,7 +2979,6 @@ export function ImagePreviewExperience(props: {
         pricingPillVars: pricingPillVarsInner,
         galleryPlaceholderPillBg: galleryPlaceholderPillBgLocal,
         singleModePricingPillBg: galleryPlaceholderPillBgLocal,
-        overlayBorder: overlayBorderLocal,
       };
     }, []);
 
@@ -3127,11 +3189,17 @@ export function ImagePreviewExperience(props: {
     (accuratePricingStatus === "error" ? lockedPillPrice : leadGateEnabled && leadCaptured ? lockedPillPrice : lockedPillPrice);
   const pillLoading = waitingForExactPricing;
   const shouldShowBottomPricingPill = Boolean(shouldShowPricingPill && lockedPillPrice);
-  const shouldShowCenteredPricingFormOverlay = Boolean(
-    leadGateEnabled && !leadCaptured && showCenteredPricingForm
+  const shouldShowCenteredLeadFormOverlay = Boolean(
+    leadGateEnabled &&
+      !leadCaptured &&
+      (showCenteredPricingForm || showCenteredPreviewActionLeadModal || showCenteredIdeasToolbarLeadModal)
+  );
+  /** Centered dimmed backdrop (preview actions or Ideas toolbar gate — not the bottom-anchored SHOW PRICING sheet). */
+  const centeredLeadFormIsImageAction = Boolean(
+    showCenteredPreviewActionLeadModal || showCenteredIdeasToolbarLeadModal
   );
   const showBottomPreviewDock = Boolean(
-    singleModePreviewChrome && !lightboxOpen && !shouldShowCenteredPricingFormOverlay
+    singleModePreviewChrome && !lightboxOpen && !shouldShowCenteredLeadFormOverlay
   );
   const previewPricingPillMaxWidth =
     leadGateEnabled && !leadCaptured
@@ -3465,97 +3533,29 @@ export function ImagePreviewExperience(props: {
                     style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
                   >
                     {hero && !busy ? (
-                      leadGateEnabled && !leadCaptured ? (
-                        <LeadGenPopover
-                          open={showGenerateGate}
-                          onOpenChange={onGenerateGateOpenChange}
-                          instanceId={instanceId}
-                          sessionId={sessionId}
-                          gateContext={gateContextRef.current || "regenerate_manual"}
-                          surface="overlay"
-                          contentStyle={singleModeOverlayVars}
-                          {...PRICING_LEAD_COPY}
-                          requirePhone
-                          submitOnEmail={false}
-                          submissionData={{ surface: "preview_generate" }}
-                          side="bottom"
-                          align="end"
-                          sideOffset={6}
-                          onSubmitted={() => {
-                            setLeadCaptured(true);
-                            const action = pendingActionRef.current;
-                            const mode = pendingGenerateModeRef.current;
-                            pendingActionRef.current = null;
-                            pendingGenerateModeRef.current = "manual";
-                            if (action === "refresh") void runGenerate(mode);
-                          }}
-                        >
-                          <button
-                            type="button"
-                            disabled={busy || !canRegenerateInGallery}
-                            onClick={handleRefreshClick}
-                            className={overlayButtonClass}
-                            aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
-                            style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
-                          >
-                            {showConceptPicker ? (
-                              <span className="font-medium">Regenerate</span>
-                            ) : (
-                              <>
-                                <span className="opacity-65">Not what you want?</span>
-                                <span className="font-medium">Try again</span>
-                              </>
-                            )}
-                          </button>
-                        </LeadGenPopover>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={busy || !canRegenerateInGallery}
-                          onClick={handleRefreshClick}
-                          className={overlayButtonClass}
-                          aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
-                          style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
-                        >
-                          {showConceptPicker ? (
-                            <span className="font-medium">Regenerate</span>
-                          ) : (
-                            <>
-                              <span className="opacity-65">Not what you want?</span>
-                              <span className="font-medium">Try again</span>
-                            </>
-                          )}
-                        </button>
-                      )
+                      <button
+                        type="button"
+                        disabled={busy || !canRegenerateInGallery}
+                        onClick={handleRefreshClick}
+                        className={overlayButtonClass}
+                        aria-label={showConceptPicker ? "Regenerate ideas" : "Not what you want? Try again"}
+                        style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+                      >
+                        {showConceptPicker ? (
+                          <span className="font-medium">Regenerate</span>
+                        ) : (
+                          <>
+                            <span className="opacity-65">Not what you want?</span>
+                            <span className="font-medium">Try again</span>
+                          </>
+                        )}
+                      </button>
                     ) : null}
                     {/* Download and expand only in single view — not meaningful in gallery picker mode */}
                     {!showConceptPicker ? (
                       <>
                         {/* Only mount Popover while the gate can apply — same as regenerate. If we mount after
                             capture with `open` stuck false, Radix keeps syncing open state and can loop in focus-scope. */}
-                        {leadGateEnabled && !leadCaptured ? (
-                          <LeadGenPopover
-                        open={showDownloadGate}
-                        onOpenChange={onDownloadGateOpenChange}
-                        instanceId={instanceId}
-                        sessionId={sessionId}
-                        gateContext="download"
-                        surface="overlay"
-                        contentStyle={singleModeOverlayVars}
-                        {...PRICING_LEAD_COPY}
-                        side="top"
-                        align="end"
-                        sideOffset={4}
-                        requirePhone
-                        submitOnEmail={false}
-                        submissionData={{ surface: "preview_download" }}
-                        onSubmitted={async () => {
-                          setLeadCaptured(true);
-                          const action = pendingActionRef.current;
-                          pendingActionRef.current = null;
-                          if (action === "download") await downloadActiveImage();
-                        }}
-                      >
                         <button
                           type="button"
                           disabled={busy || !hero}
@@ -3566,19 +3566,6 @@ export function ImagePreviewExperience(props: {
                         >
                           <Download className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         </button>
-                      </LeadGenPopover>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={busy || !hero}
-                            onClick={handleDownloadClick}
-                            className={overlayIconButtonClass}
-                            aria-label="Download preview"
-                            title="Download preview"
-                          >
-                            <Download className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                          </button>
-                        )}
 
                         <button
                           type="button"
@@ -3620,27 +3607,31 @@ export function ImagePreviewExperience(props: {
                     </div>
                   ) : null}
                   {!showProgressiveGalleryLoader ? (
-                    <div className="shrink-0 space-y-0 px-0.5 pb-0.5 text-center sm:px-1">
+                    <div className="shrink-0 px-0.5 pb-1 text-center sm:px-1 sm:pb-1.5">
                       <p
-                        className="text-[11px] font-semibold leading-snug text-balance sm:text-[13px] md:text-sm"
+                        className="text-base font-semibold leading-tight text-balance sm:text-lg md:text-xl"
                         style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                       >
-                        We generated starter concepts for your project. Tap one to show pricing.
-                      </p>
-                      <p
-                        className="text-[9px] leading-snug text-balance opacity-75 sm:text-[10px] md:text-[11px]"
-                        style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
-                      >
-                        These are starting concepts. You can refine them after unlocking pricing.
+                        Tap a starter concept to get started.
                       </p>
                     </div>
                   ) : null}
                   <div
-                    className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y px-0.5 pb-0.5 sm:px-1 sm:pb-1"
-                    style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties}
+                    className={cn(
+                      "min-h-0 w-full min-w-0 flex-1 px-0.5 pb-0.5 sm:px-1 sm:pb-1",
+                      // Mobile: horizontal snap rail (grid + touch-pan-y prevented horizontal swipe).
+                      "max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:overscroll-x-contain max-sm:snap-x max-sm:snap-mandatory max-sm:touch-pan-x",
+                      "max-sm:[scrollbar-width:none] max-sm:[-ms-overflow-style:none] max-sm:[&::-webkit-scrollbar]:hidden",
+                      "sm:overflow-y-auto sm:overflow-x-hidden sm:overscroll-contain sm:touch-pan-y"
+                    )}
+                    style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
                   >
                     <div
-                      className="grid w-full min-w-0 content-start gap-1 sm:gap-1.5"
+                      className={cn(
+                        "min-w-0 gap-1 sm:gap-1.5",
+                        "max-sm:flex max-sm:w-max max-sm:flex-row max-sm:items-stretch",
+                        "sm:grid sm:w-full sm:content-start"
+                      )}
                       style={{
                         gridTemplateColumns: `repeat(${conceptGalleryGridCols}, minmax(0, 1fr))`,
                       }}
@@ -3668,7 +3659,7 @@ export function ImagePreviewExperience(props: {
                           return (
                             <div
                               key={idx}
-                              className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
+                              className="relative aspect-square w-full min-w-0 max-sm:w-[min(78vw,260px)] max-sm:shrink-0 max-sm:snap-start overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
                               style={{
                                 borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
                               }}
@@ -3698,7 +3689,7 @@ export function ImagePreviewExperience(props: {
 	                          });
 	                        }}
 	                        className={cn(
-                            "group relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
+                            "group relative aspect-square w-full min-w-0 max-sm:w-[min(78vw,260px)] max-sm:shrink-0 max-sm:snap-start overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
                             selectedConceptIndex === idx ? "border-white/80 ring-2 ring-white/50" : "border-white/20 md:hover:border-white/50"
                           )}
 	                        style={{
@@ -3782,101 +3773,29 @@ export function ImagePreviewExperience(props: {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={formStepUploadThumbnail} alt="Your uploaded photo" className="h-full w-full object-cover" />
                   </div>
-                  {leadGateEnabled && leadGateActive ? (
-                    <LeadGenPopover
-                      open={showUploadGate}
-                      onOpenChange={onUploadGateOpenChange}
-                      instanceId={instanceId}
-                      sessionId={sessionId}
-                      gateContext="upload_reference"
-                      surface="overlay"
-                      contentStyle={overlayVars}
-                      {...PRICING_LEAD_COPY}
-                      side="top"
-                      align="start"
-                      sideOffset={8}
-                      requirePhone
-                      submitOnEmail={false}
-                      submissionData={{ surface: "preview_change_reference" }}
-                      onSubmitted={() => {
-                        setLeadCaptured(true);
-                        const action = pendingActionRef.current;
-                        pendingActionRef.current = null;
-                        if (action === "upload") uploadInputRef.current?.click();
-                      }}
-                    >
-                      <button
-                        type="button"
-                        disabled={isUploadingOwnImages || busy}
-                        onClick={handleUploadClick}
-                        className={overlayButtonClass}
-                        aria-label="Change uploaded image"
-                        style={{ fontFamily: theme.fontFamily, ...overlayVars }}
-                      >
-                        {isUploadingOwnImages ? "Uploading…" : "Change image"}
-                      </button>
-                    </LeadGenPopover>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={isUploadingOwnImages || busy}
-                      onClick={handleUploadClick}
-                      className={overlayButtonClass}
-                      aria-label="Change uploaded image"
-                      style={{ fontFamily: theme.fontFamily, ...overlayVars }}
-                    >
-                      {isUploadingOwnImages ? "Uploading…" : "Change image"}
-                    </button>
-                  )}
-                </>
-              ) : (
-                /* No form-step upload yet — offer the preview-level "Upload your own image" button */
-                leadGateEnabled && leadGateActive ? (
-                  <LeadGenPopover
-                    open={showUploadGate}
-                    onOpenChange={onUploadGateOpenChange}
-                    instanceId={instanceId}
-                    sessionId={sessionId}
-                    gateContext="upload_reference"
-                    surface="overlay"
-                    contentStyle={overlayVars}
-                    {...PRICING_LEAD_COPY}
-                    side="top"
-                    align="start"
-                    sideOffset={8}
-                    requirePhone
-                    submitOnEmail={false}
-                    submissionData={{ surface: "preview_upload_reference" }}
-                    onSubmitted={() => {
-                      setLeadCaptured(true);
-                      const action = pendingActionRef.current;
-                      pendingActionRef.current = null;
-                      if (action === "upload") uploadInputRef.current?.click();
-                    }}
-                  >
-                    <button
-                      type="button"
-                      disabled={isUploadingOwnImages || busy}
-                      onClick={handleUploadClick}
-                      className={overlayButtonClass}
-                      aria-label="Upload your own image"
-                      style={{ fontFamily: theme.fontFamily, ...overlayVars }}
-                    >
-                      {isUploadingOwnImages ? "Uploading…" : "Upload your own image"}
-                    </button>
-                  </LeadGenPopover>
-                ) : (
                   <button
                     type="button"
                     disabled={isUploadingOwnImages || busy}
                     onClick={handleUploadClick}
                     className={overlayButtonClass}
-                    aria-label="Upload your own image"
+                    aria-label="Change uploaded image"
                     style={{ fontFamily: theme.fontFamily, ...overlayVars }}
                   >
-                    {isUploadingOwnImages ? "Uploading…" : "Upload your own image"}
+                    {isUploadingOwnImages ? "Uploading…" : "Change image"}
                   </button>
-                )
+                </>
+              ) : (
+                /* No form-step upload yet — offer the preview-level "Upload your own image" button */
+                <button
+                  type="button"
+                  disabled={isUploadingOwnImages || busy}
+                  onClick={handleUploadClick}
+                  className={overlayButtonClass}
+                  aria-label="Upload your own image"
+                  style={{ fontFamily: theme.fontFamily, ...overlayVars }}
+                >
+                  {isUploadingOwnImages ? "Uploading…" : "Upload your own image"}
+                </button>
               )}
 
             </div>
@@ -3934,22 +3853,30 @@ export function ImagePreviewExperience(props: {
 	                </div>
 	              ) : null}
 
-              {!lightboxOpen && shouldShowCenteredPricingFormOverlay ? (
+              {!lightboxOpen && shouldShowCenteredLeadFormOverlay ? (
                 <div
-                  className="absolute inset-0 z-30 flex items-end justify-end pointer-events-none"
-                  style={{ padding: centeredPricingOverlayInset }}
+                  className={cn(
+                    "absolute inset-0 pointer-events-none",
+                    centeredLeadFormIsImageAction
+                      ? "z-[38] flex items-center justify-center bg-black/35 p-4 sm:p-6"
+                      : "z-30 flex items-end justify-end"
+                  )}
+                  style={centeredLeadFormIsImageAction ? undefined : { padding: centeredPricingOverlayInset }}
                 >
                   <div
                     className={cn(
                       "pointer-events-auto overflow-visible shadow-[0_10px_28px_rgba(15,23,42,0.24)] transition-[width,transform] duration-200",
-                      showCenteredPricingForm ? "min-h-0" : "h-auto"
+                      showCenteredPricingForm ||
+                      showCenteredPreviewActionLeadModal ||
+                      showCenteredIdeasToolbarLeadModal
+                        ? "min-h-0"
+                        : "h-auto"
                     )}
                     style={{
                       width: centeredPricingPanelWidth,
                       maxWidth: "100%",
                       borderRadius: centeredPricingPanelRadius,
                       backgroundColor: singleModePricingPillBg,
-                      border: `1px solid ${overlayBorder}`,
                       WebkitBackdropFilter: "blur(12px)",
                       backdropFilter: "blur(12px)",
                       containerType: "inline-size",
@@ -3980,6 +3907,8 @@ export function ImagePreviewExperience(props: {
                                   return;
                                 }
                                 setShowCenteredPricingForm(false);
+                                setShowCenteredPreviewActionLeadModal(false);
+                                setShowCenteredIdeasToolbarLeadModal(false);
                               }}
                               className="flex shrink-0 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
                               style={{
@@ -4203,14 +4132,14 @@ export function ImagePreviewExperience(props: {
                         backgroundColor: singleModePricingPillBg,
                         backdropFilter: "blur(12px)",
                         WebkitBackdropFilter: "blur(12px)",
-                        fontFamily: pricingDisplayFont,
+                        fontFamily: theme.fontFamily,
                       }}
                       data-overlay-estimate-expanded
                     >
                       <div
                         className={cn(
                           "relative",
-                          waitingForExactPricing ? "p-2 sm:p-2.5" : "p-3 sm:p-4"
+                          waitingForExactPricing ? "p-2 sm:p-2.5" : "p-2 sm:p-2.5"
                         )}
                       >
                         <div
@@ -4232,7 +4161,7 @@ export function ImagePreviewExperience(props: {
                                 />
                                 <span
                                   className="min-w-0 truncate text-sm font-semibold text-white sm:text-[15px]"
-                                  style={{ fontFamily: pricingDisplayFont }}
+                                  style={{ fontFamily: theme.fontFamily }}
                                 >
                                   Updating your estimate
                                 </span>
@@ -4251,64 +4180,74 @@ export function ImagePreviewExperience(props: {
                               </button>
                             </div>
                             {onKeepDesigning ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onKeepDesigning();
-                                }}
-                                className="h-7 w-full rounded-full border border-white/15 bg-white/5 px-2 text-[10px] font-semibold text-white/90 hover:bg-white/10 sm:text-[11px]"
-                              >
-                                Keep designing
-                              </button>
+                              <div className="flex justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onKeepDesigning();
+                                  }}
+                                  className="text-[10px] font-medium text-white/75 underline-offset-2 transition-colors hover:text-white/95 hover:underline"
+                                  style={{ fontFamily: theme.fontFamily }}
+                                >
+                                  Keep designing
+                                </button>
+                              </div>
                             ) : null}
                           </div>
                         ) : (
                           <>
-                            <div className="relative flex items-start justify-between gap-3">
+                            <div className="relative flex items-start justify-between gap-2">
                               <div className="flex min-w-0 flex-1 flex-col items-center text-center">
                                 <div
                                   className="inline-flex items-center justify-center gap-2"
                                   style={{ fontFamily: pricingDisplayFont }}
                                 >
-                                  <div className="text-[11px] font-semibold tracking-[0.12em] text-white/70 sm:text-[11.5px]">
+                                  <div className="text-[10px] font-semibold tracking-[0.12em] text-white/70 sm:text-[10.5px]">
                                     YOUR ESTIMATED PRICE
                                   </div>
                                 </div>
 
-                                <div className="mt-1 flex flex-col items-center gap-1.5">
+                                <div className="mt-0.5 flex flex-col items-center gap-1">
                                   <div
-                                    className="text-[32px] font-semibold tabular-nums leading-none tracking-[0.01em] text-white/95 sm:text-[40px]"
+                                    className="text-[26px] font-semibold tabular-nums leading-none tracking-[0.01em] text-white/95 sm:text-[30px]"
                                     style={{ fontFamily: pricingDisplayFont }}
                                   >
                                     {overlayPricingMidpointLabel}
                                   </div>
                                   <div
-                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/80"
-                                    style={{ fontFamily: pricingDisplayFont }}
+                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/80"
+                                    style={{ fontFamily: theme.fontFamily }}
                                   >
                                     {overlayPricingRangeLabel}
                                   </div>
                                 </div>
-
-                                <div className="mt-1.5 max-w-[28rem] text-[10px] leading-snug text-white/55 sm:text-[11px]">
-                                  Final pricing may change based on your final selections and details.
-                                </div>
                                 {previewBookingCta.primaryUrl ? (
                                   <Button
                                     asChild
-                                    className="mt-3 h-10 w-full max-w-[18rem] rounded-full text-xs font-semibold shadow-sm"
-                                    style={{ backgroundColor: primary, color: "#fff" }}
+                                    className="mt-2 h-11 w-full max-w-[18rem] rounded-full px-4 text-sm font-semibold shadow-sm sm:h-12 sm:text-[15px]"
+                                    style={{ backgroundColor: primary, color: "#fff", fontFamily: theme.fontFamily }}
                                   >
                                     <a href={previewBookingCta.primaryUrl} target="_blank" rel="noopener noreferrer">
                                       {previewBookingCta.primaryLabel}
                                     </a>
                                   </Button>
+                                ) : onKeepDesigning ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onKeepDesigning();
+                                    }}
+                                    className="mt-1.5 text-[10px] font-medium text-white/75 underline-offset-2 transition-colors hover:text-white/95 hover:underline"
+                                    style={{ fontFamily: theme.fontFamily }}
+                                  >
+                                    Keep designing
+                                  </button>
                                 ) : null}
                               </div>
 
                               <button
                                 type="button"
-                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
+                                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white/85 hover:bg-white/10 hover:text-white"
                                 onClick={() => {
                                   setOverlayPricingCollapsedPreference(true);
                                   setOverlayPricingExpanded(false);
@@ -4316,39 +4255,8 @@ export function ImagePreviewExperience(props: {
                                 aria-label="Collapse pricing"
                                 title="Collapse pricing"
                               >
-                                <ChevronDown className="h-4 w-4" />
+                                <ChevronDown className="h-3.5 w-3.5" />
                               </button>
-                            </div>
-
-                            <div className="relative mt-3 flex flex-col items-center gap-3">
-                              <div className="flex flex-wrap justify-center gap-1.5">
-                                {[
-                                  "Generated from your answers",
-                                  "Unlocks pricing and editing",
-                                  "No obligation",
-                                ].map((label) => (
-                                  <span
-                                    key={label}
-                                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/75"
-                                  >
-                                    {label}
-                                  </span>
-                                ))}
-                              </div>
-
-                              <div className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
-                                {onKeepDesigning ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onKeepDesigning();
-                                    }}
-                                    className="text-[11px] font-medium text-white/90 underline-offset-2 transition-colors hover:text-white hover:underline"
-                                  >
-                                    Refine this design
-                                  </button>
-                                ) : null}
-                              </div>
                             </div>
                           </>
                         )}

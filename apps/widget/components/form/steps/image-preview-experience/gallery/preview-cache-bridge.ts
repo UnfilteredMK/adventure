@@ -2,10 +2,14 @@
 
 export const PREVIEW_CACHE_UPDATED_EVENT = "sif_preview_cache_updated";
 
-/** Dispatched from the question toolbar (e.g. idea chips) to open the preview centered lead/pricing flow. */
+/** Dispatched from the question toolbar (e.g. idea chips) to open the preview lead flow. */
 export const OPEN_DESIGN_ESTIMATE_GATE_EVENT = "sif_open_design_estimate_gate";
 
-export type OpenDesignEstimateGateDetail = { sessionId: string };
+export type OpenDesignEstimateGateDetail = {
+  sessionId: string;
+  /** When true, open the full-screen centered modal on the preview (same as Try again / Download). */
+  centered?: boolean;
+};
 
 export type PreviewPriceSnapshot = {
   totalMin: number;

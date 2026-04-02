@@ -2,7 +2,11 @@ import { FormState } from "@/types/ai-form";
 import { emitTelemetry } from "@/lib/ai-form/telemetry";
 import { saveUIPlan } from "@/lib/ai-form/state/ui-plan-storage";
 import { saveFormPlan } from "@/lib/ai-form/state/form-plan-storage";
-import { loadServiceCatalog, saveServiceCatalog } from "@/lib/ai-form/state/service-catalog-storage";
+import {
+  loadServiceCatalog,
+  saveServiceCatalog,
+  type ServiceCatalogSnapshot,
+} from "@/lib/ai-form/state/service-catalog-storage";
 import {
   DETERMINISTIC_BUDGET_ID,
   DETERMINISTIC_SCENE_IMAGE_ID,
@@ -529,12 +533,72 @@ export async function fetchAndAppendGenerateStepsBatch(
   }
 }
 
+function applyServiceCatalogFromWidgetOptions(sessionId: string, widgetServiceOptions: any[]) {
+  if (widgetServiceOptions.length === 0 || !sessionId) return;
+  saveServiceCatalog(
+    sessionId,
+    widgetServiceOptions
+      .map((o: any) => ({
+        serviceId: String(o?.value || ""),
+        serviceName:
+          typeof o?.serviceName === "string" ? o.serviceName : typeof o?.label === "string" ? o.label : null,
+        industryId: typeof o?.industryId === "string" ? o.industryId : null,
+        industryName: typeof o?.industryName === "string" ? o.industryName : null,
+        serviceSummary:
+          typeof o?.serviceSummary === "string"
+            ? o.serviceSummary
+            : typeof o?.service_summary === "string"
+              ? o.service_summary
+              : null,
+        ...(typeof o?.heroCtaUrl === "string" && o.heroCtaUrl.trim() ? { heroCtaUrl: o.heroCtaUrl.trim() } : {}),
+        ...(typeof o?.heroCtaText === "string" && o.heroCtaText.trim() ? { heroCtaText: o.heroCtaText.trim() } : {}),
+        styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
+        styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
+      }))
+      .filter((item: any) => item.serviceId)
+  );
+}
+
+function pickFallbackServiceOption(widgetServiceOptions: any[], nextSelectedServiceId: string | null) {
+  return (
+    (nextSelectedServiceId ? widgetServiceOptions.find((o: any) => String(o?.value || "") === nextSelectedServiceId) : null) ||
+    widgetServiceOptions[0] ||
+    null
+  );
+}
+
+/** Shape expected by `pickFallbackServiceOption` / style-step builders (matches widget JSON serviceOptions). */
+function serviceCatalogSnapshotToWidgetOptions(snapshot: ServiceCatalogSnapshot): any[] {
+  return Object.values(snapshot.byServiceId).map((item) => ({
+    value: item.serviceId,
+    label: item.serviceName || item.serviceId,
+    serviceName: item.serviceName,
+    industryId: item.industryId,
+    industryName: item.industryName,
+    serviceSummary: item.serviceSummary ?? null,
+    ...(item.heroCtaUrl ? { heroCtaUrl: item.heroCtaUrl } : {}),
+    ...(item.heroCtaText ? { heroCtaText: item.heroCtaText } : {}),
+    ...(item.subcategoryComponents?.length ? { subcategoryComponents: item.subcategoryComponents } : {}),
+    ...(item.subcategoryScope?.length ? { subcategoryScope: item.subcategoryScope } : {}),
+    styleQuestion: item.styleQuestion ?? null,
+    styleOptions: item.styleOptions,
+  }));
+}
+
 export async function hydrateServiceCatalogFromWidget(args: {
   instanceId: string;
   sessionId: string;
   nextSelectedServiceId: string | null;
 }): Promise<any | null> {
   const { instanceId, sessionId, nextSelectedServiceId } = args;
+
+  const persisted = loadServiceCatalog(sessionId);
+  const ids = persisted?.byServiceId && typeof persisted.byServiceId === "object" ? Object.keys(persisted.byServiceId) : [];
+  if (ids.length > 0) {
+    const widgetServiceOptions = serviceCatalogSnapshotToWidgetOptions(persisted as ServiceCatalogSnapshot);
+    return pickFallbackServiceOption(widgetServiceOptions, nextSelectedServiceId);
+  }
+
   try {
     const widgetRes = await fetch(`/api/widget/${instanceId}`, {
       cache: "no-store",
@@ -542,34 +606,8 @@ export async function hydrateServiceCatalogFromWidget(args: {
     });
     const widgetJson = widgetRes.ok ? await widgetRes.json().catch(() => null) : null;
     const widgetServiceOptions = Array.isArray(widgetJson?.serviceOptions) ? widgetJson.serviceOptions : [];
-    if (widgetServiceOptions.length > 0 && sessionId) {
-      saveServiceCatalog(
-        sessionId,
-        widgetServiceOptions
-          .map((o: any) => ({
-            serviceId: String(o?.value || ""),
-            serviceName:
-              typeof o?.serviceName === "string" ? o.serviceName : typeof o?.label === "string" ? o.label : null,
-            industryId: typeof o?.industryId === "string" ? o.industryId : null,
-            industryName: typeof o?.industryName === "string" ? o.industryName : null,
-            serviceSummary:
-              typeof o?.serviceSummary === "string"
-                ? o.serviceSummary
-                : typeof o?.service_summary === "string"
-                  ? o.service_summary
-                  : null,
-            ...(typeof o?.heroCtaUrl === "string" && o.heroCtaUrl.trim() ? { heroCtaUrl: o.heroCtaUrl.trim() } : {}),
-            ...(typeof o?.heroCtaText === "string" && o.heroCtaText.trim() ? { heroCtaText: o.heroCtaText.trim() } : {}),
-            styleQuestion: typeof o?.styleQuestion === "string" ? o.styleQuestion : null,
-            styleOptions: Array.isArray(o?.styleOptions) ? o.styleOptions : undefined,
-          }))
-          .filter((item: any) => item.serviceId)
-      );
-    }
-    const fallbackServiceOption =
-      (nextSelectedServiceId ? widgetServiceOptions.find((o: any) => String(o?.value || "") === nextSelectedServiceId) : null) ||
-      widgetServiceOptions[0];
-    return fallbackServiceOption ?? null;
+    applyServiceCatalogFromWidgetOptions(sessionId, widgetServiceOptions);
+    return pickFallbackServiceOption(widgetServiceOptions, nextSelectedServiceId);
   } catch {
     return null;
   }

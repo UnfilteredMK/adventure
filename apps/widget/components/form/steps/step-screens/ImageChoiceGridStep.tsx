@@ -192,41 +192,32 @@ export function ImageChoiceGridStep({
         </span>
       )
     : null;
+  /** In preview-under compact layout, hide "Pick n–m" + n/m counter — it used a full-height grid row and overlapped the title/images. */
   const styleSelectionHeader =
-    isStyleStep && multiple && selectionCounter ? (
-      <div
-        className={cn(
-          "flex max-w-full flex-col items-end gap-0.5 sm:flex-row sm:items-baseline sm:gap-2.5",
-          headerInlineControl ? "sm:items-center" : null,
-          compactInPreview ? "items-center text-center sm:items-center" : null
-        )}
-      >
-        <span
-          className={cn(
-            "text-[11px] leading-snug text-muted-foreground sm:text-sm",
-            compactInPreview
-              ? "text-center"
-              : "text-right max-w-[14rem] sm:max-w-[min(100%,20rem)]"
-          )}
-        >
-          {compactInPreview ? (
-            <>Pick {minSelections}–{Number(maxSelections)} styles</>
-          ) : (
-            <>
-              <span className="sm:hidden">
-                Pick {minSelections}–{Number(maxSelections)} styles
+    compactInPreview
+      ? null
+      : isStyleStep && multiple && selectionCounter
+        ? (
+            <div
+              className={cn(
+                "flex max-w-full flex-col items-end gap-0.5 sm:flex-row sm:items-baseline sm:gap-2.5",
+                headerInlineControl ? "sm:items-center" : null
+              )}
+            >
+              <span className="text-right text-[11px] leading-snug text-muted-foreground max-w-[14rem] sm:max-w-[min(100%,20rem)] sm:text-sm">
+                <span className="sm:hidden">
+                  Pick {minSelections}–{Number(maxSelections)} styles
+                </span>
+                <span className="hidden sm:inline">
+                  Select at least {minSelections} examples (up to {Number(maxSelections)})
+                </span>
               </span>
-              <span className="hidden sm:inline">
-                Select at least {minSelections} examples (up to {Number(maxSelections)})
-              </span>
-            </>
-          )}
-        </span>
-        {selectionCounter}
-      </div>
-    ) : (
-      selectionCounter
-    );
+              {selectionCounter}
+            </div>
+          )
+        : (
+            selectionCounter
+          );
   const resolvedHeaderInlineControl = styleSelectionHeader || headerInlineControl
     ? (
         <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:justify-start">
@@ -261,7 +252,7 @@ export function ImageChoiceGridStep({
           isPricedGridStep
             ? "flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
             : !isPricedGridStep && compactInPreview
-              ? "mx-auto flex h-full min-h-0 w-full max-w-none min-w-0 flex-1 flex-col"
+              ? "mx-auto flex w-full max-w-none min-w-0 shrink-0 flex-col min-h-0"
               : "flex min-h-0 w-full min-w-0 flex-col"
         )}
         style={isPricedGridStep ? undefined : withLayoutDebugStyle(undefined, layoutDebugEnabled, "emerald")}
@@ -304,7 +295,7 @@ export function ImageChoiceGridStep({
               compactScroller={isPricedGridStep ? false : Boolean(compactInPreview)}
               hideOptionText={isStyleStep || isPricedGridStep}
               displayMode={isPricedGridStep ? "priced_examples" : "default"}
-              className={!isPricedGridStep && compactInPreview ? "h-full min-h-0 flex-1" : undefined}
+              className={!isPricedGridStep && compactInPreview ? "w-full min-h-0 shrink-0" : undefined}
             />
           </div>
         </div>

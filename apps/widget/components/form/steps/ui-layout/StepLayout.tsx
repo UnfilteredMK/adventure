@@ -90,9 +90,17 @@ export function StepLayout({
       : null;
   const compactQuestionFontSize = isVisualAnswerStep ? "clamp(1rem, 2vh, 1.28rem)" : "clamp(1rem, 2.1vh, 1.35rem)";
   const compactSubtextFontSize = isVisualAnswerStep ? "clamp(0.74rem, 1.2vh, 0.9rem)" : "clamp(0.82rem, 1.45vh, 0.98rem)";
-  const compactQuestionRowClass = useCompactPane ? "min-h-0 h-full min-w-0 overflow-visible px-2 pt-1 pb-1" : "shrink-0 min-w-0";
-  const compactHeaderControlRowClass =
-    "row-start-1 min-h-0 h-full min-w-0 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1";
+  /** Visual steps must not use `h-full` on the question row — it steals height from `grid-rows-[auto_minmax(0,1fr)]` and collapses the answer area (image grids). */
+  const compactQuestionRowClass = useCompactPane
+    ? cn(
+        "min-h-0 min-w-0 overflow-visible px-2 pt-1 pb-1",
+        isVisualAnswerStep ? "shrink-0" : "h-full"
+      )
+    : "shrink-0 min-w-0";
+  /** No `h-full` in compact pane — it steals the whole column and stacks on top of the question/images. */
+  const compactHeaderControlRowClass = useCompactPane
+    ? "row-start-1 min-h-0 shrink-0 min-w-0 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1"
+    : "row-start-1 min-h-0 h-full min-w-0 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1";
   const compactAnswerViewportClass = useCompactPane
     ? isVisualAnswerStep
       ? "h-full min-h-0 px-1 pt-0.5 pb-0"
@@ -112,7 +120,10 @@ export function StepLayout({
     : "h-[50%] min-h-[56px] max-h-[100px] w-11 sm:w-12 rounded-lg p-0";
   const compactActionButtonClass = "h-8 min-w-[80px] px-2.5 text-[11px]";
   const compactHeaderLayoutClass = useCompactPane
-    ? "flex h-full min-h-0 flex-col items-center justify-center gap-0 text-center"
+    ? cn(
+        "flex min-h-0 flex-col items-center gap-0 text-center",
+        isVisualAnswerStep ? "justify-start" : "h-full min-h-0 justify-center"
+      )
     : undefined;
   const compactInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const standardInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
@@ -226,7 +237,11 @@ export function StepLayout({
                   layoutDebugEnabled,
                   cn(
                     "min-w-0 w-full",
-                    useCompactPane ? "h-full min-h-0" : null,
+                    useCompactPane
+                      ? isVisualAnswerStep
+                        ? "min-h-0"
+                        : "h-full min-h-0"
+                      : null,
                     compactHeaderLayoutClass,
                     useCompactPane ? (isChoiceStep ? "mx-auto max-w-4xl" : "max-w-none mx-auto") : null
                   )
@@ -349,7 +364,11 @@ export function StepLayout({
                 layoutDebugEnabled,
                 cn(
                   "min-w-0 w-full",
-                  useCompactPane ? "h-full min-h-0" : null,
+                  useCompactPane
+                    ? isVisualAnswerStep
+                      ? "min-h-0"
+                      : "h-full min-h-0"
+                    : null,
                   compactHeaderLayoutClass,
                   useCompactPane ? (isChoiceStep ? "mx-auto max-w-4xl" : "max-w-none mx-auto") : null
                 )

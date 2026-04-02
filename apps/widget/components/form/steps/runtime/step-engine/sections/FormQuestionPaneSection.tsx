@@ -9,13 +9,14 @@ import { Slider as SliderPrimitive } from "@/components/ui/slider";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { ComponentRenderer } from "../../ComponentRenderer";
 import { EaseFeedbackPrompt } from "../../../../dev-helpers/UserFeedbackPrompt";
-import { ArrowLeft, ArrowUp, ImagePlus, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUp, ImagePlus } from "lucide-react";
 import { usePreviewSuggestions } from "@/components/form/state/PreviewSuggestionsContext";
 import type { Suggestion } from "@/types";
 import { PreviewIdeasChips } from "../../../preview-ideas/PreviewIdeasChips";
 import { OPEN_DESIGN_ESTIMATE_GATE_EVENT } from "../../../image-preview-experience/gallery/preview-cache-bridge";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
 import { layoutDebugClassName, withLayoutDebugStyle } from "../debug-layout";
+import { DesignModeToolbar } from "./DesignModeToolbar";
 
 interface FormQuestionSectionProps {
   config?: any;
@@ -136,16 +137,38 @@ export function FormQuestionSection({
       !isRefinementUploadStep &&
       !hideQuestionPane
   );
+  /** Mode strip (Ideas / Guided / Prompt / …) — hidden until lead capture so the preview lead modal is the focus. */
+  const showModeToolbar = Boolean(showPromptControls && leadCapturedForUI);
   const usePreviewPaneLayout = Boolean(
     usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage && !forceExpandedStepLayout
   );
   const useBottomDockLayout = Boolean(usePreviewPaneLayout && isMobileViewport);
   const useCompactNav = useBottomDockLayout;
+  /** Compact Prompt/Budget/Uploads chrome whenever the pane is squashed under the preview (desktop or mobile). */
+  const useCompactToolingChrome = Boolean(useBottomDockLayout || usePreviewPaneLayout);
   const compactPreviewActive = Boolean(usePreviewPaneLayout);
   const useIconOnlyActions = Boolean(useCompactNav || usePreviewPaneLayout);
   const useWideQuestionContent = Boolean(usePreviewDominantLayout && showQuestionPaneUnderPreview && previewHasImage);
   const rendererStepType = String((stepForRenderer as any)?.type || (stepForRenderer as any)?.componentType || "").toLowerCase();
-  const rendererAllowsInternalScroll = rendererStepType === "image_choice_grid";
+  /** Steps that own scrolling / tall visual content must not use bottom-anchoring (would clip the top of grids). */
+  const rendererAllowsInternalScroll =
+    rendererStepType === "image_choice_grid" || rendererStepType === "gallery";
+  /** Single-hero preview: anchor guided questionnaire (e.g. text choices) to the bottom of the strip — not image grids. */
+  const singleHeroGuidedBottom = Boolean(
+    previewSurfaceMode === "single" &&
+      usePreviewPaneLayout &&
+      adventureInputMode === "questions" &&
+      !rendererAllowsInternalScroll
+  );
+  /** Top-align scroll-owned guided steps so image grids are not vertically centered/clipped in the strip. */
+  const compactGuidedVisualScroll =
+    Boolean(
+      usePreviewPaneLayout &&
+        adventureInputMode === "questions" &&
+        rendererAllowsInternalScroll
+    );
+  /** Guided strip height follows step content (parent host is `h-auto` + max-height in StepEngineBodySection). */
+  const guidedPaneContentSized = Boolean(usePreviewPaneLayout && adventureInputMode === "questions");
   const promptText = promptDraft.trim();
   /** Always offer Back when `handleBack` is wired; behavior for step 0 is handled in StepEngine (e.g. return to concept grid). */
   const canGoBack = true;
@@ -268,7 +291,9 @@ export function FormQuestionSection({
   const requestPreviewLeadGate = useCallback(() => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(
-      new CustomEvent(OPEN_DESIGN_ESTIMATE_GATE_EVENT, { detail: { sessionId } })
+      new CustomEvent(OPEN_DESIGN_ESTIMATE_GATE_EVENT, {
+        detail: { sessionId, centered: true },
+      })
     );
   }, [sessionId]);
 
@@ -279,119 +304,8 @@ export function FormQuestionSection({
     }
   }, [designToolsNeedLead, adventureInputMode, setAdventureInputMode]);
 
-  const modeTabClass = (active: boolean, equalWidth: boolean) =>
-    cn(
-      "inline-flex min-w-0 items-center justify-center gap-0.5 rounded-full text-xs font-medium transition-colors",
-      equalWidth ? "w-full" : "w-auto shrink-0",
-      useCompactNav
-        ? cn(
-            "h-[clamp(18px,2.4vh,24px)] text-[clamp(9px,1.3vh,11px)]",
-            equalWidth ? "px-1" : "px-2"
-          )
-        : cn("h-6", equalWidth ? "px-1.5" : "px-2.5"),
-      active ? "bg-primary/10 text-foreground" : ""
-    );
-
-  const primaryModeToggle = showPromptControls ? (
-      <div
-        className={layoutDebugClassName(
-          layoutDebugEnabled,
-          cn(
-            "flex w-full min-w-0 max-w-full items-stretch gap-0.5 rounded-full border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-0.5",
-            useCompactNav && "h-[clamp(20px,2.8vh,28px)]"
-          )
-        )}
-        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
-      >
-        <button
-          type="button"
-          onClick={() => setAdventureInputMode("ideas")}
-          className={modeTabClass(adventureInputMode === "ideas", false)}
-          style={
-            adventureInputMode !== "ideas"
-              ? { color: textMuted || "var(--form-text-color)" }
-              : undefined
-          }
-          title="Explore AI-suggested upgrades and styles"
-        >
-          <Sparkles className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-          <span className="whitespace-nowrap">Ideas</span>
-        </button>
-        <div
-          className={layoutDebugClassName(
-            layoutDebugEnabled,
-            "grid min-w-0 flex-1 grid-cols-4 gap-0.5"
-          )}
-        >
-        <button
-          type="button"
-          disabled={guidedTabDisabled}
-          title={
-            guidedTabDisabled
-              ? "Finish the pricing step on the preview image to unlock"
-              : undefined
-          }
-          onClick={() => setAdventureInputMode("questions")}
-          className={cn(
-            modeTabClass(adventureInputMode === "questions", true),
-            guidedTabDisabled ? "opacity-45" : null
-          )}
-          style={
-            adventureInputMode !== "questions"
-              ? { color: textMuted || "var(--form-text-color)" }
-              : undefined
-          }
-        >
-          <span className="truncate">Guided</span>
-        </button>
-        <button
-          type="button"
-          disabled={designToolsNeedLead}
-          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
-          onClick={() => setAdventureInputMode("prompt")}
-          className={cn(modeTabClass(adventureInputMode === "prompt", true), designToolsNeedLead ? "opacity-45" : null)}
-          style={
-            adventureInputMode !== "prompt"
-              ? { color: textMuted || "var(--form-text-color)" }
-              : undefined
-          }
-        >
-          <span className="truncate">Prompt</span>
-        </button>
-        <button
-          type="button"
-          disabled={designToolsNeedLead}
-          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
-          onClick={() => setAdventureInputMode("budget")}
-          className={cn(modeTabClass(adventureInputMode === "budget", true), designToolsNeedLead ? "opacity-45" : null)}
-          style={
-            adventureInputMode !== "budget"
-              ? { color: textMuted || "var(--form-text-color)" }
-              : undefined
-          }
-        >
-          <span className="truncate">Budget</span>
-        </button>
-        <button
-          type="button"
-          disabled={designToolsNeedLead}
-          title={designToolsNeedLead ? "Finish the pricing step on the preview image to unlock" : undefined}
-          onClick={() => setAdventureInputMode("uploads")}
-          className={cn(modeTabClass(adventureInputMode === "uploads", true), designToolsNeedLead ? "opacity-45" : null)}
-          style={
-            adventureInputMode !== "uploads"
-              ? { color: textMuted || "var(--form-text-color)" }
-              : undefined
-          }
-        >
-          <span className="truncate">Uploads</span>
-        </button>
-        </div>
-      </div>
-	  ) : undefined;
-
   const sharedQuestionControls =
-    showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
+    showModeToolbar || (showEasePrompt && adventureInputMode === "questions") ? (
     <div
       className={layoutDebugClassName(
         layoutDebugEnabled,
@@ -411,24 +325,36 @@ export function FormQuestionSection({
         )}
         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
       >
-        {showPromptControls || (showEasePrompt && adventureInputMode === "questions") ? (
+        {showModeToolbar || (showEasePrompt && adventureInputMode === "questions") ? (
           <div
             className={layoutDebugClassName(
               layoutDebugEnabled,
               cn(
                 "min-h-8 w-full min-w-0 items-center gap-2",
-                useCompactNav ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]" : "flex justify-center"
+                useCompactNav || usePreviewPaneLayout
+                  ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+                  : "flex justify-center"
               )
             )}
           >
-            {useCompactNav ? <div aria-hidden="true" className="min-w-0" /> : null}
-            <div className="relative z-10 flex min-w-0 items-center justify-center overflow-visible">
-              {primaryModeToggle}
+            {useCompactNav || usePreviewPaneLayout ? <div aria-hidden="true" className="min-w-0" /> : null}
+            <div className="relative z-10 flex min-w-0 items-center justify-center overflow-visible self-center">
+              {showModeToolbar ? (
+                <DesignModeToolbar
+                  adventureInputMode={adventureInputMode}
+                  setAdventureInputMode={setAdventureInputMode}
+                  designToolsNeedLead={designToolsNeedLead}
+                  guidedTabDisabled={guidedTabDisabled}
+                  textMuted={textMuted}
+                  layoutDebugEnabled={layoutDebugEnabled}
+                  compactTabs={useCompactToolingChrome}
+                />
+              ) : null}
             </div>
             <div
               className={cn(
                 "relative z-0 flex min-w-0 items-center",
-                useCompactNav ? "justify-end" : "justify-center"
+                useCompactNav || usePreviewPaneLayout ? "justify-end" : "justify-center"
               )}
             >
               {showEasePrompt && adventureInputMode === "questions" ? (
@@ -454,12 +380,17 @@ export function FormQuestionSection({
           className={layoutDebugClassName(
             layoutDebugEnabled,
             cn(
-              "relative flex w-full min-h-0 flex-col overflow-hidden",
+              "relative flex w-full min-h-0 flex-col",
+              guidedPaneContentSized
+                ? "h-auto shrink-0 overflow-x-hidden overflow-y-visible"
+                : "overflow-hidden",
               usePreviewPaneLayout
                 ? (
-                    useBottomDockLayout
-                      ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
-                      : "min-h-0 flex-1"
+                    guidedPaneContentSized
+                      ? "border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
+                      : useBottomDockLayout
+                        ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
+                        : "min-h-0 flex-1"
                   )
                 : "flex-1"
             )
@@ -471,7 +402,9 @@ export function FormQuestionSection({
                 className={layoutDebugClassName(
                   layoutDebugEnabled,
                   cn(
-                    "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
+                    guidedPaneContentSized
+                      ? "mx-auto flex h-auto min-h-0 w-full flex-col overflow-x-hidden"
+                      : "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
                     useWideQuestionContent ? "max-w-none" : "max-w-6xl"
                   )
                 )}
@@ -482,9 +415,22 @@ export function FormQuestionSection({
                 className={layoutDebugClassName(
                   layoutDebugEnabled,
                   cn(
-                    "flex min-h-0 flex-1 flex-col",
-                    usePreviewPaneLayout ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
-                    useBottomDockLayout ? "justify-end" : useCompactNav ? "justify-center" : null
+                    "flex min-h-0 w-full flex-col",
+                    guidedPaneContentSized ? "flex-none" : "flex-1",
+                    adventureInputMode === "ideas"
+                      ? usePreviewPaneLayout
+                        ? "overflow-x-hidden overflow-y-auto justify-start"
+                        : "overflow-x-hidden overflow-y-hidden justify-start"
+                      : usePreviewPaneLayout
+                        ? "overflow-x-hidden overflow-y-auto"
+                        : "overflow-auto",
+                    singleHeroGuidedBottom || (adventureInputMode !== "ideas" && useBottomDockLayout)
+                      ? "justify-end"
+                      : adventureInputMode !== "ideas" && useCompactToolingChrome
+                        ? compactGuidedVisualScroll
+                          ? "justify-start"
+                          : "justify-center"
+                        : null
                   )
                 )}
                 style={
@@ -621,26 +567,39 @@ export function FormQuestionSection({
 	                        animate={{ opacity: 1, x: 0 }}
 	                        exit={{ opacity: 0, x: -16 }}
 	                        transition={{ duration: 0.18, ease: "easeOut" }}
-	                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col overflow-hidden")}
+	                        className={layoutDebugClassName(
+	                          layoutDebugEnabled,
+	                          "flex w-full shrink-0 flex-col overflow-hidden"
+	                        )}
 	                        style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
 	                      >
 	                        <div
 	                          className={layoutDebugClassName(
 	                            layoutDebugEnabled,
 	                            cn(
-	                              "flex w-full min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
-	                              usePreviewPaneLayout ? "px-2 py-2" : "px-2.5 py-2 sm:px-3"
+	                              "flex w-full shrink-0 flex-col overflow-hidden",
+	                              usePreviewPaneLayout ? "px-2 pb-2 pt-3" : "px-2.5 pb-2 pt-3 sm:px-3 sm:pt-3.5"
 	                            )
 	                          )}
 	                          style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
 	                        >
-	                          <PreviewIdeasChips
-	                            suggestions={ideasSuggestions}
-	                            loading={ideasLoading}
-	                            onApply={onApplyIdeaSuggestion}
-	                            onRequestLeadGate={designToolsNeedLead ? requestPreviewLeadGate : undefined}
-	                            compact={compactPreviewActive}
-	                          />
+	                          {/* Same outer shell as `MultipleChoiceStep` so idea pills match choice bubbles */}
+	                          <div
+	                            className={
+	                              compactPreviewActive
+	                                ? "flex h-full min-h-0 min-w-0 w-full flex-col justify-start overflow-hidden py-0 text-center [&>div]:w-full [&>div]:min-w-0 [&>div>div]:mx-auto"
+	                                : "w-full min-w-0 [&>div]:w-full [&>div]:text-left [&>div>div]:mx-0 [&>div>div:first-child]:w-full [&>div>div:first-child]:justify-start"
+	                            }
+	                          >
+	                            <PreviewIdeasChips
+	                              suggestions={ideasSuggestions}
+	                              loading={ideasLoading}
+	                              onApply={onApplyIdeaSuggestion}
+	                              onRequestLeadGate={designToolsNeedLead ? requestPreviewLeadGate : undefined}
+	                              compact={compactPreviewActive}
+	                              leadComplete={leadCapturedForUI}
+	                            />
+	                          </div>
 	                        </div>
 	                      </motion.div>
 	                    ) : adventureInputMode === "prompt" && showPromptControls ? (
@@ -663,17 +622,17 @@ export function FormQuestionSection({
                           )}
                           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
                         >
-                          {useCompactNav ? (
+                          {useCompactToolingChrome ? (
                             <div className="min-w-0 min-h-0 flex flex-1 flex-col">
                               <div
-                                className="rounded-xl border p-2 min-h-0 flex-1 flex flex-col min-w-0"
+                                className="rounded-xl border p-2 min-h-0 flex-1 flex flex-col min-w-0 overflow-hidden"
                                 style={{
                                   backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.70))",
                                   borderColor: "var(--form-surface-border-color, rgba(0,0,0,0.10))",
                                   borderRadius: `${theme.borderRadius ?? 12}px`,
                                 }}
                               >
-                                <div className="flex items-end gap-2 min-w-0 min-h-0 flex-1">
+                                <div className="flex min-h-0 min-w-0 flex-1 items-stretch gap-2">
                                   <textarea
                                     value={promptDraft}
                                     onChange={(e) => setPromptDraft(e.target.value)}
@@ -684,13 +643,13 @@ export function FormQuestionSection({
                                       }
                                     }}
                                     placeholder="Add a prompt to refine this image..."
-                                    className="min-h-[2.5rem] max-h-[6rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                    className="min-h-[2.5rem] max-h-[6rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-left align-top text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                                   />
                                   <Button
                                     type="button"
                                     onClick={submitPrompt}
                                     disabled={promptText.length < 4}
-                                    className="h-8 w-8 shrink-0 rounded-full p-0"
+                                    className="h-8 w-8 shrink-0 self-end rounded-full p-0"
                                     style={{
                                       backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
                                       color: "#fff",
@@ -714,7 +673,7 @@ export function FormQuestionSection({
                                   borderRadius: `${theme.borderRadius ?? 12}px`,
                                 }}
                               >
-                                <div className="flex items-end gap-2 min-w-0 min-h-0 flex-1">
+                                <div className="flex min-h-0 min-w-0 flex-1 items-stretch gap-2">
                                   <textarea
                                     value={promptDraft}
                                     onChange={(e) => setPromptDraft(e.target.value)}
@@ -725,13 +684,13 @@ export function FormQuestionSection({
                                       }
                                     }}
                                     placeholder="Add a prompt to refine this image..."
-                                    className="min-h-[4rem] max-h-[8rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                                    className="min-h-[4rem] max-h-[8rem] flex-1 resize-none overflow-auto rounded border-0 bg-transparent px-2 py-1.5 text-left align-top text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                                   />
                                   <Button
                                     type="button"
                                     onClick={submitPrompt}
                                     disabled={promptText.length < 4}
-                                    className="h-9 w-9 shrink-0 rounded-full p-0"
+                                    className="h-9 w-9 shrink-0 self-end rounded-full p-0"
                                     style={{
                                       backgroundColor: theme.primaryColor || "var(--form-primary-color, #3b82f6)",
                                       color: "#fff",
@@ -768,7 +727,7 @@ export function FormQuestionSection({
                             )}
                             style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
                           >
-	                          {useCompactNav ? (
+	                          {useCompactToolingChrome ? (
 	                            <div className="flex items-center min-w-0 min-h-0 flex-1">
 	                              <div className="flex-1 min-w-0">
 	                                <div className="px-1 min-w-0 py-0.5">
@@ -870,9 +829,7 @@ export function FormQuestionSection({
                                 "flex w-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden",
                                 usePreviewPaneLayout
                                   ? "px-2 py-1.5 sm:py-2"
-                                  : useCompactNav
-                                    ? "px-2 py-1"
-                                    : "px-2 py-1.5 sm:px-3 sm:py-2 md:px-4 md:py-2.5"
+                                  : "px-2 py-1.5 sm:px-3 sm:py-2 md:px-4 md:py-2.5"
                               )
                             )}
                             style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "amber")}
@@ -950,14 +907,18 @@ export function FormQuestionSection({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -20 }}
                         transition={{ duration: 0.2, ease: "easeOut" }}
-                        className={layoutDebugClassName(layoutDebugEnabled, "w-full min-h-0 flex flex-1 flex-col")}
+                        className={layoutDebugClassName(
+                          layoutDebugEnabled,
+                          cn("w-full min-h-0 flex flex-1 flex-col", singleHeroGuidedBottom && "justify-end")
+                        )}
                         style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
                       >
                         <div
                           className={layoutDebugClassName(
                             layoutDebugEnabled,
                             cn(
-                              "flex-1 min-h-0",
+                              "min-h-0 flex-1",
+                              singleHeroGuidedBottom && "flex flex-col justify-end",
                               rendererAllowsInternalScroll ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
                             )
                           )}

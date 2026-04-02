@@ -48,13 +48,26 @@ function coerceSubcategoryScope(raw: unknown): string[] {
   return out;
 }
 
-/** SEO columns from 20251005 — local DBs without that migration would 42703 the whole select. */
+/** Hero CTA fields live on category_subcategory_seo after migration 20260127000002. */
+const CATEGORIES_SUBCAT_SELECT_WITH_SEO =
+  "id, subcategory, category_id, service_summary, subcategory_components, subcategory_scope, category_subcategory_seo(hero_cta_url, hero_cta_text), categories(name)";
+/** Pre-split DBs: hero_cta_* still on categories_subcategories. */
 const CATEGORIES_SUBCAT_SELECT_WITH_HERO =
   "id, subcategory, category_id, service_summary, subcategory_components, subcategory_scope, hero_cta_url, hero_cta_text, categories(name)";
 const CATEGORIES_SUBCAT_SELECT_BASE =
   "id, subcategory, category_id, service_summary, subcategory_components, subcategory_scope, categories(name)";
 const CATEGORIES_SUBCAT_SELECT_MINIMAL =
   "id, subcategory, category_id, service_summary, subcategory_components, categories(name)";
+
+function shouldRetryCategoriesSubcatSelect(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  const code = String(e?.code ?? "");
+  const msg = String(e?.message ?? "");
+  if (code === "42703" || code === "PGRST200") return true;
+  if (/does not exist/i.test(msg)) return true;
+  if (/relationship/i.test(msg) && /category_subcategory_seo/i.test(msg)) return true;
+  return false;
+}
 
 async function fetchCategoriesSubcategoriesForWidget(
   supabase: ReturnType<typeof createClient>,
@@ -64,30 +77,42 @@ async function fetchCategoriesSubcategoriesForWidget(
   const trySelect = async (cols: string) =>
     supabase.from("categories_subcategories").select(cols).in("id", ids).limit(60);
 
-  let res = await trySelect(CATEGORIES_SUBCAT_SELECT_WITH_HERO);
+  let res = await trySelect(CATEGORIES_SUBCAT_SELECT_WITH_SEO);
   if (!res.error) return res;
 
   const err0 = res.error as any;
   const msg0 = String(err0?.message || "");
-  const undefinedCol = err0?.code === "42703" || /does not exist/i.test(msg0);
+  if (!shouldRetryCategoriesSubcatSelect(err0)) return res;
 
-  if (undefinedCol) {
-    res = await trySelect(CATEGORIES_SUBCAT_SELECT_BASE);
-    if (!res.error) {
-      logger.warn("[widget] categories_subcategories: using select without hero_cta_*", { firstError: msg0 });
-      return res;
-    }
-    const err1 = res.error as any;
-    const msg1 = String(err1?.message || "");
-    if (err1?.code === "42703" || /does not exist/i.test(msg1)) {
-      res = await trySelect(CATEGORIES_SUBCAT_SELECT_MINIMAL);
-      if (!res.error) {
-        logger.warn("[widget] categories_subcategories: using minimal select (subcategory_scope or other col missing)", {
-          firstError: msg0,
-          secondError: msg1,
-        });
-      }
-    }
+  res = await trySelect(CATEGORIES_SUBCAT_SELECT_WITH_HERO);
+  if (!res.error) {
+    logger.warn("[widget] categories_subcategories: using legacy hero_cta columns (no category_subcategory_seo embed)", {
+      firstError: msg0,
+    });
+    return res;
+  }
+
+  const err1 = res.error as any;
+  const msg1 = String(err1?.message || "");
+  if (!shouldRetryCategoriesSubcatSelect(err1)) return res;
+
+  res = await trySelect(CATEGORIES_SUBCAT_SELECT_BASE);
+  if (!res.error) {
+    logger.warn("[widget] categories_subcategories: using select without hero CTA", { firstError: msg0, secondError: msg1 });
+    return res;
+  }
+
+  const err2 = res.error as any;
+  const msg2 = String(err2?.message || "");
+  if (!shouldRetryCategoriesSubcatSelect(err2)) return res;
+
+  res = await trySelect(CATEGORIES_SUBCAT_SELECT_MINIMAL);
+  if (!res.error) {
+    logger.warn("[widget] categories_subcategories: using minimal select (subcategory_scope or other col missing)", {
+      firstError: msg0,
+      secondError: msg1,
+      thirdError: msg2,
+    });
   }
   return res;
 }
@@ -96,6 +121,22 @@ function coerceHeroCtaText(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const t = raw.trim();
   return t || null;
+}
+
+/** Prefer category_subcategory_seo (current schema); fall back to legacy columns on the row. */
+function pickHeroCtaFromSubcatRow(s: any): { url: string | null; text: string | null } {
+  const seo = s?.category_subcategory_seo;
+  const nested = Array.isArray(seo) ? seo[0] : seo;
+  if (nested && typeof nested === "object") {
+    return {
+      url: coerceHeroCtaUrl((nested as any).hero_cta_url),
+      text: coerceHeroCtaText((nested as any).hero_cta_text),
+    };
+  }
+  return {
+    url: coerceHeroCtaUrl(s?.hero_cta_url),
+    text: coerceHeroCtaText(s?.hero_cta_text),
+  };
 }
 
 function coerceHeroCtaUrl(raw: unknown): string | null {
@@ -373,8 +414,7 @@ export async function GET(
               const serviceName = String(s?.subcategory || "Service");
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary = typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
-              const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
-              const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
+              const { url: heroCtaUrl, text: heroCtaText } = pickHeroCtaFromSubcatRow(s);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const subcategoryScope = coerceSubcategoryScope((s as any)?.subcategory_scope);
               const cat = (s as any)?.categories;
@@ -469,8 +509,7 @@ export async function GET(
               const industryId = s?.category_id ? String(s.category_id) : null;
               const serviceSummary =
                 typeof (s as any)?.service_summary === "string" ? String((s as any).service_summary).trim() || null : null;
-              const heroCtaUrl = coerceHeroCtaUrl((s as any)?.hero_cta_url);
-              const heroCtaText = coerceHeroCtaText((s as any)?.hero_cta_text);
+              const { url: heroCtaUrl, text: heroCtaText } = pickHeroCtaFromSubcatRow(s);
               const subcategoryComponents = coerceSubcategoryComponents((s as any)?.subcategory_components);
               const subcategoryScope = coerceSubcategoryScope((s as any)?.subcategory_scope);
               const cat = (s as any)?.categories;

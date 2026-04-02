@@ -468,9 +468,9 @@ export function ImageChoiceGrid({
         <div
           ref={scrollViewportRef}
           onScroll={updateScrollAffordances}
-          className="h-full min-h-0 w-full overflow-x-auto overflow-y-visible px-6 py-0"
+          className="w-full overflow-x-auto overflow-y-visible px-6 py-0 [scrollbar-gutter:stable]"
         >
-          <div className="flex h-full min-h-0 min-w-max snap-x snap-mandatory items-stretch gap-1.5 pr-3">
+          <div className="flex min-h-0 min-w-max snap-x snap-mandatory items-stretch gap-1.5 py-0.5 pr-3">
             {options.map((opt, index) => {
               const key = opt.value || opt.label;
               const picked = selectedArray.includes(key);
@@ -496,19 +496,20 @@ export function ImageChoiceGrid({
                   onBlur={() => setHoveredCompactOption((current) => (current?.label === opt.label ? null : current))}
                   aria-disabled={disabled}
                   className={cn(
-                    "group relative z-0 flex h-full min-h-0 shrink-0 snap-start flex-col overflow-hidden rounded-lg border bg-[var(--form-surface-color)] text-left transition-all duration-150",
+                    "group relative z-0 flex shrink-0 snap-start flex-col overflow-hidden rounded-lg border bg-[var(--form-surface-color)] text-left transition-all duration-150",
                     picked ? "border-primary shadow-sm" : "border-[color:var(--form-surface-border-color)] hover:border-black/25",
                     disabled ? "cursor-not-allowed opacity-45" : "hover:z-20 hover:shadow-xl"
                   )}
                   style={{ width: compactCardWidth, borderRadius: `${theme.borderRadius}px` }}
                 >
-                  <div className="relative h-full min-h-0 w-full flex-1 overflow-hidden bg-muted/30">
+                  <div className="relative aspect-square w-full shrink-0 overflow-hidden bg-muted/30">
                     {opt.imageUrl ? (
                       <img
                         src={opt.imageUrl}
                         alt={opt.label}
-                        loading="eager"
+                        loading={index < 6 ? "eager" : "lazy"}
                         decoding="async"
+                        fetchPriority={index < 4 ? "high" : undefined}
                         className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
                       />
                     ) : (
