@@ -241,6 +241,7 @@ export function ImageChoiceGridStep({
       canContinue={canContinue}
       headerInlineControl={resolvedHeaderInlineControl}
       actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
+      stickyActionsTransparent={isStyleStep}
       hideContinueAction={isPricedGridStep}
       compactInPreview={isPricedGridStep ? false : compactInPreview}
       preferWideLayout={isPricedGridStep || !compactInPreview}

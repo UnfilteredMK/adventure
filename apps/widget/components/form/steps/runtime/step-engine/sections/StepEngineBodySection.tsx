@@ -145,143 +145,239 @@ export function StepEngineBodySection(props: any) {
     compactQuestionHost && previewSurfaceMode === "single"
   );
 
+  /** One vertical scroller for preview + step content (mobile image generation — matches style-step scroll feel). */
+  const mobileGenerationScrollStack = Boolean(
+    isMobileViewport &&
+      previewGeneratingFocused &&
+      showPreviewSection &&
+      !hideQuestionPane
+  );
+  /** Concept grid needs its own vertical pan; outer column scroll yields to inner; question pane scrolls separately. */
+  const mobileGalleryStackSplit = Boolean(
+    mobileGenerationScrollStack && isMobileViewport && previewSurfaceMode === "gallery"
+  );
+
+  const previewSectionEl = (
+    <PreviewSection
+      adventureInputMode={adventureInputMode}
+      answeredQuestionCount={previewAutoAnsweredQuestionCount}
+      autoGenerationCounterScope={previewAutoGenerationCounterScope}
+      config={config}
+      hasPreviewSubsections={hasPreviewSubsections}
+      instanceId={instanceId}
+      isAdventureSurface={isAdventureSurface}
+      isRefinementUploadStep={isRefinementUploadStep}
+      previewMaxPx={previewMaxPx}
+      previewHasImage={previewHasImage}
+      previewRefreshNonce={previewRefreshNonce}
+      stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}
+      pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
+      promptDraft={promptDraft}
+      promptSubmitCount={promptSubmitCount}
+      sessionId={sessionId}
+      setAutoGenerationBusy={setPreviewAutoGenerationBusy}
+      setPreviewHasImage={setPreviewHasImage}
+      setPreviewVisible={setPreviewVisible}
+      leadPricingPresentationActive={leadPricingPresentationActive}
+      showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
+      stateStepData={state?.stepData}
+      toolingEnabled={!pricedGridStepActive}
+      disableConceptPicker={!pricedGridStepActive && !allowConceptGallery}
+      useDesktopPreviewLayout={useDesktopPreviewLayout}
+      useMobilePreviewLayout={useMobilePreviewLayout}
+      usePreviewDominantLayout={previewLayoutActive}
+      generationScrollStack={mobileGenerationScrollStack}
+      previewSurfaceMode={previewSurfaceMode}
+      onKeepDesigning={onKeepDesigning}
+      onPreviewSurfaceModeChange={onPreviewSurfaceModeChange}
+    />
+  );
+
+  const formQuestionSectionEl = (
+    <FormQuestionSection
+      config={config}
+      effectiveCurrentStep={effectiveCurrentStep}
+      flowCompleted={flowCompleted}
+      forceExpandedStepLayout={pricedGridStepActive}
+      guidedThumbnailMode={guidedThumbnailMode}
+      handleBack={handleBack}
+      handleEaseFeedback={handleEaseFeedback}
+      handleReflectionFeedback={handleReflectionFeedback}
+      handleStepComplete={handleStepComplete}
+      hideQuestionPane={hideQuestionPane}
+      instanceId={instanceId}
+      isBatchLoading={isBatchLoading}
+      isFetchingNext={isFetchingNext}
+      isMobileViewport={isMobileViewport}
+      isRefinementUploadStep={isRefinementUploadStep}
+      leadCapturedForUI={effectiveLeadCompleteForPreviewFlow}
+      leadGateLocksQuestionArea={leadGateLocksQuestionArea}
+      adventureInputMode={adventureInputMode}
+      setAdventureInputMode={setAdventureInputMode}
+      onApplyIdeaSuggestion={onApplyIdeaSuggestion}
+      budgetSliderConfig={budgetSliderConfig}
+      budgetValue={budgetValue}
+      onBudgetChange={handleBudgetChange}
+      promptDraft={promptDraft}
+      setPromptDraft={setPromptDraft}
+      handlePromptSubmit={onPromptSubmit}
+      onRegeneratePreview={onRegeneratePreview}
+      previewEnabled={previewEnabled}
+      previewHasImage={previewHasImage}
+      previewSurfaceMode={previewSurfaceMode}
+      questionContentRef={questionContentRef}
+      questionScale={questionScale}
+      questionViewportRef={questionViewportRef}
+      refinementUploadInputRef={refinementUploadInputRef}
+      refinementUploading={refinementUploading}
+      reflectionFeedbackSent={reflectionFeedbackSent}
+      sessionId={sessionId}
+      setRefinementUploading={setRefinementUploading}
+      showStepTransitionSkeleton={showStepTransitionSkeleton}
+      showAccuratePricingLoader={showAccuratePricingLoader}
+      showEasePrompt={showEasePrompt}
+      showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
+      state={state}
+      stepForRenderer={stepForRenderer}
+      theme={theme}
+      layoutDebugEnabled={layoutDebugEnabled}
+      usePreviewDominantLayout={previewLayoutActive}
+      scrollStackWithPreview={mobileGenerationScrollStack}
+    />
+  );
+
   return (
-    <main className="relative flex flex-1 min-h-0 items-stretch justify-center overflow-hidden px-2 pb-0 pt-2 sm:px-3 sm:pb-3 sm:pt-3">
-      <div className="mx-auto h-full min-h-0 w-full max-w-[92rem] overflow-hidden">
+    <main
+      className={cn(
+        "relative flex flex-1 items-stretch justify-center pb-0 pt-1.5 sm:px-3 sm:pb-3 sm:pt-3",
+        "min-h-0 overflow-hidden sm:min-h-0",
+        "max-sm:flex-none max-sm:min-h-0 max-sm:overflow-visible max-sm:px-0 max-sm:pt-0"
+      )}
+    >
+      <div
+        className={cn(
+          "mx-auto w-full max-w-[92rem]",
+          "h-full min-h-0 overflow-hidden sm:h-full",
+          "max-sm:h-auto max-sm:min-h-0 max-sm:overflow-visible"
+        )}
+      >
         <motion.div
           ref={previewColumnRef}
           layout={false}
           className={cn(
-            "relative flex h-full min-h-0 max-h-full flex-col overflow-hidden",
+            "relative flex min-h-0 flex-col overflow-hidden sm:h-full sm:max-h-full",
+            "max-sm:overflow-visible",
+            showPreviewSection && isMobileViewport ? "max-sm:min-h-[min(65dvh,560px)]" : "max-sm:min-h-0",
             previewLayoutActive ? (isMobileViewport ? "gap-0" : "gap-1.5") : usePreviewDominantLayout ? "gap-2" : previewRailOpen ? "gap-2" : "gap-0"
           )}
         >
-          {showPreviewSection ? (
-            <div
-              ref={previewViewportRef}
-              className={cn(
-                ((!flowCompleted && styleStepActive) || (pricedGridStepActive && showQuestionPaneUnderPreview))
-                  ? "pointer-events-none absolute h-0 w-0 overflow-hidden opacity-0"
-                  : leadPricingPresentationActive
-                    ? "flex min-h-0 flex-col overflow-hidden"
-                    : "flex min-h-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
-                previewLayoutActive ? "flex-1 min-h-0" : "shrink-0"
-              )}
-            >
-              <PreviewSection
-                adventureInputMode={adventureInputMode}
-                answeredQuestionCount={previewAutoAnsweredQuestionCount}
-                autoGenerationCounterScope={previewAutoGenerationCounterScope}
-                config={config}
-                hasPreviewSubsections={hasPreviewSubsections}
-                instanceId={instanceId}
-                isAdventureSurface={isAdventureSurface}
-                isRefinementUploadStep={isRefinementUploadStep}
-                previewMaxPx={previewMaxPx}
-                previewHasImage={previewHasImage}
-                previewRefreshNonce={previewRefreshNonce}
-                stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}
-                pendingPreviewSceneUploadUrl={pendingPreviewSceneUploadUrl}
-                promptDraft={promptDraft}
-                promptSubmitCount={promptSubmitCount}
-                sessionId={sessionId}
-                setAutoGenerationBusy={setPreviewAutoGenerationBusy}
-                setPreviewHasImage={setPreviewHasImage}
-                setPreviewVisible={setPreviewVisible}
-                leadPricingPresentationActive={leadPricingPresentationActive}
-                showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
-                stateStepData={state?.stepData}
-                toolingEnabled={!pricedGridStepActive}
-                disableConceptPicker={!pricedGridStepActive && !allowConceptGallery}
-                useDesktopPreviewLayout={useDesktopPreviewLayout}
-                useMobilePreviewLayout={useMobilePreviewLayout}
-                usePreviewDominantLayout={previewLayoutActive}
-                onKeepDesigning={onKeepDesigning}
-                onPreviewSurfaceModeChange={onPreviewSurfaceModeChange}
-              />
-            </div>
-          ) : null}
-          {!hideQuestionPane ? (
+          {mobileGenerationScrollStack ? (
             <div
               className={cn(
-                pricedGridStepActive
-                  ? "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain"
-                  : compactQuestionHost
-                  ? isMobileViewport
-                    ? cn(
-                        "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)]",
-                        compactQuestionHostClassNames({
-                          isMobileViewport,
-                          compactLargeQuestionHost,
-                          compactSingleHeroLayout,
-                          adventureInputMode,
-                        })
-                      )
-                    : cn(
-                        "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1",
-                        compactQuestionHostClassNames({
-                          isMobileViewport,
-                          compactLargeQuestionHost,
-                          compactSingleHeroLayout,
-                          adventureInputMode,
-                        })
-                      )
-                  : "flex flex-col flex-1 min-h-0"
+                "flex min-h-0 flex-1 flex-col overflow-x-hidden overscroll-contain [touch-action:pan-y]",
+                mobileGalleryStackSplit
+                  ? "overflow-y-visible"
+                  : "overflow-y-auto"
               )}
-              style={pricedGridStepActive ? ({ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties) : undefined}
+              style={{ WebkitOverflowScrolling: "touch" }}
             >
-              <FormQuestionSection
-                config={config}
-                effectiveCurrentStep={effectiveCurrentStep}
-                flowCompleted={flowCompleted}
-                forceExpandedStepLayout={pricedGridStepActive}
-                guidedThumbnailMode={guidedThumbnailMode}
-                handleBack={handleBack}
-                handleEaseFeedback={handleEaseFeedback}
-                handleReflectionFeedback={handleReflectionFeedback}
-                handleStepComplete={handleStepComplete}
-                hideQuestionPane={hideQuestionPane}
-                instanceId={instanceId}
-                isBatchLoading={isBatchLoading}
-                isFetchingNext={isFetchingNext}
-                isMobileViewport={isMobileViewport}
-                isRefinementUploadStep={isRefinementUploadStep}
-                leadCapturedForUI={effectiveLeadCompleteForPreviewFlow}
-                leadGateLocksQuestionArea={leadGateLocksQuestionArea}
-                adventureInputMode={adventureInputMode}
-                setAdventureInputMode={setAdventureInputMode}
-                onApplyIdeaSuggestion={onApplyIdeaSuggestion}
-                budgetSliderConfig={budgetSliderConfig}
-                budgetValue={budgetValue}
-                onBudgetChange={handleBudgetChange}
-                promptDraft={promptDraft}
-                setPromptDraft={setPromptDraft}
-                handlePromptSubmit={onPromptSubmit}
-                onRegeneratePreview={onRegeneratePreview}
-                previewEnabled={previewEnabled}
-                previewHasImage={previewHasImage}
-                previewSurfaceMode={previewSurfaceMode}
-                questionContentRef={questionContentRef}
-                questionScale={questionScale}
-                questionViewportRef={questionViewportRef}
-                refinementUploadInputRef={refinementUploadInputRef}
-                refinementUploading={refinementUploading}
-                reflectionFeedbackSent={reflectionFeedbackSent}
-                sessionId={sessionId}
-                setRefinementUploading={setRefinementUploading}
-                showStepTransitionSkeleton={showStepTransitionSkeleton}
-                previewGeneratingFocused={previewGeneratingFocused}
-                showAccuratePricingLoader={showAccuratePricingLoader}
-                showEasePrompt={showEasePrompt}
-                showQuestionPaneUnderPreview={showQuestionPaneUnderPreview}
-                state={state}
-                stepForRenderer={stepForRenderer}
-                theme={theme}
-                layoutDebugEnabled={layoutDebugEnabled}
-                usePreviewDominantLayout={previewLayoutActive}
-              />
+              {showPreviewSection ? (
+                <div ref={previewViewportRef} className="flex shrink-0 flex-col">
+                  {previewSectionEl}
+                </div>
+              ) : null}
+              {!hideQuestionPane ? (
+                <div
+                  className={cn(
+                    "flex w-full flex-col border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]",
+                    mobileGalleryStackSplit ? "min-h-0 min-w-0 flex-1 shrink overflow-y-auto overflow-x-hidden overscroll-contain" : "shrink-0",
+                    pricedGridStepActive
+                      ? "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain"
+                      : compactQuestionHost
+                        ? isMobileViewport
+                          ? cn(
+                              "flex flex-col pb-[max(env(safe-area-inset-bottom),8px)]",
+                              compactQuestionHostClassNames({
+                                isMobileViewport,
+                                compactLargeQuestionHost,
+                                compactSingleHeroLayout,
+                                adventureInputMode,
+                              })
+                            )
+                          : cn(
+                              "flex flex-col pb-0.5 sm:pb-1",
+                              compactQuestionHostClassNames({
+                                isMobileViewport,
+                                compactLargeQuestionHost,
+                                compactSingleHeroLayout,
+                                adventureInputMode,
+                              })
+                            )
+                        : "flex flex-col min-h-0"
+                  )}
+                  style={
+                    pricedGridStepActive || mobileGalleryStackSplit
+                      ? ({ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  {formQuestionSectionEl}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          ) : (
+            <>
+              {showPreviewSection ? (
+                <div
+                  ref={previewViewportRef}
+                  className={cn(
+                    ((!flowCompleted && styleStepActive) || (pricedGridStepActive && showQuestionPaneUnderPreview))
+                      ? "pointer-events-none absolute h-0 w-0 overflow-hidden opacity-0"
+                      : leadPricingPresentationActive
+                        ? "flex min-h-0 flex-col overflow-hidden"
+                        : isMobileViewport && previewSurfaceMode === "gallery"
+                          ? "flex min-h-0 flex-col overflow-y-visible overflow-x-hidden"
+                          : "flex min-h-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
+                    previewLayoutActive ? "flex-1 min-h-0" : "shrink-0"
+                  )}
+                >
+                  {previewSectionEl}
+                </div>
+              ) : null}
+              {!hideQuestionPane ? (
+                <div
+                  className={cn(
+                    pricedGridStepActive
+                      ? "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain"
+                      : compactQuestionHost
+                        ? isMobileViewport
+                          ? cn(
+                              "flex min-h-0 shrink-0 flex-col pb-[max(env(safe-area-inset-bottom),8px)]",
+                              compactQuestionHostClassNames({
+                                isMobileViewport,
+                                compactLargeQuestionHost,
+                                compactSingleHeroLayout,
+                                adventureInputMode,
+                              })
+                            )
+                          : cn(
+                              "flex min-h-0 shrink-0 flex-col pb-0.5 sm:pb-1",
+                              compactQuestionHostClassNames({
+                                isMobileViewport,
+                                compactLargeQuestionHost,
+                                compactSingleHeroLayout,
+                                adventureInputMode,
+                              })
+                            )
+                        : "flex flex-col flex-1 min-h-0"
+                  )}
+                  style={pricedGridStepActive ? ({ WebkitOverflowScrolling: "touch", touchAction: "pan-y" } as React.CSSProperties) : undefined}
+                >
+                  {formQuestionSectionEl}
+                </div>
+              ) : null}
+            </>
+          )}
         </motion.div>
       </div>
     </main>

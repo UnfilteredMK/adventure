@@ -2188,6 +2188,10 @@ export function StepEngine({
   // same step as generation — otherwise previewQuestionRevealReady stays false and the pane never mounts.
   const showQuestionPaneUnderPreview =
     forceQuestionPaneVisibleForBacktracking ||
+    /** Mobile: while preview is generating (or early loading shell), keep the pane mounted for one vertical scroll with the preview. */
+    (useMobilePreviewLayout &&
+      !previewHasImage &&
+      (isPreviewGenerationStage || showPreviewGeneratingEarly)) ||
     (
       !isPreviewGenerationStage &&
       (previewQuestionRevealReady || previewHasImage) &&
@@ -2339,7 +2343,10 @@ export function StepEngine({
   });
   const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1);
   return (
-	  <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent text-foreground" style={{ color: theme.textColor }}>
+	  <div
+	    className="flex w-full flex-col bg-transparent text-foreground max-sm:h-auto max-sm:min-h-min max-sm:overflow-visible sm:h-full sm:min-h-0 sm:overflow-hidden"
+	    style={{ color: theme.textColor }}
+	  >
 	      {/* Header always owns its height budget so the body starts below it. */}
         <StepEngineHeaderSection
           showProgressBar={showProgressBar}

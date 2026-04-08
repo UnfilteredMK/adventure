@@ -1374,16 +1374,22 @@ export function AdventureFormExperience({
     <FormThemeProvider config={resolvedDesign}>
       <ExperienceStateProvider>
         <PreviewSuggestionsProvider instanceId={instanceId}>
-        <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <div
+          className="relative flex h-full min-h-0 w-full flex-col overflow-hidden max-sm:box-border max-sm:px-3 max-sm:pt-[max(0.75rem,env(safe-area-inset-top))] max-sm:pr-[max(0.75rem,env(safe-area-inset-right))] max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:pl-[max(0.75rem,env(safe-area-inset-left))]"
+        >
           {dspyMeta?.lintFailed && (
             <div className="fixed bottom-4 right-4 z-50 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-700 shadow-sm">
               We adjusted wording for clarity
             </div>
           )}
-          {useWidgetDefaults ? (
-            <BrandHeader config={resolvedDesign} containerWidth={1024} hideInMobile={false} />
-          ) : null}
-          <div className="flex min-h-0 flex-1 flex-col">
+          {/* Mobile: one vertical scroller for header + form; desktop: fill viewport, inner panes scroll. */}
+          <div className="flex min-h-0 flex-1 flex-col max-sm:overflow-y-auto max-sm:overscroll-y-contain max-sm:[-webkit-overflow-scrolling:touch] sm:overflow-hidden">
+            {useWidgetDefaults ? (
+              <div className="shrink-0">
+                <BrandHeader config={resolvedDesign} containerWidth={1024} hideInMobile={false} />
+              </div>
+            ) : null}
+            <div className="flex min-h-min flex-1 flex-col sm:min-h-0">
             <StepEngine
               instanceId={instanceId}
               sessionScopeKey={sessionScopeKey}
@@ -1408,6 +1414,7 @@ export function AdventureFormExperience({
                 leadCaptureRequired: formConfig?.leadCaptureRequired,
               }}
             />
+            </div>
           </div>
         </div>
         </PreviewSuggestionsProvider>

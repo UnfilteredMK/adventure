@@ -220,14 +220,14 @@ export function Choice({
       <div
         className={cn(
           isCompact
-            ? "w-full max-w-none overflow-x-auto overflow-y-hidden py-0.5 text-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            ? "w-full max-w-none overflow-x-hidden overflow-y-visible py-0.5 text-center"
             : "space-y-2.5"
         )}
       >
         <div
           className={cn(
             isCompact
-              ? "inline-flex min-w-max flex-nowrap items-center justify-center gap-1 px-1"
+              ? "flex w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-2 px-1"
               : "flex flex-wrap items-center justify-center gap-1.5 sm:gap-2"
           )}
         >

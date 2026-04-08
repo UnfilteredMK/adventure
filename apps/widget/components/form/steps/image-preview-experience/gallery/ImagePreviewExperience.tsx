@@ -3174,7 +3174,7 @@ export function ImagePreviewExperience(props: {
   const pillLabel = waitingForExactPricing
     ? "CALCULATING COST"
     : leadGateEnabled
-      ? (leadCaptured ? "EST PRICING" : "SHOW PRICING")
+      ? (leadCaptured ? "EST PRICING" : "Show pricing")
       : "EST PRICING";
   const lockedPillPrice =
     formattedAccuratePricingRange ||
@@ -3593,7 +3593,7 @@ export function ImagePreviewExperience(props: {
                 data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}
               >
 	              {showConceptPicker ? (
-	                <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col px-1.5 pb-1.5 pt-0 sm:px-2 sm:pb-2">
+	                <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col px-0 pb-1.5 pt-0 sm:px-2 sm:pb-2">
 	                  <div className="relative isolate flex h-full min-h-0 w-full flex-1 flex-col gap-0.5 overflow-hidden">
                   {showProgressiveGalleryLoader ? (
                     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4">
@@ -3607,7 +3607,7 @@ export function ImagePreviewExperience(props: {
                     </div>
                   ) : null}
                   {!showProgressiveGalleryLoader ? (
-                    <div className="shrink-0 px-0.5 pb-1 text-center sm:px-1 sm:pb-1.5">
+                    <div className="shrink-0 px-0 pb-1 text-center sm:px-1 sm:pb-1.5">
                       <p
                         className="text-base font-semibold leading-tight text-balance sm:text-lg md:text-xl"
                         style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
@@ -3618,23 +3618,30 @@ export function ImagePreviewExperience(props: {
                   ) : null}
                   <div
                     className={cn(
-                      "min-h-0 w-full min-w-0 flex-1 px-0.5 pb-0.5 sm:px-1 sm:pb-1",
-                      // Mobile: horizontal snap rail (grid + touch-pan-y prevented horizontal swipe).
-                      "max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:overscroll-x-contain max-sm:snap-x max-sm:snap-mandatory max-sm:touch-pan-x",
-                      "max-sm:[scrollbar-width:none] max-sm:[-ms-overflow-style:none] max-sm:[&::-webkit-scrollbar]:hidden",
-                      "sm:overflow-y-auto sm:overflow-x-hidden sm:overscroll-contain sm:touch-pan-y"
+                      "min-h-0 w-full min-w-0 flex-1 px-0 pb-0.5 sm:px-1 sm:pb-1",
+                      // Bounded height so this region actually scrolls (unbounded flex = no overflow). Taller than the old 62dvh cap so row 1 isn’t clipped on common phones.
+                      "max-sm:max-h-[min(calc(100dvh-10rem),78dvh,720px)] max-sm:min-h-0",
+                      "overflow-y-auto overflow-x-hidden overscroll-y-contain [touch-action:pan-y] scroll-pt-1",
+                      "max-sm:[scrollbar-width:thin] sm:[scrollbar-width:none] sm:[-ms-overflow-style:none] sm:[&::-webkit-scrollbar]:hidden"
                     )}
-                    style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                    style={
+                      {
+                        WebkitOverflowScrolling: "touch",
+                        touchAction: "pan-y",
+                      } as React.CSSProperties
+                    }
                   >
                     <div
                       className={cn(
-                        "min-w-0 gap-1 sm:gap-1.5",
-                        "max-sm:flex max-sm:w-max max-sm:flex-row max-sm:items-stretch",
-                        "sm:grid sm:w-full sm:content-start"
+                        "min-w-0 grid w-full content-start gap-1 sm:gap-1.5",
+                        // Mobile: single column stack; sm+: multi-column grid (cols via --concept-cols).
+                        "max-sm:grid-cols-1 max-sm:pt-0.5 sm:[grid-template-columns:repeat(var(--concept-cols),minmax(0,1fr))]"
                       )}
-                      style={{
-                        gridTemplateColumns: `repeat(${conceptGalleryGridCols}, minmax(0, 1fr))`,
-                      }}
+                      style={
+                        {
+                          ["--concept-cols" as string]: conceptGalleryGridCols,
+                        } as React.CSSProperties
+                      }
                     >
 	                    {Array.from({
                         length: conceptGalleryCellCount,
@@ -3659,7 +3666,7 @@ export function ImagePreviewExperience(props: {
                           return (
                             <div
                               key={idx}
-                              className="relative aspect-square w-full min-w-0 max-sm:w-[min(78vw,260px)] max-sm:shrink-0 max-sm:snap-start overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
+                              className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]"
                               style={{
                                 borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
                               }}
@@ -3689,7 +3696,7 @@ export function ImagePreviewExperience(props: {
 	                          });
 	                        }}
 	                        className={cn(
-                            "group relative aspect-square w-full min-w-0 max-sm:w-[min(78vw,260px)] max-sm:shrink-0 max-sm:snap-start overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
+                            "group relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
                             selectedConceptIndex === idx ? "border-white/80 ring-2 ring-white/50" : "border-white/20 md:hover:border-white/50"
                           )}
 	                        style={{
@@ -4124,7 +4131,7 @@ export function ImagePreviewExperience(props: {
 
               {/* Bottom overlay: upload + estimate only (AI ideas live in the question pane Ideas tab). */}
               {showBottomPreviewDock ? (
-                <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-4 sm:right-4 sm:bottom-4 flex flex-col gap-2 pb-[max(0px,env(safe-area-inset-bottom))]">
+                <div className="absolute bottom-2 left-2 right-2 z-30 flex flex-col gap-1.5 pointer-events-auto pb-[max(0.25rem,env(safe-area-inset-bottom))] sm:bottom-4 sm:left-4 sm:right-4 sm:gap-2">
                   {overlayPricingExpanded && (!leadGateEnabled || leadCaptured) && hero ? (
                     <div
                       className="ml-auto w-full rounded-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.38)] backdrop-blur-md sm:w-[min(32rem,calc(100%-0.5rem))]"

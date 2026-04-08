@@ -58,7 +58,6 @@ interface FormQuestionSectionProps {
   sessionId: string;
   setRefinementUploading: React.Dispatch<React.SetStateAction<boolean>>;
   showStepTransitionSkeleton: boolean;
-  previewGeneratingFocused?: boolean;
   showAccuratePricingLoader: boolean;
   showEasePrompt: boolean;
   showQuestionPaneUnderPreview: boolean;
@@ -75,6 +74,8 @@ interface FormQuestionSectionProps {
   usePreviewDominantLayout: boolean;
   guidedThumbnailMode: boolean;
   layoutDebugEnabled?: boolean;
+  /** Parent (e.g. body) owns vertical scroll — avoid nested scroll traps under the preview. */
+  scrollStackWithPreview?: boolean;
 }
 
 export function FormQuestionSection({
@@ -116,7 +117,6 @@ export function FormQuestionSection({
   sessionId,
   setRefinementUploading,
   showStepTransitionSkeleton,
-  previewGeneratingFocused = false,
   showAccuratePricingLoader,
   showEasePrompt,
   showQuestionPaneUnderPreview,
@@ -126,6 +126,7 @@ export function FormQuestionSection({
   usePreviewDominantLayout,
   guidedThumbnailMode,
   layoutDebugEnabled = false,
+  scrollStackWithPreview = false,
 }: FormQuestionSectionProps) {
   const uploadsInputRef = useRef<HTMLInputElement>(null);
   const { suggestions: ideasSuggestions, loading: ideasLoading } = usePreviewSuggestions();
@@ -310,7 +311,8 @@ export function FormQuestionSection({
       className={layoutDebugClassName(
         layoutDebugEnabled,
         cn(
-          "shrink-0 px-2 pb-1 pt-1 sm:px-2.5",
+          "shrink-0 pb-1 pt-1 sm:px-2.5",
+          usePreviewPaneLayout && isMobileViewport ? "px-0" : "px-2",
           usePreviewPaneLayout ? "pt-1" : "pt-0.5"
         )
       )}
@@ -383,7 +385,9 @@ export function FormQuestionSection({
               "relative flex w-full min-h-0 flex-col",
               guidedPaneContentSized
                 ? "h-auto shrink-0 overflow-x-hidden overflow-y-visible"
-                : "overflow-hidden",
+                : scrollStackWithPreview
+                  ? "overflow-visible"
+                  : "overflow-hidden",
               usePreviewPaneLayout
                 ? (
                     guidedPaneContentSized
@@ -392,7 +396,9 @@ export function FormQuestionSection({
                         ? "min-h-0 flex-1 border-t border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)]"
                         : "min-h-0 flex-1"
                   )
-                : "flex-1"
+                : scrollStackWithPreview
+                  ? "h-auto w-full shrink-0"
+                  : "flex-1"
             )
           )}
           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
@@ -404,7 +410,9 @@ export function FormQuestionSection({
                   cn(
                     guidedPaneContentSized
                       ? "mx-auto flex h-auto min-h-0 w-full flex-col overflow-x-hidden"
-                      : "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
+                      : scrollStackWithPreview
+                        ? "mx-auto flex h-auto min-h-0 w-full flex-col overflow-x-hidden overflow-y-visible"
+                        : "mx-auto flex h-full min-h-0 flex-1 w-full flex-col overflow-hidden",
                     useWideQuestionContent ? "max-w-none" : "max-w-6xl"
                   )
                 )}
@@ -416,14 +424,16 @@ export function FormQuestionSection({
                   layoutDebugEnabled,
                   cn(
                     "flex min-h-0 w-full flex-col",
-                    guidedPaneContentSized ? "flex-none" : "flex-1",
+                    guidedPaneContentSized ? "flex-none" : scrollStackWithPreview ? "flex-none" : "flex-1",
                     adventureInputMode === "ideas"
                       ? usePreviewPaneLayout
                         ? "overflow-x-hidden overflow-y-auto justify-start"
                         : "overflow-x-hidden overflow-y-hidden justify-start"
                       : usePreviewPaneLayout
                         ? "overflow-x-hidden overflow-y-auto"
-                        : "overflow-auto",
+                        : scrollStackWithPreview
+                          ? "overflow-x-hidden overflow-y-visible"
+                          : "overflow-auto",
                     singleHeroGuidedBottom || (adventureInputMode !== "ideas" && useBottomDockLayout)
                       ? "justify-end"
                       : adventureInputMode !== "ideas" && useCompactToolingChrome
@@ -449,7 +459,7 @@ export function FormQuestionSection({
 	              >
 	                <AnimatePresence mode="wait">
 	                  {!showAccuratePricingLoader ? (
-	                    leadGateLocksQuestionArea ? null : previewGeneratingFocused ? null : isRefinementUploadStep ? (
+	                    leadGateLocksQuestionArea ? null : isRefinementUploadStep ? (
 	                      <motion.div
 	                        key="refinement-upload"
 	                        initial={{ opacity: 0, y: 8 }}
@@ -937,7 +947,13 @@ export function FormQuestionSection({
                             sessionId={sessionId}
                             config={config}
                             leadCaptured={leadCapturedForUI}
-                            actionsVariant={useIconOnlyActions ? "icon_only" : "default"}
+                            actionsVariant={
+                              isMobileViewport
+                                ? "sticky_mobile"
+                                : useIconOnlyActions
+                                  ? "icon_only"
+                                  : "default"
+                            }
                             guidedThumbnailMode={guidedThumbnailMode}
                             compactInPreview={compactPreviewActive}
                             layoutDebugEnabled={layoutDebugEnabled}

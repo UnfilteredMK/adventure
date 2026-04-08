@@ -32,6 +32,10 @@ interface PreviewSectionProps {
   useDesktopPreviewLayout: boolean;
   useMobilePreviewLayout: boolean;
   usePreviewDominantLayout: boolean;
+  /** Mobile: preview + question pane share one vertical scroll (image generation phase). */
+  generationScrollStack?: boolean;
+  /** When gallery picker is open on mobile, outer wrappers must not scroll so the concept grid can pan. */
+  previewSurfaceMode?: "gallery" | "single" | "empty";
   onKeepDesigning?: () => void;
   onPreviewSurfaceModeChange?: (mode: "gallery" | "single" | "empty") => void;
 }
@@ -63,9 +67,14 @@ export function PreviewSection({
   useDesktopPreviewLayout,
   useMobilePreviewLayout,
   usePreviewDominantLayout,
+  generationScrollStack = false,
+  previewSurfaceMode = "empty",
   onKeepDesigning,
   onPreviewSurfaceModeChange,
 }: PreviewSectionProps) {
+  const galleryPickerOwnsVerticalPan = Boolean(
+    useMobilePreviewLayout && previewSurfaceMode === "gallery"
+  );
   const stepDataSoFar = useMemo(() => {
     const base = { ...(stateStepData || {}) };
     if (previewRefreshNonce > 0) base["__previewRefreshNonce"] = previewRefreshNonce;
@@ -92,13 +101,19 @@ export function PreviewSection({
     <div
       className={cn(
         "flex min-h-0 flex-col overflow-x-hidden",
-        leadPricingPresentationActive ? "overflow-hidden" : "overflow-y-auto overscroll-contain",
+        leadPricingPresentationActive
+          ? "overflow-hidden"
+          : generationScrollStack || galleryPickerOwnsVerticalPan
+            ? "overflow-y-visible"
+            : "overflow-y-auto overscroll-contain",
         usePreviewDominantLayout
           ? hasPreviewSubsections
             ? "flex-1"
             : leadPricingPresentationActive
               ? "flex-1"
-              : "flex-1 flex items-start justify-center"
+              : generationScrollStack
+                ? "w-full shrink-0"
+                : "flex-1 flex items-start justify-center"
           : "flex-1 shrink-0"
       )}
     >
@@ -107,13 +122,13 @@ export function PreviewSection({
           "mx-auto flex w-full min-h-0 flex-col",
           leadPricingPresentationActive ? "h-full flex-1" : null,
           useMobilePreviewLayout
-            ? "px-2 max-w-none"
+            ? "max-w-none px-0"
             : useDesktopPreviewLayout
               ? "max-w-5xl px-4"
               : isAdventureSurface
                 ? "max-w-6xl px-4"
                 : "max-w-4xl px-4",
-          usePreviewDominantLayout ? "py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
+          usePreviewDominantLayout ? "py-0.5 max-sm:py-0 sm:py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
         <div className={cn("flex w-full min-h-0 flex-col", leadPricingPresentationActive ? "h-full flex-1" : null)}>
@@ -134,6 +149,7 @@ export function PreviewSection({
             onHasImageChange={setPreviewHasImage}
             variant="hero"
             previewMaxPx={previewMaxPx ?? undefined}
+            previewMaxVh={generationScrollStack ? 52 : undefined}
             previewChromePx={8}
             suppressUploadOverlay={isRefinementUploadStep}
             toolingEnabled={toolingEnabled}

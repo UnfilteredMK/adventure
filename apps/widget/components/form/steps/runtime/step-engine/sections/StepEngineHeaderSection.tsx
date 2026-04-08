@@ -36,9 +36,16 @@ export function StepEngineHeaderSection(args: {
   const currentVisiblePosition = stepJoggerSteps.findIndex(({ index }) => index === currentStepIndex);
 
   return (
-    <div className={cn("z-50 shrink-0 backdrop-blur")} style={{ backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.85))" }}>
+    <div
+      className={cn(
+        "z-50 shrink-0 backdrop-blur",
+        /** Sticky below brand inside the adventure mobile scroll region so progress + step jogger stay visible while the body scrolls. */
+        "max-sm:sticky max-sm:top-0"
+      )}
+      style={{ backgroundColor: "var(--form-surface-color, rgba(255,255,255,0.85))" }}
+    >
       {showProgressBar ? (
-        <div className="px-4 pt-2 pb-1">
+        <div className="pb-1 pt-1.5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 sm:pt-2">
           <div className="h-1.5">
             <motion.div
               className="h-full rounded-full"
@@ -57,7 +64,7 @@ export function StepEngineHeaderSection(args: {
         </div>
       ) : null}
       {stepJoggerVisible ? (
-        <div className="px-4 pb-2">
+        <div className="pb-1.5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 sm:pb-2">
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
             {stepJoggerSteps.map(({ step, index }, visiblePosition) => {
               const isCurrent = index === currentStepIndex;

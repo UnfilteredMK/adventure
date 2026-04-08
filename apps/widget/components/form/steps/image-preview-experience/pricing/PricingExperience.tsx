@@ -5,7 +5,7 @@ import { useFormTheme } from '../../../demo/FormThemeProvider';
 import { detectCurrencyFromLocale, formatCurrency } from '@/lib/ai-form/utils/currency';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { BadgeDollarSign, Info } from 'lucide-react';
+import { BadgeDollarSign, ChevronRight, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LeadGenPopover } from '@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover';
 import { PRICING_LEAD_COPY } from '@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy';
@@ -166,6 +166,8 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
   },
   ref
 ) {
+  const { "aria-label": ariaLabelProp, ...restButtonProps } =
+    props as React.ButtonHTMLAttributes<HTMLButtonElement>;
   const effectiveDisabled = Boolean(disabled || (loading && revealed));
   const accent = typeof accentColor === 'string' && accentColor.trim().length > 0 ? accentColor.trim() : null;
 
@@ -216,6 +218,9 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
     revealedPriceClass,
     "box-border inline-flex min-h-[clamp(1.8rem,12cqi,2.75rem)] items-center justify-center rounded-lg border border-white/10 bg-white/[0.07] px-[clamp(0.35rem,3cqi,0.75rem)] py-[1.5%] text-[clamp(0.75rem,8cqi,2rem)] font-semibold tabular-nums text-white/95 select-none tracking-[0.01em] leading-none overflow-visible"
   );
+  const lockedTransparentInteractive =
+    Boolean(transparentBackground && !revealed && !effectiveDisabled);
+  const showPricingCta = pillLabel === "SHOW PRICING";
   return (
       <div
         className={cn(
@@ -241,7 +246,11 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
         onClick={onClick}
         className={cn(
           transparentBackground
-            ? 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200'
+            ? cn(
+                'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-none border-0 bg-transparent p-0 text-white transition-all duration-200',
+                lockedTransparentInteractive &&
+                  'cursor-pointer hover:bg-white/10 active:scale-[0.99] active:opacity-95'
+              )
             : 'relative flex h-full min-h-0 w-full flex-col items-stretch appearance-none rounded-[12%] border-0 bg-white/[0.05] p-0 text-white transition-all duration-200',
           pillOverflowClass,
           transparentBackground ? 'w-full min-w-0 max-w-full' : 'w-full',
@@ -256,7 +265,10 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
           color: '#fff',
           ...(transparentBackground && propsStyle?.backgroundColor ? { backgroundColor: 'transparent' } : {}),
         }}
-        {...props}
+        {...restButtonProps}
+        aria-label={
+          !revealed ? ariaLabelProp ?? "Show pricing to unlock your estimate" : ariaLabelProp
+        }
       >
         <div
           data-pricing-locked={!revealed ? true : undefined}
@@ -271,16 +283,17 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
             <span className={labelRowClass}>
               {revealed ? (
                 <span className={cn(labelTextClass, "block min-w-0 truncate text-center")}>{pillLabel}</span>
-              ) : pillLabel === "SHOW PRICING" ? (
+              ) : showPricingCta ? (
                 <span
                   className={cn(
                     lockedLabelTextClass,
-                    "flex min-w-0 items-center justify-center gap-[0.34em] overflow-visible text-center"
+                    "flex min-w-0 items-center justify-center gap-[0.28em] overflow-visible text-center normal-case font-semibold tracking-[0.02em]"
                   )}
                   style={lockedLabelStyle}
                 >
                   <BadgeDollarSign className="size-[0.88em] shrink-0 text-white/90" strokeWidth={2.25} />
-                  <span className="shrink-0 whitespace-nowrap">{pillLabel}</span>
+                  <span className="shrink-0 whitespace-nowrap">Show pricing</span>
+                  <ChevronRight className="size-[0.95em] shrink-0 text-white/85" aria-hidden strokeWidth={2.25} />
                 </span>
               ) : lockedLabelIsAllCaps ? (
                 <span className={cn(lockedLabelTextClass, "block min-w-0 truncate text-center")} style={lockedLabelStyle}>

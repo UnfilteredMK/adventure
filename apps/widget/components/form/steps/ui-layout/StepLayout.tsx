@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useFormTheme } from "../../demo/FormThemeProvider";
@@ -26,6 +27,8 @@ interface StepLayoutProps {
   /** When true and preview is not showing, use a wider max-width for more real estate (e.g. image grids) */
   preferWideLayout?: boolean;
   layoutDebugEnabled?: boolean;
+  /** When `actionsVariant` is sticky on small screens, skip the solid `--form-surface-color` bar (e.g. style image grid). */
+  stickyActionsTransparent?: boolean;
 }
 
 function getQuestion(step: any): string {
@@ -43,6 +46,20 @@ function getSubtext(step: any): string {
     String(step?.copy?.subtext || "").trim() ||
     String(step?.subtext || "").trim() ||
     String(step?.content?.subtext || "").trim()
+  );
+}
+
+/** Framer Motion (and any transformed ancestor) breaks `position:fixed` — portal to body for real viewport pinning. */
+function useIsMaxSm() {
+  return React.useSyncExternalStore(
+    (onStoreChange) => {
+      if (typeof window === "undefined") return () => {};
+      const mq = window.matchMedia("(max-width: 639px)");
+      mq.addEventListener("change", onStoreChange);
+      return () => mq.removeEventListener("change", onStoreChange);
+    },
+    () => (typeof window !== "undefined" ? window.matchMedia("(max-width: 639px)").matches : false),
+    () => false
   );
 }
 
@@ -64,6 +81,7 @@ export function StepLayout({
   compactInPreview = false,
   preferWideLayout = false,
   layoutDebugEnabled = false,
+  stickyActionsTransparent = false,
 }: StepLayoutProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
@@ -93,7 +111,7 @@ export function StepLayout({
   /** Visual steps must not use `h-full` on the question row — it steals height from `grid-rows-[auto_minmax(0,1fr)]` and collapses the answer area (image grids). */
   const compactQuestionRowClass = useCompactPane
     ? cn(
-        "min-h-0 min-w-0 overflow-visible px-2 pt-1 pb-1",
+        "min-h-0 min-w-0 overflow-visible px-1.5 pt-1 pb-1 sm:px-2",
         isVisualAnswerStep ? "shrink-0" : "h-full"
       )
     : "shrink-0 min-w-0";
@@ -103,10 +121,10 @@ export function StepLayout({
     : "row-start-1 min-h-0 h-full min-w-0 overflow-visible grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1";
   const compactAnswerViewportClass = useCompactPane
     ? isVisualAnswerStep
-      ? "h-full min-h-0 px-1 pt-0.5 pb-0"
+      ? "h-full min-h-0 px-0.5 pt-0.5 pb-0 sm:px-1"
       : isChoiceStep
         ? "h-full min-h-0 px-0 pt-0.5 pb-0"
-        : "h-full min-h-0 px-2 pt-0.5 pb-0.5"
+        : "h-full min-h-0 px-1.5 pt-0.5 pb-0.5 sm:px-2"
     : null;
   const question = getQuestion(step);
   const subtext = getSubtext(step);
@@ -159,6 +177,22 @@ export function StepLayout({
         ? "w-full justify-start overflow-visible"
         : "justify-start overflow-hidden"
   );
+
+  const isMaxSm = useIsMaxSm();
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+  /** Mobile: portal to document.body — `fixed` inside Framer Motion (transform) is not viewport-fixed and snaps per step. */
+  const portalStickyMobileActions = actionsVariant === "sticky_mobile" && isMaxSm && mounted;
+  const glassStickyActions = stickyActionsTransparent && actionsVariant === "sticky_mobile";
+  const stickyBarClass = glassStickyActions
+    ? "border-t border-white/15 bg-transparent backdrop-blur-xl supports-[backdrop-filter]:bg-black/15"
+    : "bg-[var(--form-surface-color)] shadow-[0_-8px_28px_rgba(15,23,42,0.1)]";
+  const stickyBarSmClass = glassStickyActions
+    ? "sm:sticky sm:bottom-2 sm:z-10 sm:rounded-xl sm:border sm:border-white/12 sm:bg-transparent sm:p-2 sm:backdrop-blur-xl supports-[backdrop-filter]:sm:bg-black/10"
+    : "sm:sticky sm:bottom-2 sm:z-10 sm:rounded-xl sm:bg-[var(--form-surface-color)] sm:p-2";
+  const glassBackButtonClass =
+    "border-white/35 bg-white/10 text-white backdrop-blur-md hover:bg-white/18 hover:text-white";
+  const glassContinueButtonClass = "shadow-[0_6px_24px_rgba(0,0,0,0.28)]";
 
   return (
     <div
@@ -343,7 +377,11 @@ export function StepLayout({
             layoutDebugEnabled,
             cn(
               compactRowsClass ? `grid h-full min-h-0 ${compactRowsClass} overflow-hidden` : "flex h-full min-h-0 flex-col",
-              standardInnerStackClass
+              standardInnerStackClass,
+              // Reserve space for portaled bottom action bar on mobile (matches max-sm portal).
+              actionsVariant === "sticky_mobile"
+                ? "max-sm:pb-[max(5.5rem,calc(4rem+env(safe-area-inset-bottom)))]"
+                : null
             )
           )}
           style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "paneParent")}
@@ -477,54 +515,132 @@ export function StepLayout({
             <div className={layoutDebugClassName(layoutDebugEnabled, compactAnswerInnerClass)}>{children}</div>
           </div>
 
-          <div
-            className={layoutDebugClassName(
-              layoutDebugEnabled,
-              cn(
-                "flex min-w-0 shrink-0 justify-center gap-2.5",
-                useCompactPane ? "mt-auto pt-1" : null,
-                actionsVariant === "sticky_mobile"
-                  ? "sticky bottom-2 z-10 rounded-xl border border-[color:var(--form-surface-border-color)] bg-[var(--form-surface-color)] p-2"
-                  : null
+          {portalStickyMobileActions
+            ? createPortal(
+                <div
+                  className={cn(
+                    "pointer-events-auto fixed inset-x-0 bottom-0 z-[60] flex min-w-0 justify-center gap-2.5 px-4 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]",
+                    stickyBarClass
+                  )}
+                  role="toolbar"
+                  aria-label="Step actions"
+                >
+                  {onBack ? (
+                    <Button
+                      type="button"
+                      onClick={onBack}
+                      variant="outline"
+                      className={cn(
+                        actionButtonClass,
+                        useCompactPane ? compactActionButtonClass : null,
+                        glassStickyActions && glassBackButtonClass
+                      )}
+                      style={{
+                        ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "rose"),
+                        ...(glassStickyActions
+                          ? {
+                              fontFamily: theme.fontFamily,
+                              borderRadius: `${theme.borderRadius}px`,
+                            }
+                          : {
+                              borderColor: theme.primaryColor,
+                              color: theme.primaryColor,
+                              fontFamily: theme.fontFamily,
+                              borderRadius: `${theme.borderRadius}px`,
+                            }),
+                      }}
+                    >
+                      Back
+                    </Button>
+                  ) : null}
+                  {!hideContinueAction ? (
+                    <Button
+                      type="button"
+                      onClick={onComplete}
+                      disabled={disableContinue}
+                      className={cn(
+                        actionButtonClass,
+                        useCompactPane ? compactActionButtonClass : null,
+                        glassStickyActions && glassContinueButtonClass
+                      )}
+                      style={{
+                        ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
+                        backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor,
+                        color: theme.buttonStyle?.textColor || "#ffffff",
+                        fontFamily: theme.fontFamily,
+                        borderRadius: `${theme.borderRadius}px`,
+                      }}
+                    >
+                      {isLoading ? "Loading..." : resolvedContinueLabel}
+                    </Button>
+                  ) : null}
+                </div>,
+                document.body
               )
-            )}
-            style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
-          >
-            {onBack ? (
-              <Button
-                type="button"
-                onClick={onBack}
-                variant="outline"
-                className={cn(actionButtonClass, useCompactPane ? compactActionButtonClass : null)}
-                style={{
-                  ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "rose"),
-                  borderColor: theme.primaryColor,
-                  color: theme.primaryColor,
-                  fontFamily: theme.fontFamily,
-                  borderRadius: `${theme.borderRadius}px`,
-                }}
-              >
-                Back
-              </Button>
-            ) : null}
-            {!hideContinueAction ? (
-              <Button
-                type="button"
-                onClick={onComplete}
-                disabled={disableContinue}
-                className={cn(actionButtonClass, useCompactPane ? compactActionButtonClass : null)}
-                style={{
-                  ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
-                  backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor,
-                  color: theme.buttonStyle?.textColor || "#ffffff",
-                  fontFamily: theme.fontFamily,
-                  borderRadius: `${theme.borderRadius}px`,
-                }}
-              >
-                {isLoading ? "Loading..." : resolvedContinueLabel}
-              </Button>
-            ) : null}
-          </div>
+            : null}
+          {!portalStickyMobileActions ? (
+            <div
+              className={layoutDebugClassName(
+                layoutDebugEnabled,
+                cn(
+                  "flex min-w-0 shrink-0 justify-center gap-2.5",
+                  useCompactPane ? "mt-auto pt-1" : null,
+                  actionsVariant === "sticky_mobile" ? stickyBarSmClass : null
+                )
+              )}
+              style={withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet")}
+            >
+              {onBack ? (
+                <Button
+                  type="button"
+                  onClick={onBack}
+                  variant="outline"
+                  className={cn(
+                    actionButtonClass,
+                    useCompactPane ? compactActionButtonClass : null,
+                    glassStickyActions && glassBackButtonClass
+                  )}
+                  style={{
+                    ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "rose"),
+                    ...(glassStickyActions
+                      ? {
+                          fontFamily: theme.fontFamily,
+                          borderRadius: `${theme.borderRadius}px`,
+                        }
+                      : {
+                          borderColor: theme.primaryColor,
+                          color: theme.primaryColor,
+                          fontFamily: theme.fontFamily,
+                          borderRadius: `${theme.borderRadius}px`,
+                        }),
+                  }}
+                >
+                  Back
+                </Button>
+              ) : null}
+              {!hideContinueAction ? (
+                <Button
+                  type="button"
+                  onClick={onComplete}
+                  disabled={disableContinue}
+                  className={cn(
+                    actionButtonClass,
+                    useCompactPane ? compactActionButtonClass : null,
+                    glassStickyActions && glassContinueButtonClass
+                  )}
+                  style={{
+                    ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "violet"),
+                    backgroundColor: theme.buttonStyle?.backgroundColor || theme.primaryColor,
+                    color: theme.buttonStyle?.textColor || "#ffffff",
+                    fontFamily: theme.fontFamily,
+                    borderRadius: `${theme.borderRadius}px`,
+                  }}
+                >
+                  {isLoading ? "Loading..." : resolvedContinueLabel}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
     </div>

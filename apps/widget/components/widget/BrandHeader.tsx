@@ -41,12 +41,11 @@ export function BrandHeader({ config, containerWidth = 1024, hideInMobile = fals
       initial={reduceMotion ? undefined : { opacity: 0, y: -4 }}
       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className={`${sticky ? "sticky top-0" : "relative"} z-20 flex-shrink-0 flex ${alignmentClasses[headerAlignment as keyof typeof alignmentClasses]} w-full`}
+      className={`${sticky ? "sticky top-0" : "relative"} z-20 flex-shrink-0 flex ${alignmentClasses[headerAlignment as keyof typeof alignmentClasses]} w-full py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 sm:py-2.5`}
       style={{
         backgroundColor: getBackgroundColor(config.background_color || "#ffffff", config.background_opacity),
         fontFamily: config.font_family || 'inherit',
         fontSize: config.base_font_size ? `${config.base_font_size}px` : undefined,
-        padding: `10px ${Math.max(12, 16)}px 6px`
       }}
     >
       <div 
