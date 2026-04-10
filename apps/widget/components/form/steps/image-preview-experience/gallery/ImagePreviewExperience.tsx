@@ -22,7 +22,7 @@ import {
 } from "@/lib/ai-form/state/form-state-storage";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { ArrowLeft, ChevronDown, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
 import { PRICING_LEAD_COPY } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
@@ -3174,7 +3174,7 @@ export function ImagePreviewExperience(props: {
   const pillLabel = waitingForExactPricing
     ? "CALCULATING COST"
     : leadGateEnabled
-      ? (leadCaptured ? "EST PRICING" : "Show pricing")
+      ? (leadCaptured ? "EST PRICING" : "PRICING")
       : "EST PRICING";
   const lockedPillPrice =
     formattedAccuratePricingRange ||
@@ -3735,25 +3735,56 @@ export function ImagePreviewExperience(props: {
 	                </div>
 	                </div>
 	              ) : hero ? (
-	                <div
-	                  className="h-full w-full cursor-zoom-in isolate"
-	                  role="button"
-	                  tabIndex={0}
-	                  aria-label="Open larger preview"
-	                  onClick={openLightbox}
-	                  onKeyDown={(e) => {
-	                    if (e.key === "Enter" || e.key === " ") {
-	                      e.preventDefault();
-	                      openLightbox();
-	                    }
-	                  }}
-	                >
-	                  {/* eslint-disable-next-line @next/next/no-img-element */}
-	                  <img
-	                    src={hero}
-	                    alt="Preview"
-	                    className="h-full w-full object-cover"
-	                  />
+	                <div className="relative h-full w-full isolate">
+	                  <div
+	                    className="h-full w-full cursor-zoom-in"
+	                    role="button"
+	                    tabIndex={0}
+	                    aria-label="Open larger preview"
+	                    onClick={openLightbox}
+	                    onKeyDown={(e) => {
+	                      if (e.key === "Enter" || e.key === " ") {
+	                        e.preventDefault();
+	                        openLightbox();
+	                      }
+	                    }}
+	                  >
+	                    {/* eslint-disable-next-line @next/next/no-img-element */}
+	                    <img
+	                      src={hero}
+	                      alt="Preview"
+	                      className="h-full w-full object-cover"
+	                    />
+	                  </div>
+	                  {leadGateActive &&
+	                  !shouldShowCenteredLeadFormOverlay &&
+	                  !lightboxOpen ? (
+	                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-4">
+	                      <button
+	                        type="button"
+	                        className={cn(
+	                          overlayButtonClass,
+	                          "pointer-events-auto !h-auto min-h-0 max-w-[min(100%,18rem)] items-center gap-2.5 rounded-2xl border-0 px-4 py-3 text-left",
+	                          "text-[clamp(0.8125rem,2.4cqi,0.9375rem)] font-semibold leading-none text-white/95",
+	                          "shadow-sm backdrop-blur-md transition-colors active:scale-[0.98]"
+	                        )}
+	                        style={{ fontFamily: theme.fontFamily, ...singleModeOverlayVars }}
+	                        aria-label="Show pricing to unlock your estimate"
+	                        onClick={(e) => {
+	                          e.preventDefault();
+	                          e.stopPropagation();
+	                          openDesignEstimateLeadFlow();
+	                        }}
+	                      >
+	                        <span className="min-w-0 flex-1">Show pricing</span>
+	                        <ChevronRight
+	                          className="size-[1.125rem] shrink-0 text-white/75 sm:size-5"
+	                          aria-hidden
+	                          strokeWidth={2.25}
+	                        />
+	                      </button>
+	                    </div>
+	                  ) : null}
 	                </div>
 	              ) : (
 	                <div className="h-full w-full bg-muted/40 isolate" />

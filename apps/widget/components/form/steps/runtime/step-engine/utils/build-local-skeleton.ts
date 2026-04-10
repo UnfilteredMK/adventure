@@ -132,8 +132,8 @@ function buildPresetScopeStep(
 ): UIStep {
   const serviceLabel = normalizeServiceLabel(serviceOption);
   const scopeQuestion = isGenericServiceLabel(serviceLabel)
-    ? "What's the scope of this project?"
-    : `What kind of ${serviceLabel.toLowerCase()} project is this?`;
+    ? "What are your overall needs?"
+    : `What are your overall needs for your ${serviceLabel.toLowerCase()}?`;
   const presetOptions = withOtherChoiceOption(
     presets.map((label, i) => ({
       label,
@@ -144,7 +144,7 @@ function buildPresetScopeStep(
     id: LOCAL_SCOPE_STEP_ID,
     type: "multiple_choice",
     question: scopeQuestion,
-    humanism: "Pick the option that fits best.",
+    humanism: "Start with the big picture — choose one.",
     options: presetOptions,
     multi_select: false,
     columns: presetOptions.length > 4 ? 1 : 2,
@@ -155,14 +155,13 @@ function buildPresetScopeStep(
 }
 
 function buildPartsScopeStep(
-  serviceOption: LocalSkeletonServiceOption | null | undefined,
   components: ReturnType<typeof normalizeComponents>,
   usePartsOnlyStepId: boolean,
+  afterPresetScopeStep: boolean,
 ): UIStep {
-  const serviceLabel = normalizeServiceLabel(serviceOption);
-  const scopeQuestion = isGenericServiceLabel(serviceLabel)
-    ? "Which parts of this project should we focus on?"
-    : `What parts of your ${serviceLabel.toLowerCase()} are in scope?`;
+  const scopeQuestion = afterPresetScopeStep
+    ? "Now, what should we include?"
+    : "What should we include?";
   const partOptions = withOtherChoiceOption(
     components.slice(0, 12).map((component) => ({
       label: component.label,
@@ -173,7 +172,7 @@ function buildPartsScopeStep(
     id: usePartsOnlyStepId ? LOCAL_SCOPE_STEP_ID : LOCAL_PARTS_STEP_ID,
     type: partOptions.length > 6 ? "chips_multi" : "multiple_choice",
     question: scopeQuestion,
-    humanism: "Select everything you'd like us to focus on.",
+    humanism: "Select everything that you might need us to do.",
     options: partOptions,
     multi_select: true,
     min_selections: 1,
@@ -186,8 +185,8 @@ function buildPartsScopeStep(
 function buildGenericExtentStep(serviceOption: LocalSkeletonServiceOption | null | undefined): UIStep {
   const serviceLabel = normalizeServiceLabel(serviceOption);
   const scaleQuestion = isGenericServiceLabel(serviceLabel)
-    ? "How extensive is this project?"
-    : `How big is your ${serviceLabel.toLowerCase()} project?`;
+    ? "How much are you looking to do?"
+    : `How much are you looking to do for your ${serviceLabel.toLowerCase()}?`;
 
   return {
     id: LOCAL_SCOPE_STEP_ID,
@@ -222,7 +221,7 @@ export function buildLocalScopeSteps(serviceOption: LocalSkeletonServiceOption |
   }
 
   if (components.length > 0) {
-    steps.push(buildPartsScopeStep(serviceOption, components, presets.length === 0));
+    steps.push(buildPartsScopeStep(components, presets.length === 0, presets.length > 0));
   }
 
   if (presets.length === 0 && components.length === 0) {

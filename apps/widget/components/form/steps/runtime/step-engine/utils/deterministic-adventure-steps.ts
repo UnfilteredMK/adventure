@@ -128,7 +128,7 @@ export function buildDeterministicBudgetStep(params: {
     },
     copy: {
       headline: "What budget range should we design around?",
-      subtext: "Move the slider to set your target spend so pricing and image quality stay aligned.",
+      subtext: "Move the slider to set your target spend so that we can make this more accurate.",
     },
     blueprint: required ? undefined : { presentation: { allow_skip: true } },
   } as StepDefinition;
