@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "(test -f scripts/vercel-npm-ci.sh && /bin/sh scripts/vercel-npm-ci.sh) || /bin/sh ../../scripts/vercel-npm-ci.sh",
+  "outputDirectory": "apps/widget/.next"
+}

@@ -1,6 +1,6 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "npm ci --no-audit --no-fund",
+  "installCommand": "(test -f scripts/vercel-npm-ci.sh && /bin/sh scripts/vercel-npm-ci.sh) || /bin/sh ../../scripts/vercel-npm-ci.sh",
   "framework": "nextjs",
   "outputDirectory": ".next",
   "functions": {
