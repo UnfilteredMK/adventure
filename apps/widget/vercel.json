@@ -1,6 +1,6 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "(test -f scripts/vercel-npm-ci.sh && /bin/sh scripts/vercel-npm-ci.sh) || /bin/sh ../../scripts/vercel-npm-ci.sh",
+  "installCommand": "node vercel-install.cjs",
   "framework": "nextjs",
   "outputDirectory": ".next",
   "functions": {

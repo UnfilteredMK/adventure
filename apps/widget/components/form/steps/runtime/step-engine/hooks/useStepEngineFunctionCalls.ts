@@ -63,7 +63,7 @@ export function useStepEngineFunctionCalls(args: {
       const blockCalls = extractCompositeBlockCalls(s);
       if (blockCalls.length > 0) {
         for (const call of blockCalls) {
-          const callKey = String(call.stepId || "");
+          const callKey = String(call.callKey || "");
           if (!callKey) continue;
           candidates.push({ callKey, functionCall: call.functionCall });
         }

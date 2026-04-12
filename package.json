@@ -9,6 +9,7 @@
     "shared/api/*"
   ],
   "scripts": {
+    "build": "npm run build:widget",
     "dev:designer": "npm -w apps/designer run dev",
     "dev:widget": "npm -w apps/widget run dev",
     "dev:api-service": "sh -c 'cd apps/api-service && make dev'",
@@ -39,8 +40,8 @@
     "env:replace:prod:dry": "node scripts/vercel-env-manager.js reset --target production --dry-run && node scripts/vercel-env-manager.js push --source env/.env.shared.production --target production --prune --dry-run",
     "env:sync:prod": "bash env/sync-production-env.sh",
     "env:cleanup-local": "node scripts/sync-local-envs.js",
-    "prod:designer": "sh -c 'cd apps/designer && vercel --prod --yes'",
-    "prod:widget": "sh -c 'cd apps/widget && vercel --prod --yes'",
+    "prod:designer": "sh -c 'cd \"$(git rev-parse --show-toplevel)\" && vercel --prod --yes -A apps/designer/vercel.json'",
+    "prod:widget": "sh -c 'cd \"$(git rev-parse --show-toplevel)\" && vercel --prod --yes -A apps/widget/vercel.json'",
     "prod:shopify": "sh -c 'cd apps/shopify && vercel --prod --yes'",
     "prod:api-service": "sh -c 'cd apps/api-service && vercel --prod --yes'",
     "prod": "sh -c 'npm run prod:designer & npm run prod:widget & wait'",

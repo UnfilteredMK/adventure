@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/server/logger';
 
 // Force dynamic rendering
@@ -70,7 +70,7 @@ function shouldRetryCategoriesSubcatSelect(err: unknown): boolean {
 }
 
 async function fetchCategoriesSubcategoriesForWidget(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<any, 'public', any>,
   ids: string[],
 ): Promise<{ data: any[] | null; error: { message?: string; code?: string } | null }> {
   if (ids.length === 0) return { data: [], error: null };

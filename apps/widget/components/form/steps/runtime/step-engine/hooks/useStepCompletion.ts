@@ -339,12 +339,12 @@ export function useStepCompletion(args: {
       }
       const scopeStepIdsInFlow = (state?.steps || [])
         .map((step: any) => String((step as any)?.id || ""))
-        .filter((stepId) => PRE_CONCEPT_SCOPE_STEP_IDS.has(stepId));
+        .filter((stepId: string) => PRE_CONCEPT_SCOPE_STEP_IDS.has(stepId));
       const completesAdventureScopeGate =
         disableLegacyBudgetUploadSteps &&
         PRE_CONCEPT_SCOPE_STEP_IDS.has(currentStep.id) &&
         scopeStepIdsInFlow.length > 0 &&
-        scopeStepIdsInFlow.every((stepId) => hasMeaningfulAnswer(updatedStepDataSoFar[stepId]));
+        scopeStepIdsInFlow.every((stepId: string) => hasMeaningfulAnswer(updatedStepDataSoFar[stepId]));
       const shouldRouteToAdventureStyleStep =
         !localSkeletonMode &&
         completesAdventureScopeGate &&
