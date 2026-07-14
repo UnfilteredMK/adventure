@@ -79,6 +79,7 @@ def validate_and_normalize_planner_payload(
     *,
     target_component_count: int,
     target_options_per_component: int,
+    excluded_component_keys: Optional[Sequence[str]] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Returns (ok, error_code, normalized_payload).
@@ -86,6 +87,11 @@ def validate_and_normalize_planner_payload(
     """
     target_components = max(1, min(_MAX_COMPONENTS, int(target_component_count or _MAX_COMPONENTS)))
     target_opts = max(1, min(_MAX_OPTIONS_PER_COMPONENT, int(target_options_per_component or _MAX_OPTIONS_PER_COMPONENT)))
+    excluded_keys = {
+        key
+        for key in (slugify_component_key(str(value or "")) for value in (excluded_component_keys or []))
+        if key
+    }
 
     comps_in = raw.get("components")
     seeds_in = raw.get("optionSeeds")
@@ -103,7 +109,7 @@ def validate_and_normalize_planner_payload(
         label = sanitize_visual_context_text(item.get("label") or item.get("name") or "", max_len=120)
         raw_key = str(item.get("key") or "").strip()
         key = slugify_component_key(raw_key or label)
-        if not key or key in seen_keys:
+        if not key or key in seen_keys or key in excluded_keys:
             continue
         reason = sanitize_visual_context_text(item.get("reason") or "", max_len=320)
         if _is_blocked_component(key=key, label=label, reason=reason):

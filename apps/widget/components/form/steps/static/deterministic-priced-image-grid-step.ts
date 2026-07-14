@@ -1,5 +1,6 @@
 import type { UIStep } from "@/types/ai-form";
 import type { PreviewCacheSnapshot, PreviewPriceSnapshot, PreviewRunSnapshot } from "../image-preview-experience/gallery/preview-cache-bridge";
+import { roundCurrencyBucket } from "@/lib/visual-pricing/rounding";
 
 export const DETERMINISTIC_PRICED_IMAGE_GRID_ID = "step-priced-image-grid";
 
@@ -16,13 +17,6 @@ function stableHash(input: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return Math.abs(hash >>> 0);
-}
-
-function roundToNearestBucket(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  if (value < 2500) return Math.round(value / 250) * 250;
-  if (value < 10000) return Math.round(value / 500) * 500;
-  return Math.round(value / 1000) * 1000;
 }
 
 function normalizeExplicitPrice(price: PreviewPriceSnapshot | undefined | null): PriceRange | null {
@@ -42,8 +36,8 @@ function deriveVariantPriceRange(baseRange: PriceRange, imageUrl: string, index:
   const width = Math.max(1000, baseRange.high - baseRange.low);
   const hashOffset = ((stableHash(`${imageUrl}:${index}`) % 7) - 3) * 0.01;
   const offset = (orderedOffsets[index % orderedOffsets.length] ?? 0) + hashOffset;
-  const nextLow = roundToNearestBucket(baseRange.low * (1 + offset));
-  const nextHigh = roundToNearestBucket(baseRange.high * (1 + offset));
+  const nextLow = roundCurrencyBucket(baseRange.low * (1 + offset));
+  const nextHigh = roundCurrencyBucket(baseRange.high * (1 + offset));
   const low = Math.max(1000, Math.min(nextLow, nextHigh - 500));
   const high = Math.max(low + Math.max(500, Math.round(width * 0.32)), Math.max(nextLow, nextHigh));
   return {
@@ -100,8 +94,8 @@ export function buildDeterministicPricedImageGridStep(params: {
   return {
     id: DETERMINISTIC_PRICED_IMAGE_GRID_ID,
     type: "image_choice_grid",
-    question: "We generated a few starter ideas for your project",
-    humanism: "Tap a concept to unlock pricing and keep refining it.",
+    question: "Choose the concept that feels most like your project",
+    humanism: "Browse the deck, compare the estimated ranges, then tap your favorite to continue.",
     options: options as any,
     multi_select: false,
     columns: 3,

@@ -8,9 +8,10 @@ interface BrandHeaderProps {
   config: DesignSettings;
   containerWidth?: number;
   hideInMobile?: boolean; // New prop to control mobile/iframe visibility
+  compact?: boolean;
 }
 
-export function BrandHeader({ config, containerWidth = 1024, hideInMobile = false }: BrandHeaderProps) {
+export function BrandHeader({ config, containerWidth = 1024, hideInMobile = false, compact = false }: BrandHeaderProps) {
   const reduceMotion = useReducedMotion();
   const headerOn = coerceDesignBoolean(config.header_enabled, true);
   const logoOn = coerceDesignBoolean(config.logo_enabled, false);
@@ -32,7 +33,12 @@ export function BrandHeader({ config, containerWidth = 1024, hideInMobile = fals
 
   // Use minimal spacing that respects the configured padding
   const itemGap = Math.max(6, Math.min(16, containerWidth * 0.01));
-  const logoHeight = Math.max(16, Math.round((config.logo_height || 48) * 0.9));
+  const logoHeight = compact
+    ? Math.max(18, Math.min(28, Math.round((config.logo_height || 48) * 0.55)))
+    : Math.max(16, Math.round((config.logo_height || 48) * 0.9));
+  const brandFontSize = compact
+    ? Math.max(16, Math.min(22, Number(config.brand_name_font_size || 32)))
+    : Number(config.brand_name_font_size || 32);
 
   const sticky = Boolean(config.sticky_header);
 
@@ -41,7 +47,7 @@ export function BrandHeader({ config, containerWidth = 1024, hideInMobile = fals
       initial={reduceMotion ? undefined : { opacity: 0, y: -4 }}
       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className={`${sticky ? "sticky top-0" : "relative"} z-20 flex-shrink-0 flex ${alignmentClasses[headerAlignment as keyof typeof alignmentClasses]} w-full py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 sm:py-2.5`}
+      className={`${sticky ? "sticky top-0" : "relative"} z-20 flex-shrink-0 flex ${alignmentClasses[headerAlignment as keyof typeof alignmentClasses]} w-full ${compact ? "py-1.5 sm:py-2" : "py-2 sm:py-2.5"} pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4`}
       style={{
         backgroundColor: getBackgroundColor(config.background_color || "#ffffff", config.background_opacity),
         fontFamily: config.font_family || 'inherit',
@@ -74,7 +80,7 @@ export function BrandHeader({ config, containerWidth = 1024, hideInMobile = fals
             style={{ 
               color: config.brand_name_color || '#000000',
               fontFamily: config.brand_name_font_family || 'inherit',
-              fontSize: `${config.brand_name_font_size || 32}px`,
+              fontSize: `${brandFontSize}px`,
             }}
           >
             {config.brand_name}

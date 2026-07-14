@@ -2,6 +2,7 @@
 
 // Step Engine - Main component that orchestrates the form flow
 import React, { useEffect, useCallback, useRef, useState, useMemo } from 'react';
+import { LayoutGroup } from "framer-motion";
 import { useSearchParams } from "next/navigation";
 import { useStepEngine } from '@/hooks/use-step-engine';
 import { useFormMetrics } from '@/hooks/use-form-metrics';
@@ -121,6 +122,9 @@ interface StepEngineProps {
     useCase?: string;
     previewPricing?: { totalMin: number; totalMax: number; currency?: string; randomizePct?: number };
     leadCaptureRequired?: boolean;
+    pricingGateStrategy?: "blurred" | "coarse_visible" | "experiment";
+    pricingGateExperimentPercent?: number;
+    pricingGateExperimentKey?: string;
   };
   /** Disable deprecated pre-image budget/upload legacy steps (Adventure route). */
   disableLegacyBudgetUploadSteps?: boolean;
@@ -215,6 +219,8 @@ export function StepEngine({
   const pendingRefinementPreviewAdvanceRef = useRef<null | { stepId: string; data: any }>(null);
   const pendingRefinementPreviewAdvanceStageRef = useRef<"idle" | "waiting_for_start" | "waiting_for_finish">("idle");
   const [pendingPreviewSceneUploadUrl, setPendingPreviewSceneUploadUrl] = useState<string | null>(null);
+  const [starterProjectPhotoUrl, setStarterProjectPhotoUrl] = useState<string | null>(null);
+  const [studioPreviewRequested, setStudioPreviewRequested] = useState(true);
   // Once the preview experience is enabled, keep it enabled (avoids flicker if total steps change as new batches load).
   const [previewEverEnabled, setPreviewEverEnabled] = useState(false);
   // Snapshot the initial question count from the first `generate-steps` response so the 60% gate
@@ -254,20 +260,13 @@ export function StepEngine({
             if (!cache || !activeRun || !Array.isArray(activeRun.images) || activeRun.images.length === 0) {
               return cache;
             }
-            const maxIndex = Math.max(0, activeRun.images.length - 1);
-            const rawSelectedIndex =
-              typeof cache.selectedConceptIndex === "number" && Number.isFinite(cache.selectedConceptIndex)
-                ? Math.floor(cache.selectedConceptIndex)
-                : 0;
-            const nextSelectedIndex = Math.max(0, Math.min(maxIndex, rawSelectedIndex));
+            // Finishing the questions opens Concepts. Selecting a concept is the only action
+            // that may advance the studio into Estimate.
             return {
               ...cache,
               activeRunId: activeRun.id,
-              selectedConceptIndex: nextSelectedIndex,
-              viewMode: "single",
-              status: cache.status === "running" ? "complete" : cache.status,
-              message: null,
-              error: null,
+              selectedConceptIndex: null,
+              viewMode: "gallery",
               updatedAt: Date.now(),
             };
           });
@@ -348,6 +347,10 @@ export function StepEngine({
     legacyBudgetUploadEnabled,
     updateStepData,
   });
+  const requiredDeterministicUploadSteps = useMemo(
+    () => desiredDeterministicUploadSteps.filter((step: any) => (step as any)?.data?.required !== false),
+    [desiredDeterministicUploadSteps],
+  );
 
   const applyIdeaSuggestion = useCallback(
     (s: Suggestion) => {
@@ -424,11 +427,13 @@ export function StepEngine({
   );
   const pricedImageGridStep = useMemo(
     () =>
-      buildDeterministicPricedImageGridStep({
-        cache: previewCacheSnapshot,
-        run: activePreviewRun,
-      }),
-    [activePreviewRun, previewCacheSnapshot]
+      localSkeletonMode
+        ? null
+        : buildDeterministicPricedImageGridStep({
+            cache: previewCacheSnapshot,
+            run: activePreviewRun,
+          }),
+    [activePreviewRun, localSkeletonMode, previewCacheSnapshot]
   );
   const deterministicStyleStep = useMemo(() => {
     const fromSelected = buildDeterministicStyleStep(selectedServiceMeta);
@@ -671,6 +676,7 @@ export function StepEngine({
   ]);
 
   useEffect(() => {
+    if (localSkeletonMode) return;
     if (!activePreviewRun?.id) return;
     if (!state?.steps?.length) return;
     const pricedAnswer = (state.stepData as any)?.[DETERMINISTIC_PRICED_IMAGE_GRID_ID];
@@ -746,6 +752,7 @@ export function StepEngine({
     currentStep?.id,
     goToStep,
     leadCapturedForUI,
+    localSkeletonMode,
     designControlsRevealed,
     previewCacheSnapshot?.selectedConceptIndex,
     previewCacheSnapshot?.viewMode,
@@ -769,7 +776,7 @@ export function StepEngine({
   }, [currentStep?.id]);
 
   const belowPreviewControlStepIds = useMemo(() => {
-    const uploadIds = desiredDeterministicUploadSteps
+    const uploadIds = requiredDeterministicUploadSteps
       .map((step: any) => String(step?.id || ""))
       .filter(Boolean);
     return new Set([
@@ -777,7 +784,7 @@ export function StepEngine({
       ...uploadIds,
       REFINEMENT_UPLOAD_STEP_ID,
     ]);
-  }, [desiredDeterministicUploadSteps]);
+  }, [requiredDeterministicUploadSteps]);
   const leadCaptureStepIds = useMemo(
     () => new Set(["step-lead-capture", "step-lead-name", "step-lead-phone"]),
     []
@@ -1201,7 +1208,7 @@ export function StepEngine({
     if (!localSkeletonMode && !hasReceivedQuestionsFromGenerateSteps) return;
     if (previewHasImage) return;
 
-    const desiredDeterministicSteps = [deterministicBudgetStep, ...desiredDeterministicUploadSteps];
+    const desiredDeterministicSteps = [deterministicBudgetStep, ...requiredDeterministicUploadSteps];
     const desiredIds = new Set(desiredDeterministicSteps.map((s: any) => String(s?.id || "")).filter(Boolean));
     if (desiredIds.size === 0) return;
 
@@ -1321,7 +1328,7 @@ export function StepEngine({
   }, [
     addSteps,
     deterministicBudgetStep,
-    desiredDeterministicUploadSteps,
+    requiredDeterministicUploadSteps,
     flowPlan?.sessionId,
     hasReceivedQuestionsFromGenerateSteps,
     legacyBudgetUploadEnabled,
@@ -1826,6 +1833,25 @@ export function StepEngine({
     setPreviewAutoGenerationPending,
     refinementUploadStepId: REFINEMENT_UPLOAD_STEP_ID,
   });
+  const handleStarterProjectPhotoSelected = useCallback(
+    async (url: string) => {
+      if (!url) return;
+      setStarterProjectPhotoUrl(url);
+      updateStepData(DETERMINISTIC_SCENE_IMAGE_ID, url);
+    },
+    [updateStepData],
+  );
+  const handleStudioStepComplete = useCallback(
+    async (data: any) => {
+      const completingBudget = currentStep?.id === DETERMINISTIC_BUDGET_ID;
+      await handleStepComplete(data);
+      if (localSkeletonMode && completingBudget) {
+        if (flowCompleted) setPreviewRefreshNonce((nonce) => nonce + 1);
+        setStudioPreviewRequested(true);
+      }
+    },
+    [currentStep?.id, flowCompleted, handleStepComplete, localSkeletonMode],
+  );
 
   // If the user resumes a session where steps are already present (e.g. from localStorage),
   // make sure the preview system is allowed to activate without requiring a fresh generate-steps request.
@@ -1953,8 +1979,8 @@ export function StepEngine({
     completedQuestionCount,
     config,
     currentStepId: currentStep?.id,
-    desiredDeterministicUploadSteps: disableLegacyBudgetUploadSteps ? [] : desiredDeterministicUploadSteps,
-    desiredDeterministicStepsForInsert: disableLegacyBudgetUploadSteps ? [] : [deterministicBudgetStep, ...desiredDeterministicUploadSteps],
+    desiredDeterministicUploadSteps: disableLegacyBudgetUploadSteps ? [] : requiredDeterministicUploadSteps,
+    desiredDeterministicStepsForInsert: disableLegacyBudgetUploadSteps ? [] : [deterministicBudgetStep, ...requiredDeterministicUploadSteps],
     flowPlanSessionId: flowPlan?.sessionId,
     formStateMetricProgress: formState?.metricProgress ?? null,
     hasReceivedQuestionsFromGenerateSteps,
@@ -1968,7 +1994,10 @@ export function StepEngine({
     state,
     updateStepData,
   });
-  previewEnabledForBackNavRef.current = previewEnabled;
+  const effectivePreviewEnabled = Boolean(
+    previewEnabled && (!localSkeletonMode || (flowCompleted && studioPreviewRequested)),
+  );
+  previewEnabledForBackNavRef.current = effectivePreviewEnabled;
 
   const isBacktrackingInForm = Boolean(state && (state.currentStepIndex ?? 0) < maxVisitedIndex);
 
@@ -1992,12 +2021,13 @@ export function StepEngine({
   // After scene upload completes, show ImagePreviewExperience with "generating" immediately instead of "Getting you accurate pricing..."
   // Use ref when state hasn't updated yet (avoids overlapping "Getting you accurate pricing..." and "Generating your design + pricing..." loaders)
   const showPreviewGeneratingEarly = Boolean(
+    (!localSkeletonMode || flowCompleted) &&
     (hasSceneImageInStepData || sceneUploadJustCompletedRef.current) &&
       (!effectiveCurrentStep || isWaitingForNextBatch) &&
-      !previewEnabled
+      !effectivePreviewEnabled
   );
   const isStyleStepActive = Boolean(currentStep?.id === DETERMINISTIC_STYLE_ID);
-  const showPreviewSection = previewEnabled || showPreviewGeneratingEarly || isInitialLoading;
+  const showPreviewSection = effectivePreviewEnabled || showPreviewGeneratingEarly || isInitialLoading;
 
   const {
     isAdventureSurface,
@@ -2038,7 +2068,7 @@ export function StepEngine({
     setQuestionPaneRevealedByUser(false);
   }, [previewHasImage]);
 
-  const isPreviewGenerationStage = Boolean(previewEnabled && !previewHasImage);
+  const isPreviewGenerationStage = Boolean(effectivePreviewEnabled && !previewHasImage);
   const pricedGridStepActive = Boolean(currentStep?.id === DETERMINISTIC_PRICED_IMAGE_GRID_ID);
   const showAccuratePricingLoader =
     !showPreviewSection &&
@@ -2104,7 +2134,7 @@ export function StepEngine({
   const previewGenerationStepIdRef = useRef<string | null>(null);
   const [previewQuestionRevealReady, setPreviewQuestionRevealReady] = useState(false);
   useEffect(() => {
-    if (!previewEnabled) {
+    if (!effectivePreviewEnabled) {
       previewGenerationStepIdRef.current = null;
       setPreviewQuestionRevealReady(true);
       return;
@@ -2142,7 +2172,7 @@ export function StepEngine({
     setPreviewQuestionRevealReady(true);
   }, [
     currentStep?.id,
-    previewEnabled,
+    effectivePreviewEnabled,
     previewHasImage,
     isBacktrackingInForm,
     effectiveLeadCompleteForPreviewFlow,
@@ -2180,7 +2210,7 @@ export function StepEngine({
   const conceptPickerStepActive = Boolean(pricedGridStepActive || allowConceptGallery);
   const hideQuestionPaneUntilConceptSingle = Boolean(
     !forceQuestionPaneVisibleForBacktracking &&
-      previewEnabled &&
+      effectivePreviewEnabled &&
       conceptPickerStepActive &&
       previewSurfaceMode !== "single"
   );
@@ -2212,6 +2242,13 @@ export function StepEngine({
   const gatedQuestionPaneUnderPreview = Boolean(
     showQuestionPaneUnderPreview && shouldRevealCompactedQuestionPane
   );
+  const selectedConceptCommitted = Boolean(
+    typeof previewCacheSnapshot?.selectedConceptIndex === "number" &&
+      Number.isFinite(previewCacheSnapshot.selectedConceptIndex),
+  );
+  const studioEstimatePresentationActive = Boolean(
+    localSkeletonMode && effectivePreviewEnabled && selectedConceptCommitted
+  );
 
   const handleKeepDesigning = useCallback(() => {
     setAdventureInputMode("questions");
@@ -2233,7 +2270,8 @@ export function StepEngine({
     isInitialLoading ||
     !gatedQuestionPaneUnderPreview ||
     isAdvancingAfterLeadCapture ||
-    hideQuestionPaneUntilConceptSingle
+    hideQuestionPaneUntilConceptSingle ||
+    studioEstimatePresentationActive
   );
   useEffect(() => {
     const committedRaw = (state?.stepData as any)?.["step-refinement-upload-scene-image"];
@@ -2255,7 +2293,7 @@ export function StepEngine({
       showBranding: Boolean(showBrandingHeader),
       showProgress: Boolean(showProgressBar),
       showTimeline: Boolean(showStepDescriptions && state?.steps && state.steps.length > 0),
-      previewEnabled: Boolean(previewEnabled),
+      previewEnabled: Boolean(effectivePreviewEnabled),
       previewVisible: Boolean(previewVisible),
       previewHasImage: Boolean(previewHasImage),
       leadCaptured: Boolean(effectiveLeadCompleteForPreviewFlow),
@@ -2268,7 +2306,7 @@ export function StepEngine({
     isDesktopViewport,
     isMobileViewport,
     effectiveLeadCompleteForPreviewFlow,
-    previewEnabled,
+    effectivePreviewEnabled,
     previewHasImage,
     previewVisible,
     gatedQuestionPaneUnderPreview,
@@ -2341,15 +2379,104 @@ export function StepEngine({
     refinementUploadStepId: REFINEMENT_UPLOAD_STEP_ID,
     getStepMetaById: (stepId) => stepMetaRef.current.get(stepId) ?? null,
   });
-  const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1);
+  const suppressLegacyJourneyChrome = Boolean(localSkeletonMode);
+  const stepJoggerVisible = Boolean(showStepDescriptions && stepJoggerSteps.length > 1 && !suppressLegacyJourneyChrome);
+  const selectedStartingIdea = (() => {
+    const styleStep = (state?.steps || []).find((step: any) => String(step?.id || "") === DETERMINISTIC_STYLE_ID) as any;
+    const rawSelection = state?.stepData?.[DETERMINISTIC_STYLE_ID];
+    const selectedValue = Array.isArray(rawSelection) ? String(rawSelection[0] || "") : String(rawSelection || "");
+    if (!selectedValue) return null;
+    if (selectedValue === "__project_photo__") {
+      const storedPhoto = state?.stepData?.[DETERMINISTIC_SCENE_IMAGE_ID];
+      const imageUrl = starterProjectPhotoUrl || (typeof storedPhoto === "string" ? storedPhoto : "");
+      return imageUrl ? { value: selectedValue, label: "Your project photo", imageUrl, isProjectPhoto: true } : null;
+    }
+    const options = Array.isArray(styleStep?.options) ? styleStep.options : [];
+    const option = options.find((candidate: any) => String(candidate?.value || candidate?.label || "") === selectedValue);
+    if (!option) return null;
+    const imageUrl = typeof option?.imageUrl === "string" ? option.imageUrl : typeof option?.image_url === "string" ? option.image_url : "";
+    return imageUrl
+      ? { value: selectedValue, label: String(option?.label || selectedValue), imageUrl, isProjectPhoto: false }
+      : null;
+  })();
+  const styleStepIndex = (state?.steps || []).findIndex((step: any) => String(step?.id || "") === DETERMINISTIC_STYLE_ID);
+  const projectStepIndexes = (state?.steps || [])
+    .map((step: any, index: number) => ({ id: String(step?.id || ""), index }))
+    .filter(({ id }) => PRE_CONCEPT_SCOPE_STEP_IDS.has(id))
+    .map(({ index }) => index);
+  const projectStepIndex = projectStepIndexes[0] ?? -1;
+  const budgetStepIndex = (state?.steps || []).findIndex((step: any) => String(step?.id || "") === DETERMINISTIC_BUDGET_ID);
+  const startingPointComplete = hasMeaningfulAnswer(state?.stepData?.[DETERMINISTIC_STYLE_ID]);
+  const projectPhaseComplete =
+    projectStepIndexes.length > 0 &&
+    projectStepIndexes.every((index) => {
+      const stepId = String((state?.steps || [])[index]?.id || "");
+      return hasMeaningfulAnswer(state?.stepData?.[stepId]);
+    });
+  const budgetPhaseComplete = hasMeaningfulAnswer(state?.stepData?.[DETERMINISTIC_BUDGET_ID]);
+  const conceptsComplete = Boolean((activePreviewRun?.images?.length || 0) >= 4 && previewCacheSnapshot?.status === "complete");
+  const estimateReached = Boolean(effectivePreviewEnabled && selectedConceptCommitted);
+  const activeStudioPhase = effectivePreviewEnabled
+    ? selectedConceptCommitted
+      ? "estimate"
+      : "concepts"
+    : currentStep?.id === DETERMINISTIC_STYLE_ID
+      ? "starting-point"
+      : currentStep?.id === DETERMINISTIC_BUDGET_ID
+        ? "budget"
+        : "project";
+  const studioPhases = localSkeletonMode
+    ? [
+        { key: "starting-point", label: "Starting point", active: activeStudioPhase === "starting-point", complete: startingPointComplete, enabled: styleStepIndex >= 0 },
+        { key: "project", label: "Project", active: activeStudioPhase === "project", complete: projectPhaseComplete, enabled: projectStepIndex >= 0 && (projectStepIndex <= maxVisitedIndex || projectPhaseComplete) },
+        { key: "budget", label: "Budget", active: activeStudioPhase === "budget", complete: budgetPhaseComplete, enabled: budgetStepIndex >= 0 && (budgetStepIndex <= maxVisitedIndex || budgetPhaseComplete) },
+        { key: "concepts", label: "Concepts", active: activeStudioPhase === "concepts", complete: conceptsComplete, enabled: flowCompleted && (effectivePreviewEnabled || previewHasImage) },
+        {
+          key: "estimate",
+          label: "Estimate",
+          active: activeStudioPhase === "estimate",
+          complete: estimateReached && (config?.leadCaptureRequired === false || leadCapturedForUI),
+          enabled: estimateReached,
+        },
+      ]
+    : [];
+  const handleStudioPhaseNavigate = (phaseKey: string) => {
+    setAdventureInputMode("questions");
+    if (phaseKey === "estimate") {
+      setStudioPreviewRequested(true);
+      setQuestionPaneRevealedByUser(false);
+      const targetIndex = budgetStepIndex >= 0 ? budgetStepIndex : Math.max(0, (state?.steps?.length || 1) - 1);
+      handleNavigateToStep(targetIndex);
+      return;
+    }
+    if (phaseKey === "concepts") {
+      setStudioPreviewRequested(true);
+      setQuestionPaneRevealedByUser(false);
+      if (previewSurfaceMode === "single") setStepNavReturnToGalleryNonce((nonce) => nonce + 1);
+      const targetIndex = budgetStepIndex >= 0 ? budgetStepIndex : Math.max(0, (state?.steps?.length || 1) - 1);
+      handleNavigateToStep(targetIndex);
+      return;
+    }
+    setStudioPreviewRequested(false);
+    const targetIndex =
+      phaseKey === "starting-point"
+        ? styleStepIndex
+        : phaseKey === "project"
+          ? projectStepIndex
+          : phaseKey === "budget"
+            ? budgetStepIndex
+            : -1;
+    if (targetIndex >= 0) handleNavigateToStep(targetIndex);
+  };
   return (
+	  <LayoutGroup id="visual-studio-journey">
 	  <div
 	    className="flex w-full flex-col bg-transparent text-foreground max-sm:h-auto max-sm:min-h-min max-sm:overflow-visible sm:h-full sm:min-h-0 sm:overflow-hidden"
 	    style={{ color: theme.textColor }}
 	  >
 	      {/* Header always owns its height budget so the body starts below it. */}
         <StepEngineHeaderSection
-          showProgressBar={showProgressBar}
+          showProgressBar={showProgressBar && !suppressLegacyJourneyChrome}
           metricProgress={formState?.metricProgress}
           progressPercentage={progress?.percentage ?? null}
           stepJoggerVisible={stepJoggerVisible}
@@ -2358,6 +2485,8 @@ export function StepEngine({
           maxVisitedIndex={maxVisitedIndex}
           onNavigateToStep={handleStepJoggerNavigate}
           onSetAdventureInputModeQuestions={() => setAdventureInputMode("questions")}
+          studioPhases={studioPhases}
+          onNavigateStudioPhase={handleStudioPhaseNavigate}
           theme={{ primaryColor: theme.primaryColor, textColor: theme.textColor, fontFamily: theme.fontFamily }}
         />
 
@@ -2369,8 +2498,9 @@ export function StepEngine({
           usePreviewDominantLayout={usePreviewDominantLayout}
           previewRailOpen={previewRailOpen}
           showPreviewSection={showPreviewSection}
-          previewEnabled={previewEnabled}
+          previewEnabled={effectivePreviewEnabled}
           leadPricingPresentationActive={isLeadPricingPresentationActive}
+          studioEstimateMode={studioEstimatePresentationActive}
           previewViewportRef={previewViewportRef}
           pricedGridStepActive={pricedGridStepActive}
           allowConceptGallery={allowConceptGallery}
@@ -2407,7 +2537,7 @@ export function StepEngine({
           handleBack={handleBack}
           handleEaseFeedback={handleEaseFeedback}
           handleReflectionFeedback={handleReflectionFeedback}
-          handleStepComplete={handleStepComplete}
+          handleStepComplete={handleStudioStepComplete}
           isBatchLoading={isBatchLoading}
           isFetchingNext={isFetchingNext || isAutoPreviewRefreshLocked}
           effectiveLeadCompleteForPreviewFlow={effectiveLeadCompleteForPreviewFlow}
@@ -2458,6 +2588,11 @@ export function StepEngine({
           layoutDebugEnabled={layoutDebugEnabled}
           effectiveCurrentStep={effectiveCurrentStep}
           guidedThumbnailMode={guidedThumbnailMode}
+          starterConcept={!isStyleStepActive ? selectedStartingIdea : null}
+          onBackToStartingIdeas={() => {
+            if (styleStepIndex >= 0) handleStepJoggerNavigate(styleStepIndex);
+          }}
+          onProjectPhotoSelected={handleStarterProjectPhotoSelected}
         />
 	      <DevModeOverlay
 	        enabled={devModeEnabled}
@@ -2470,5 +2605,6 @@ export function StepEngine({
 	        ui={devModeUI}
 	      />
 	  </div>
+	  </LayoutGroup>
 	  );
 }

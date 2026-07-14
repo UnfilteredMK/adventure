@@ -16,6 +16,7 @@
     "build": "next build",
     "start": "set -a && . ../../env/.env.shared.local && set +a && next start",
     "lint": "next lint",
+    "test:v1": "tsx --test ./tests/visual-pricing-v1.test.ts",
     "gen:types": "npm --prefix ../.. run supabase:gen:types",
     "db:update": "node ../../scripts/update-supabase.js",
     "sort:configs": "node ../../scripts/sort-configs.js",

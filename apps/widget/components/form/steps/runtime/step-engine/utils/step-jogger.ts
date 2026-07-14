@@ -14,7 +14,7 @@ export function parseBatchOrder(batchId: string | null | undefined): number | nu
 export function getStepJoggerLabel(step: any, index: number): string {
   const stepId = String(step?.id || "");
   if (stepId.startsWith("step-service-primary")) return "Service";
-  if (stepId === DETERMINISTIC_STYLE_ID) return "Style";
+  if (stepId === DETERMINISTIC_STYLE_ID) return "Starting Ideas";
   if (stepId.includes("budget")) return "Budget";
   if (stepId.includes("upload-scene")) return "Upload Photo";
   if (stepId.includes("upload-user")) return "Person Photo";

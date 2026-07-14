@@ -1,8 +1,8 @@
 {
-  "buildCommand": "npm run build",
-  "installCommand": "node vercel-install.cjs",
+  "buildCommand": "npm -w apps/widget run build",
+  "installCommand": "node apps/widget/vercel-install.cjs",
   "framework": "nextjs",
-  "outputDirectory": ".next",
+  "outputDirectory": "apps/widget/.next",
   "functions": {
     "app/api/generate/route.ts": {
       "maxDuration": 300

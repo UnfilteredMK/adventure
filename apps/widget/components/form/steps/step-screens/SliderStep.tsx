@@ -116,10 +116,15 @@ export function SliderStep({
           !compactInPreview && (isCompact ? "py-3 space-y-3" : "py-5 sm:py-8 space-y-4 sm:space-y-6")
         )}
       >
+        {compactInPreview ? (
+          <div className="text-center text-[clamp(9px,1vh,11px)] font-semibold uppercase tracking-[0.14em] opacity-55">
+            Comfortable target
+          </div>
+        ) : null}
         <div
           className={cn(
             "font-black text-center",
-            compactInPreview ? "w-full min-w-0 text-[clamp(0.92rem,1.8vh,1.18rem)] leading-tight py-0.5" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
+            compactInPreview ? "w-full min-w-0 text-[clamp(1.45rem,3.4vh,2.6rem)] leading-none py-1" : isCompact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-6xl"
           )}
           style={{ color: theme.primaryColor, fontFamily: theme.fontFamily }}
         >

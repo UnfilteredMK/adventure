@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.status import HTTP_400_BAD_REQUEST
 
 from api.request_adapter import to_next_steps_payload
@@ -546,6 +547,18 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
             return JSONResponse(status_code=status, content=planned)
         return planned
 
+    @compat_router.post("/refinement-library-planner/validate-components")
+    @router.post("/refinement-library-planner/validate-components")
+    async def refinement_library_validate_components(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
+        from programs.refinement_library_planner.semantic_validator import validate_refinement_components  # noqa: E402
+
+        validated = validate_refinement_components(payload)
+        if not validated.get("ok"):
+            error = str(validated.get("error") or "").strip().lower()
+            status = HTTP_400_BAD_REQUEST if error in {"missing_service_context", "missing_components"} else 500
+            return JSONResponse(status_code=status, content=validated)
+        return validated
+
     @compat_router.post("/subcategory-scope/suggest")
     @router.post("/subcategory-scope/suggest")
     async def subcategory_scope_suggest(payload: Dict[str, Any] = Body(default_factory=dict)) -> Any:
@@ -603,7 +616,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
         routing_policy = adapted.get("routingPolicy")
 
-        pred = _generate_with_optional_optimized_request(adapted)
+        pred = await run_in_threadpool(_generate_with_optional_optimized_request, adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
         return {
             "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),
@@ -650,7 +663,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
         routing_policy = adapted.get("routingPolicy")
 
-        pred = _generate_with_optional_optimized_request(adapted)
+        pred = await run_in_threadpool(_generate_with_optional_optimized_request, adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
         return {
             "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),
@@ -694,7 +707,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
         routing_policy = adapted.get("routingPolicy")
 
-        pred = _generate_with_optional_optimized_request(adapted)
+        pred = await run_in_threadpool(_generate_with_optional_optimized_request, adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
         return {
             "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),
@@ -764,7 +777,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
         routing_policy = adapted.get("routingPolicy")
 
-        pred = _generate_with_optional_optimized_request(adapted)
+        pred = await run_in_threadpool(_generate_with_optional_optimized_request, adapted)
         if (
             isinstance(pred, dict)
             and str(adapted.get("variationMode") or adapted.get("variation_mode") or "").strip().lower() == "price_ladder_9"
@@ -816,7 +829,7 @@ def register(router: APIRouter, compat_router: APIRouter) -> None:
         )
         routing_policy = adapted.get("routingPolicy")
 
-        pred = _generate_with_optional_optimized_request(adapted)
+        pred = await run_in_threadpool(_generate_with_optional_optimized_request, adapted)
         images = normalize_output_urls(pred.get("output") if isinstance(pred, dict) else None)
         return {
             "ok": bool(isinstance(pred, dict) and pred.get("ok") and str(pred.get("status") or "").lower() == "succeeded"),

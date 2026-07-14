@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/server/logger';
+import { buildStudioStarterConcepts } from '@/lib/studio/starter-concepts';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
@@ -155,6 +156,10 @@ function buildCatalogStyleOptions(rows: any[]): {
     imageUrl: string;
     description?: string | null;
     priceTier?: string | null;
+    featuredRank?: number | null;
+    imageId?: string | null;
+    catalogKey?: string | null;
+    catalogSource?: "account" | "global";
   }>;
   question: string | null;
 } {
@@ -165,6 +170,10 @@ function buildCatalogStyleOptions(rows: any[]): {
     imageUrl: string;
     description?: string | null;
     priceTier?: string | null;
+    featuredRank?: number | null;
+    imageId?: string | null;
+    catalogKey?: string | null;
+    catalogSource?: "account" | "global";
   }> = [];
   let question: string | null = null;
 
@@ -184,10 +193,11 @@ function buildCatalogStyleOptions(rows: any[]): {
         : label;
     const imageUrl = typeof row?.image_url === "string" ? row.image_url.trim() : "";
     if (!label || !value || !imageUrl) continue;
-    const dedupeKey =
+    const catalogKey =
       typeof meta.catalog_key === "string" && meta.catalog_key.trim()
-        ? meta.catalog_key.trim().toLowerCase()
-        : value.toLowerCase();
+        ? meta.catalog_key.trim()
+        : null;
+    const dedupeKey = catalogKey ? catalogKey.toLowerCase() : value.toLowerCase();
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     options.push({
@@ -200,6 +210,12 @@ function buildCatalogStyleOptions(rows: any[]): {
       ...(typeof meta.price_tier === "string" && meta.price_tier.trim()
         ? { priceTier: meta.price_tier.trim() }
         : {}),
+      ...(Number.isFinite(Number(meta.featured_rank ?? meta.featuredRank)) && Number(meta.featured_rank ?? meta.featuredRank) > 0
+        ? { featuredRank: Math.floor(Number(meta.featured_rank ?? meta.featuredRank)) }
+        : {}),
+      ...(typeof row?.id === "string" && row.id.trim() ? { imageId: row.id.trim() } : {}),
+      ...(catalogKey ? { catalogKey } : {}),
+      catalogSource: typeof row?.account_id === "string" && row.account_id.trim() ? "account" : "global",
     });
     if (!question && typeof meta.question_text === "string" && meta.question_text.trim()) {
       question = meta.question_text.trim();
@@ -370,6 +386,10 @@ export async function GET(
         imageUrl: string;
         description?: string | null;
         priceTier?: string | null;
+        featuredRank?: number | null;
+        imageId?: string | null;
+        catalogKey?: string | null;
+        catalogSource?: "account" | "global";
       }>;
     }> = [];
     try {
@@ -551,7 +571,7 @@ export async function GET(
       try {
         const subcategoryIds = serviceOptions.map((opt) => String(opt.value || "").trim()).filter(Boolean);
         const accountId = typeof (instance as any)?.account_id === "string" ? String((instance as any).account_id).trim() : "";
-        const selectCols = "subcategory_id, image_url, metadata, created_at, account_id";
+        const selectCols = "id, subcategory_id, image_url, metadata, created_at, account_id";
         const [accountImages, globalImages] = await Promise.all([
           accountId
             ? supabase
@@ -604,10 +624,16 @@ export async function GET(
       }
     }
 
+    // New Studio V1 reads this flat projection. Existing consumers continue using
+    // serviceOptions[].styleOptions unchanged. The helper safely returns a shorter
+    // set (including []) when a catalog does not have six valid public images yet.
+    const starterConcepts = buildStudioStarterConcepts(serviceOptions);
+
     const responseData = {
       success: true,
       instance: instance,
       serviceOptions,
+      starterConcepts,
       images: [],
       totalImages: 0,
       fetchedAt: responseTimestamp,
@@ -632,6 +658,7 @@ export async function GET(
         status: 200,
         durationMs: Date.now() - startedAtMs,
         hasServiceOptions: Array.isArray(serviceOptions) && serviceOptions.length > 0,
+        starterConceptCount: starterConcepts.length,
         serviceOptions: (serviceOptions || []).slice(0, 20).map((opt: any) => ({
           serviceId: String(opt?.value || ""),
           label: typeof opt?.label === "string" ? opt.label : null,

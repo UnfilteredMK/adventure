@@ -66,6 +66,7 @@ type BootstrapServiceOption = {
     imageUrl: string;
     description?: string | null;
     priceTier?: string | null;
+    featuredRank?: number | null;
   }>;
 };
 
@@ -1386,7 +1387,7 @@ export function AdventureFormExperience({
           <div className="flex min-h-0 flex-1 flex-col max-sm:overflow-y-auto max-sm:overscroll-y-contain max-sm:[-webkit-overflow-scrolling:touch] sm:overflow-hidden">
             {useWidgetDefaults ? (
               <div className="shrink-0">
-                <BrandHeader config={resolvedDesign} containerWidth={1024} hideInMobile={false} />
+                <BrandHeader config={resolvedDesign} containerWidth={1024} hideInMobile={false} compact />
               </div>
             ) : null}
             <div className="flex min-h-min flex-1 flex-col sm:min-h-0">
@@ -1412,6 +1413,9 @@ export function AdventureFormExperience({
                   instanceData?.config?.use_case,
                 previewPricing: formConfig?.previewPricing,
                 leadCaptureRequired: formConfig?.leadCaptureRequired,
+                pricingGateStrategy: formConfig?.pricingGateStrategy,
+                pricingGateExperimentPercent: formConfig?.pricingGateExperimentPercent,
+                pricingGateExperimentKey: formConfig?.pricingGateExperimentKey,
               }}
             />
             </div>

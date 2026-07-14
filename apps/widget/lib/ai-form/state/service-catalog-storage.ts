@@ -20,6 +20,7 @@ export type ServiceCatalogItem = {
     imageUrl: string;
     description?: string | null;
     priceTier?: string | null;
+    featuredRank?: number | null;
   }>;
 };
 
@@ -114,6 +115,10 @@ export function saveServiceCatalog(sessionId: string, items: ServiceCatalogItem[
                 imageUrl: typeof opt?.imageUrl === "string" ? opt.imageUrl : "",
                 description: typeof opt?.description === "string" ? opt.description : null,
                 priceTier: typeof opt?.priceTier === "string" ? opt.priceTier : null,
+                featuredRank:
+                  Number.isFinite(Number(opt?.featuredRank ?? opt?.featured_rank)) && Number(opt?.featuredRank ?? opt?.featured_rank) > 0
+                    ? Math.floor(Number(opt?.featuredRank ?? opt?.featured_rank))
+                    : null,
               }))
               .filter((opt: any) => opt.label && opt.value && opt.imageUrl)
               .slice(0, 20)

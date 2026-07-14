@@ -76,6 +76,7 @@ interface FormQuestionSectionProps {
   layoutDebugEnabled?: boolean;
   /** Parent (e.g. body) owns vertical scroll — avoid nested scroll traps under the preview. */
   scrollStackWithPreview?: boolean;
+  onProjectPhotoSelected?: (url: string) => void | Promise<void>;
 }
 
 export function FormQuestionSection({
@@ -127,6 +128,7 @@ export function FormQuestionSection({
   guidedThumbnailMode,
   layoutDebugEnabled = false,
   scrollStackWithPreview = false,
+  onProjectPhotoSelected,
 }: FormQuestionSectionProps) {
   const uploadsInputRef = useRef<HTMLInputElement>(null);
   const { suggestions: ideasSuggestions, loading: ideasLoading } = usePreviewSuggestions();
@@ -957,6 +959,7 @@ export function FormQuestionSection({
                             guidedThumbnailMode={guidedThumbnailMode}
                             compactInPreview={compactPreviewActive}
                             layoutDebugEnabled={layoutDebugEnabled}
+                            onProjectPhotoSelected={onProjectPhotoSelected}
                           />
                         </div>
                       </motion.div>

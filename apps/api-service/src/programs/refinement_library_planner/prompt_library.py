@@ -15,6 +15,7 @@ Given service context (industry/category, service name, summaries), propose:
 - Every component listed must have its own `optionSeeds` entry with the same `componentKey`.
 - Each option needs a concise `label`, a stable `value` (snake_case), and a rich `imagePrompt` suitable for a single photorealistic render (no text in the image).
 - Avoid administrative, contractual, scheduling, pricing, permit-only, or non-visual “categories”.
+- Never return a key listed in `excluded_component_keys`; those candidates were explicitly rejected by semantic validation.
 - Respect `target_component_count` and `target_options_per_component` from the context JSON as upper bounds.
 
 ## Output JSON only

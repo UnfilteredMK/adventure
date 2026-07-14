@@ -15,6 +15,8 @@ interface StyleStepProps {
   guidedThumbnailMode?: boolean;
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
+  instanceId?: string;
+  onProjectPhotoSelected?: (url: string) => void | Promise<void>;
 }
 
 export function isDeterministicStyleStep(step: any): boolean {

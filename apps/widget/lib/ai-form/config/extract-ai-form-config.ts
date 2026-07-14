@@ -50,8 +50,48 @@ export function extractAIFormConfig(instanceConfig: unknown): AIFormConfig {
     leadCaptureEnabled
   );
   const previewPricing = pickFirst<AIFormConfig["previewPricing"]>(cfg.previewPricing, legacy.previewPricing);
+  const visualPricingJourneyVersion = pickFirst<AIFormConfig["visualPricingJourneyVersion"]>(
+    cfg.visual_pricing_journey_version,
+    cfg.visualPricingJourneyVersion,
+    legacy.visual_pricing_journey_version,
+    legacy.visualPricingJourneyVersion
+  );
+  const pricingGateStrategy = pickFirst<AIFormConfig["pricingGateStrategy"]>(
+    cfg.pricing_gate_strategy,
+    cfg.pricingGateStrategy,
+    legacy.pricing_gate_strategy,
+    legacy.pricingGateStrategy
+  );
+  const pricingGateExperimentPercent = pickFirst<number>(
+    cfg.pricing_gate_experiment_percent,
+    cfg.pricingGateExperimentPercent,
+    legacy.pricing_gate_experiment_percent,
+    legacy.pricingGateExperimentPercent
+  );
+  const pricingGateExperimentKey = pickFirst<string>(
+    cfg.pricing_gate_experiment_key,
+    cfg.pricingGateExperimentKey,
+    legacy.pricing_gate_experiment_key,
+    legacy.pricingGateExperimentKey
+  );
 
   return {
+    // The rejected stacked V1 intentionally does not reactivate when old
+    // instance data still contains `v1`. Only the new studio flag opts in.
+    visualPricingJourneyVersion:
+      visualPricingJourneyVersion === "studio_v1" ? "studio_v1" : "legacy",
+    pricingGateStrategy:
+      pricingGateStrategy === "coarse_visible" || pricingGateStrategy === "experiment"
+        ? pricingGateStrategy
+        : "blurred",
+    pricingGateExperimentPercent:
+      Number.isFinite(Number(pricingGateExperimentPercent))
+        ? Math.max(0, Math.min(100, Number(pricingGateExperimentPercent)))
+        : 50,
+    pricingGateExperimentKey:
+      typeof pricingGateExperimentKey === "string" && pricingGateExperimentKey.trim()
+        ? pricingGateExperimentKey.trim()
+        : "visual-pricing-v1-gate-1",
     maxSteps,
     maxImages,
     requiredInputs,

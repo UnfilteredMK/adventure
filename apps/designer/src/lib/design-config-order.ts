@@ -45,6 +45,11 @@ export const DESIGN_CONFIG_KEY_ORDER_V2 = [
 
   // AI form toggle status (mirrors flow_config.enabled)
   "form_status_enabled",
+  // Visual Pricing Journey rollout + pricing-gate experiment.
+  "visual_pricing_journey_version",
+  "pricing_gate_strategy",
+  "pricing_gate_experiment_percent",
+  "pricing_gate_experiment_key",
   // AI form UI toggles (stored in config; used by /adventure form UI)
   "form_show_progress_bar",
   "form_show_step_descriptions",

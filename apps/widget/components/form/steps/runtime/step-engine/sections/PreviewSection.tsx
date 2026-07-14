@@ -2,7 +2,9 @@
 
 import React, { useMemo } from "react";
 import { ImagePreviewExperience } from "../../../image-preview-experience/ImagePreviewExperience";
+import type { StudioStarterConcept } from "../../../image-preview-experience/ImagePreviewExperience";
 import { cn } from "@/lib/utils";
+import { assignPricingGateVariant } from "@/lib/visual-pricing/experiment";
 interface PreviewSectionProps {
   adventureInputMode: "questions" | "ideas" | "prompt" | "budget" | "uploads";
   answeredQuestionCount: number;
@@ -25,6 +27,7 @@ interface PreviewSectionProps {
   setPreviewHasImage: (hasImage: boolean) => void;
   setPreviewVisible: (visible: boolean) => void;
   leadPricingPresentationActive?: boolean;
+  studioEstimateMode?: boolean;
   showQuestionPaneUnderPreview: boolean;
   stateStepData?: Record<string, any>;
   toolingEnabled?: boolean;
@@ -38,6 +41,7 @@ interface PreviewSectionProps {
   previewSurfaceMode?: "gallery" | "single" | "empty";
   onKeepDesigning?: () => void;
   onPreviewSurfaceModeChange?: (mode: "gallery" | "single" | "empty") => void;
+  studioStarterConcept?: StudioStarterConcept | null;
 }
 
 export function PreviewSection({
@@ -60,7 +64,7 @@ export function PreviewSection({
   setPreviewHasImage,
   setPreviewVisible,
   leadPricingPresentationActive = false,
-  showQuestionPaneUnderPreview: _showQuestionPaneUnderPreview,
+  studioEstimateMode = false,
   stateStepData,
   toolingEnabled = true,
   disableConceptPicker = false,
@@ -71,9 +75,30 @@ export function PreviewSection({
   previewSurfaceMode = "empty",
   onKeepDesigning,
   onPreviewSurfaceModeChange,
+  studioStarterConcept = null,
 }: PreviewSectionProps) {
   const galleryPickerOwnsVerticalPan = Boolean(
     useMobilePreviewLayout && previewSurfaceMode === "gallery"
+  );
+  const studioGalleryActive = previewSurfaceMode === "gallery" && !disableConceptPicker;
+  const studioEstimateActive = Boolean(studioEstimateMode);
+  const pricingGateVariant = useMemo(
+    () =>
+      assignPricingGateVariant({
+        strategy: config?.pricingGateStrategy,
+        experimentPercent: config?.pricingGateExperimentPercent,
+        experimentKey: config?.pricingGateExperimentKey,
+        instanceId,
+        sessionId,
+        storage: typeof window !== "undefined" ? window.sessionStorage : null,
+      }),
+    [
+      config?.pricingGateExperimentKey,
+      config?.pricingGateExperimentPercent,
+      config?.pricingGateStrategy,
+      instanceId,
+      sessionId,
+    ],
   );
   const stepDataSoFar = useMemo(() => {
     const base = { ...(stateStepData || {}) };
@@ -101,7 +126,7 @@ export function PreviewSection({
     <div
       className={cn(
         "flex min-h-0 flex-col overflow-x-hidden",
-        leadPricingPresentationActive
+        leadPricingPresentationActive || studioEstimateActive
           ? "overflow-hidden"
           : generationScrollStack || galleryPickerOwnsVerticalPan
             ? "overflow-y-visible"
@@ -113,15 +138,19 @@ export function PreviewSection({
               ? "flex-1"
               : generationScrollStack
                 ? "w-full shrink-0"
-                : "flex-1 flex items-start justify-center"
+                : studioGalleryActive || studioEstimateActive
+                  ? "flex-1 items-stretch justify-start"
+                  : "flex-1 items-start justify-center"
           : "flex-1 shrink-0"
       )}
     >
       <div
         className={cn(
           "mx-auto flex w-full min-h-0 flex-col",
-          leadPricingPresentationActive ? "h-full flex-1" : null,
-          useMobilePreviewLayout
+          leadPricingPresentationActive || studioGalleryActive || studioEstimateActive ? "h-full flex-1" : null,
+          studioGalleryActive || studioEstimateActive
+            ? "max-w-[88rem] px-2 sm:px-4"
+            : useMobilePreviewLayout
             ? "max-w-none px-0"
             : useDesktopPreviewLayout
               ? "max-w-5xl px-4"
@@ -131,7 +160,7 @@ export function PreviewSection({
           usePreviewDominantLayout ? "py-0.5 max-sm:py-0 sm:py-1" : useDesktopPreviewLayout ? "py-1 sm:py-2" : null
         )}
       >
-        <div className={cn("flex w-full min-h-0 flex-col", leadPricingPresentationActive ? "h-full flex-1" : null)}>
+        <div className={cn("flex w-full min-h-0 flex-col", leadPricingPresentationActive || studioGalleryActive || studioEstimateActive ? "h-full flex-1" : null)}>
           <ImagePreviewExperience
             key="image-preview"
             enabled={true}
@@ -142,7 +171,7 @@ export function PreviewSection({
             config={config}
             stepDataSoFar={stepDataSoFar}
             answeredQuestionCount={answeredQuestionCount}
-            autoRegenerateEveryNAnsweredQuestions={2}
+            autoRegenerateEveryNAnsweredQuestions={studioEstimateMode ? 0 : 2}
             autoGenerationCounterScope={autoGenerationCounterScope}
             onAutoGenerationBusyChange={setAutoGenerationBusy}
             onPreviewVisibleChange={setPreviewVisible}
@@ -154,6 +183,11 @@ export function PreviewSection({
             suppressUploadOverlay={isRefinementUploadStep}
             toolingEnabled={toolingEnabled}
             disableConceptPicker={disableConceptPicker}
+            conceptCount={4}
+            progressiveConcepts
+            studioStarterConcept={studioStarterConcept}
+            studioEstimateMode={studioEstimateMode}
+            pricingGateVariant={pricingGateVariant}
             onKeepDesigning={onKeepDesigning}
             onPreviewSurfaceModeChange={onPreviewSurfaceModeChange}
             stepNavReturnToGalleryNonce={stepNavReturnToGalleryNonce}

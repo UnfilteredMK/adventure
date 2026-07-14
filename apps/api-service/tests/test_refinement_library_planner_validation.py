@@ -1,3 +1,4 @@
+from programs.refinement_library_planner import orchestrator
 from programs.refinement_library_planner.validation import validate_and_normalize_planner_payload
 
 
@@ -125,3 +126,120 @@ def test_dedupes_component_and_option_values() -> None:
     assert ok
     assert len(norm["components"]) == 1
     assert len(norm["optionSeeds"][0]["options"]) == 1
+
+
+def test_excluded_component_keys_are_removed_with_their_seeds() -> None:
+    raw = {
+        "components": [
+            {"key": "vanity", "label": "Vanity", "priority": 1, "reason": "Bathroom fixture"},
+            {"key": "Pavers", "label": "Pavers", "priority": 2, "reason": "Exterior hardscape"},
+        ],
+        "optionSeeds": [
+            {
+                "componentKey": "vanity",
+                "options": [
+                    {
+                        "label": "Floating oak",
+                        "value": "floating_oak",
+                        "imagePrompt": "Floating oak vanity in a finished contemporary bathroom",
+                    }
+                ],
+            },
+            {
+                "componentKey": "pavers",
+                "options": [
+                    {
+                        "label": "Concrete",
+                        "value": "concrete",
+                        "imagePrompt": "Concrete pavers across an exterior garden walkway",
+                    }
+                ],
+            },
+        ],
+    }
+
+    ok, err, norm = validate_and_normalize_planner_payload(
+        raw,
+        target_component_count=10,
+        target_options_per_component=6,
+        excluded_component_keys=["PAVERS"],
+    )
+
+    assert ok and not err
+    assert [component["key"] for component in norm["components"]] == ["vanity"]
+    assert [group["componentKey"] for group in norm["optionSeeds"]] == ["vanity"]
+
+
+def test_planner_request_passes_and_enforces_excluded_keys(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_planner_once(
+        *,
+        ctx,
+        excluded_component_keys,
+        existing_components,
+        target_component_count,
+        target_options_per_component,
+        retry_hint,
+    ):
+        calls.append(
+            {
+                "excluded": excluded_component_keys,
+                "existing": existing_components,
+                "retry_hint": retry_hint,
+            }
+        )
+        return (
+            {
+                "components": [
+                    {"key": "vanity", "label": "Vanity", "priority": 1, "reason": "Bathroom fixture"},
+                    {"key": "pavers", "label": "Pavers", "priority": 2, "reason": "Exterior hardscape"},
+                ],
+                "optionSeeds": [
+                    {
+                        "componentKey": "vanity",
+                        "options": [
+                            {
+                                "label": "Floating oak",
+                                "value": "floating_oak",
+                                "imagePrompt": "Floating oak vanity in a finished contemporary bathroom",
+                            }
+                        ],
+                    },
+                    {
+                        "componentKey": "pavers",
+                        "options": [
+                            {
+                                "label": "Concrete",
+                                "value": "concrete",
+                                "imagePrompt": "Concrete pavers across an exterior garden walkway",
+                            }
+                        ],
+                    },
+                ],
+            },
+            None,
+        )
+
+    monkeypatch.setattr(orchestrator, "_run_planner_once", fake_run_planner_once)
+    response = orchestrator.plan_refinement_library(
+        {
+            "service": "Bathroom Remodeling",
+            "excludedComponentKeys": ["Pavers", "pavers"],
+            "existingComponents": [
+                {"key": "vanity", "label": "Vanity"},
+                {"key": "pavers", "label": "Pavers"},
+            ],
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["excludedComponentKeys"] == ["pavers"]
+    assert [component["key"] for component in response["components"]] == ["vanity"]
+    assert calls == [
+        {
+            "excluded": ["pavers"],
+            "existing": [{"key": "vanity", "label": "Vanity", "priority": None}],
+            "retry_hint": None,
+        }
+    ]

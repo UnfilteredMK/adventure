@@ -54,7 +54,7 @@ class VariantSlot:
 VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     VariantSlot(
         slot_id="safe_base",
-        label="Safe Base",
+        label="Signature Direction",
         summary="closest to the chosen style direction, clean, neutral, broadly appealing",
         material_level="solid mid-range finishes with practical fixtures and restrained upgrades",
         lighting_style="balanced daylight with clean, even exposure",
@@ -76,7 +76,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="warm_cozy",
-        label="Warm & Cozy",
+        label="Warm & Inviting",
         summary="warmer lighting, softer materials, more inviting and residential",
         material_level="mid-range finishes with warmer woods, textured surfaces, and softer materials",
         lighting_style="warm layered light, gentle shadows, inviting tone",
@@ -87,7 +87,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="budget_basic",
-        label="Budget Basic",
+        label="Simplified Direction",
         summary="simpler execution, fewer premium materials, lower cost but still attractive",
         material_level="builder-grade or budget-conscious finishes, stock components, simpler material palette",
         lighting_style="straightforward realistic lighting with minimal drama",
@@ -98,7 +98,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="balanced_mid",
-        label="Balanced Mid",
+        label="Balanced Direction",
         summary="the most realistic common outcome, what many customers actually choose",
         material_level="strong mid-range materials, polished but practical finish package",
         lighting_style="balanced natural and architectural light",
@@ -109,7 +109,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="upgrade_mid",
-        label="Upgrade Mid",
+        label="Elevated Direction",
         summary="slightly nicer than average, more polish and better materials",
         material_level="upper mid-range finishes with noticeable upgrades in key surfaces and fixtures",
         lighting_style="clean flattering light with more intentional contrast",
@@ -120,7 +120,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="premium",
-        label="Premium",
+        label="Premium Direction",
         summary="higher-end finishes, cleaner detailing, clear premium signal",
         material_level="premium materials, custom-feeling surfaces, elevated hardware and fixtures",
         lighting_style="refined light with crisp highlights and premium finish definition",
@@ -131,7 +131,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="luxury",
-        label="Luxury",
+        label="Luxury Direction",
         summary="strong premium signal, spa or boutique-hotel feel, more drama",
         material_level="luxury materials and bespoke-looking focal surfaces appropriate to the service",
         lighting_style="more dramatic contrast, sculpted architectural lighting, elevated ambiance",
@@ -142,7 +142,7 @@ VARIANT_SLOTS: tuple[VariantSlot, ...] = (
     ),
     VariantSlot(
         slot_id="aspirational_anchor",
-        label="Aspirational Anchor",
+        label="Statement Direction",
         summary="highest-end believable wow factor, the strongest but still realistic anchor image",
         material_level="best-in-class finish package with the most elevated materials that still feel buildable",
         lighting_style="editorial-quality natural and architectural light without becoming fantastical",

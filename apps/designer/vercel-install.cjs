@@ -30,18 +30,21 @@ function findMonorepoRoot() {
   return tryDir(process.cwd()) || tryDir(__dirname);
 }
 
-const root = findMonorepoRoot();
-if (!root) {
-  console.error(
-    "vercel-install: adventure-monorepo root not found. Use: npm run prod:widget (deploys from git root).",
-  );
-  process.exit(1);
+function installAt(dir) {
+  process.chdir(dir);
+  console.error("vercel-install: cwd", dir);
+  try {
+    execSync("npm ci --no-audit --no-fund", { stdio: "inherit" });
+  } catch {
+    console.error("vercel-install: npm ci failed; running npm install");
+    execSync("npm install --no-audit --no-fund", { stdio: "inherit" });
+  }
 }
-process.chdir(root);
-console.error("vercel-install: cwd", root);
-try {
-  execSync("npm ci --no-audit --no-fund", { stdio: "inherit" });
-} catch {
-  console.error("vercel-install: npm ci failed; running npm install");
-  execSync("npm install --no-audit --no-fund", { stdio: "inherit" });
+
+const root = findMonorepoRoot();
+if (root) {
+  installAt(root);
+} else {
+  // CLI deploys from app subdirectory may not include monorepo root.
+  installAt(process.cwd());
 }

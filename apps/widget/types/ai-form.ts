@@ -374,6 +374,14 @@ export interface Step {
 }
 
 export interface AIFormConfig {
+  /** Canonical visual-pricing rollout. Missing values preserve the legacy journey. */
+  visualPricingJourneyVersion?: 'legacy' | 'studio_v1';
+  /** How much preliminary pricing is visible before the detailed estimate lead gate. */
+  pricingGateStrategy?: 'blurred' | 'coarse_visible' | 'experiment';
+  /** Percent assigned to coarse_visible when pricingGateStrategy is experiment. */
+  pricingGateExperimentPercent?: number;
+  /** Versioned salt used for deterministic session assignment. */
+  pricingGateExperimentKey?: string;
   maxSteps?: number;
   maxImages?: number;
   allowedBuyerRefinements?: string[];

@@ -29,10 +29,88 @@
         "title": "FormResponse",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PriceDriver": {
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "PriceDriver",
+        "type": "object"
+      },
       "PricingResponse": {
         "additionalProperties": true,
         "description": "Response for `POST /v1/api/pricing/{instanceId}`.",
         "properties": {
+          "baselinePriceRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServicePriceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budgetTier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budgettier"
+          },
+          "budgetTierRanges": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ServicePriceRange"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budgettierranges"
+          },
+          "calibrationKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibrationkey"
+          },
           "confidence": {
             "default": "low",
             "title": "Confidence",
@@ -42,6 +120,44 @@
             "default": "USD",
             "title": "Currency",
             "type": "string"
+          },
+          "deltaDirection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deltadirection"
+          },
+          "deltaPriceRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServicePriceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imagePriceRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServicePriceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceDrivers": {
+            "items": {
+              "$ref": "#/components/schemas/PriceDriver"
+            },
+            "title": "Pricedrivers",
+            "type": "array"
           },
           "rangeHigh": {
             "title": "Rangehigh",
@@ -54,6 +170,16 @@
           "requestId": {
             "title": "Requestid",
             "type": "string"
+          },
+          "servicePriceRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServicePriceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -64,17 +190,22 @@
         "title": "PricingResponse",
         "type": "object"
       },
-      "HTTPValidationError": {
+      "ServicePriceRange": {
+        "additionalProperties": true,
+        "description": "Typical price range for a service type (e.g., Landscape $5k-$175k).",
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
+          "high": {
+            "default": 0,
+            "title": "High",
+            "type": "integer"
+          },
+          "low": {
+            "default": 0,
+            "title": "Low",
+            "type": "integer"
           }
         },
-        "title": "HTTPValidationError",
+        "title": "ServicePriceRange",
         "type": "object"
       },
       "ValidationError": {
@@ -118,6 +249,679 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/": {
+      "get": {
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Root  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
+    "/api/ai-form/{instanceId}/execute-function": {
+      "post": {
+        "operationId": "execute_function_api_ai_form__instanceId__execute_function_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Execute Function Api Ai Form  Instanceid  Execute Function Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Function"
+      }
+    },
+    "/api/ai-form/{instanceId}/generate-steps": {
+      "post": {
+        "operationId": "generate_steps_compat_api_ai_form__instanceId__generate_steps_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Steps Compat Api Ai Form  Instanceid  Generate Steps Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Steps Compat"
+      }
+    },
+    "/api/ai-form/{instanceId}/pricing": {
+      "post": {
+        "operationId": "pricing_ai_form_compat_api_ai_form__instanceId__pricing_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Pricing Ai Form Compat Api Ai Form  Instanceid  Pricing Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Ai Form Compat"
+      }
+    },
+    "/api/generate/drilldown": {
+      "post": {
+        "operationId": "generate_drilldown_api_generate_drilldown_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Drilldown Api Generate Drilldown Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Drilldown"
+      }
+    },
+    "/api/generate/scene": {
+      "post": {
+        "operationId": "generate_scene_api_generate_scene_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene Api Generate Scene Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene"
+      }
+    },
+    "/api/generate/scene-placement": {
+      "post": {
+        "operationId": "generate_scene_placement_api_generate_scene_placement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene Placement Api Generate Scene Placement Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene Placement"
+      }
+    },
+    "/api/generate/scene-refinement": {
+      "post": {
+        "operationId": "generate_scene_refinement_api_generate_scene_refinement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene Refinement Api Generate Scene Refinement Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene Refinement"
+      }
+    },
+    "/api/generate/try-on": {
+      "post": {
+        "operationId": "generate_try_on_api_generate_try_on_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Try On Api Generate Try On Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Try On"
+      }
+    },
+    "/api/image": {
+      "post": {
+        "operationId": "image_compat_api_image_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Image Compat Api Image Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Image Compat"
+      }
+    },
+    "/api/option-images/generate": {
+      "post": {
+        "operationId": "option_images_generate_api_option_images_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Option Images Generate Api Option Images Generate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Option Images Generate"
+      }
+    },
+    "/api/option-images/regenerate": {
+      "post": {
+        "operationId": "option_images_regenerate_api_option_images_regenerate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Option Images Regenerate Api Option Images Regenerate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Option Images Regenerate"
+      }
+    },
+    "/api/pricing": {
+      "post": {
+        "operationId": "pricing_compat_api_pricing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Pricing Compat Api Pricing Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Compat"
+      }
+    },
+    "/api/refinement-library-planner/plan": {
+      "post": {
+        "operationId": "refinement_library_plan_api_refinement_library_planner_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Refinement Library Plan Api Refinement Library Planner Plan Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refinement Library Plan"
+      }
+    },
+    "/api/refinement-library-planner/validate-components": {
+      "post": {
+        "operationId": "refinement_library_validate_components_api_refinement_library_planner_validate_components_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Refinement Library Validate Components Api Refinement Library Planner Validate Components Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refinement Library Validate Components"
+      }
+    },
+    "/api/subcategory-catalog/generate": {
+      "post": {
+        "operationId": "subcategory_catalog_generate_api_subcategory_catalog_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Subcategory Catalog Generate Api Subcategory Catalog Generate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subcategory Catalog Generate"
+      }
+    },
+    "/api/subcategory-scope/suggest": {
+      "post": {
+        "operationId": "subcategory_scope_suggest_api_subcategory_scope_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Subcategory Scope Suggest Api Subcategory Scope Suggest Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subcategory Scope Suggest"
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_health_get",
@@ -136,6 +940,154 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/v1/api/ai-form/{instanceId}/execute-function": {
+      "post": {
+        "operationId": "execute_function_v1_api_ai_form__instanceId__execute_function_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Execute Function V1 Api Ai Form  Instanceid  Execute Function Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Function"
+      }
+    },
+    "/v1/api/ai-form/{instanceId}/generate-steps": {
+      "post": {
+        "operationId": "generate_steps_v1_api_ai_form__instanceId__generate_steps_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Steps V1 Api Ai Form  Instanceid  Generate Steps Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Steps"
+      }
+    },
+    "/v1/api/ai-form/{instanceId}/pricing": {
+      "post": {
+        "operationId": "pricing_ai_form_v1_api_ai_form__instanceId__pricing_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Pricing Ai Form V1 Api Ai Form  Instanceid  Pricing Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing Ai Form"
       }
     },
     "/v1/api/form/capabilities": {
@@ -209,10 +1161,10 @@
         "summary": "Form"
       }
     },
-    "/v1/api/pricing/{instanceId}": {
+    "/v1/api/form/{instanceId}/refinements": {
       "post": {
-        "description": "Estimates a rough pricing range based on the same inputs as step generation.",
-        "operationId": "pricing_v1_api_pricing__instanceId__post",
+        "description": "Generates refinement questions for post-concept exploration. Same payload shape as /form/{instanceId}.",
+        "operationId": "refinements_v1_api_form__instanceId__refinements_post",
         "parameters": [
           {
             "in": "path",
@@ -240,7 +1192,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PricingResponse"
+                  "$ref": "#/components/schemas/FormResponse"
                 }
               }
             },
@@ -257,13 +1209,12 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pricing"
+        "summary": "Refinements"
       }
     },
-    "/v1/api/pricing": {
+    "/v1/api/generate/drilldown": {
       "post": {
-        "description": "Estimates a rough pricing range; instanceId is taken from payload.session.instanceId or payload.instanceId.",
-        "operationId": "pricing_no_path_instance_v1_api_pricing_post",
+        "operationId": "generate_drilldown_v1_api_generate_drilldown_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -280,7 +1231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PricingResponse"
+                  "title": "Response Generate Drilldown V1 Api Generate Drilldown Post"
                 }
               }
             },
@@ -297,7 +1248,163 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pricing"
+        "summary": "Generate Drilldown"
+      }
+    },
+    "/v1/api/generate/scene": {
+      "post": {
+        "operationId": "generate_scene_v1_api_generate_scene_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene V1 Api Generate Scene Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene"
+      }
+    },
+    "/v1/api/generate/scene-placement": {
+      "post": {
+        "operationId": "generate_scene_placement_v1_api_generate_scene_placement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene Placement V1 Api Generate Scene Placement Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene Placement"
+      }
+    },
+    "/v1/api/generate/scene-refinement": {
+      "post": {
+        "operationId": "generate_scene_refinement_v1_api_generate_scene_refinement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Scene Refinement V1 Api Generate Scene Refinement Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Scene Refinement"
+      }
+    },
+    "/v1/api/generate/try-on": {
+      "post": {
+        "operationId": "generate_try_on_v1_api_generate_try_on_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Generate Try On V1 Api Generate Try On Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Try On"
       }
     },
     "/v1/api/image": {
@@ -319,9 +1426,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Image V1 Api Image Post",
-                  "type": "object"
+                  "title": "Response Image V1 Api Image Post"
                 }
               }
             },
@@ -339,6 +1444,366 @@
           }
         },
         "summary": "Image"
+      }
+    },
+    "/v1/api/image/prompt": {
+      "post": {
+        "operationId": "image_prompt_v1_api_image_prompt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Image Prompt V1 Api Image Prompt Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Image Prompt"
+      }
+    },
+    "/v1/api/option-images/generate": {
+      "post": {
+        "operationId": "option_images_generate_v1_api_option_images_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Option Images Generate V1 Api Option Images Generate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Option Images Generate"
+      }
+    },
+    "/v1/api/option-images/regenerate": {
+      "post": {
+        "operationId": "option_images_regenerate_v1_api_option_images_regenerate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Option Images Regenerate V1 Api Option Images Regenerate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Option Images Regenerate"
+      }
+    },
+    "/v1/api/pricing": {
+      "post": {
+        "description": "Estimates a rough pricing range; instanceId is taken from payload.session.instanceId or payload.instanceId.",
+        "operationId": "pricing_no_path_instance_v1_api_pricing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing No Path Instance"
+      }
+    },
+    "/v1/api/pricing/{instanceId}": {
+      "post": {
+        "description": "Estimates a rough pricing range based on the same inputs as step generation.",
+        "operationId": "pricing_v1_api_pricing__instanceId__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "title": "Instanceid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pricing"
+      }
+    },
+    "/v1/api/refinement-library-planner/plan": {
+      "post": {
+        "operationId": "refinement_library_plan_v1_api_refinement_library_planner_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Refinement Library Plan V1 Api Refinement Library Planner Plan Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refinement Library Plan"
+      }
+    },
+    "/v1/api/refinement-library-planner/validate-components": {
+      "post": {
+        "operationId": "refinement_library_validate_components_v1_api_refinement_library_planner_validate_components_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Refinement Library Validate Components V1 Api Refinement Library Planner Validate Components Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refinement Library Validate Components"
+      }
+    },
+    "/v1/api/subcategory-catalog/generate": {
+      "post": {
+        "operationId": "subcategory_catalog_generate_v1_api_subcategory_catalog_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Subcategory Catalog Generate V1 Api Subcategory Catalog Generate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subcategory Catalog Generate"
+      }
+    },
+    "/v1/api/subcategory-scope/suggest": {
+      "post": {
+        "operationId": "subcategory_scope_suggest_v1_api_subcategory_scope_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Subcategory Scope Suggest V1 Api Subcategory Scope Suggest Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subcategory Scope Suggest"
       }
     }
   }

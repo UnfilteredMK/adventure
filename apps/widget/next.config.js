@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: '.next',
@@ -8,6 +10,11 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   webpack: (config, { isServer }) => {
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      'framer-motion': path.dirname(require.resolve('framer-motion/package.json')),
+    };
+
     // Exclude OpenTelemetry from client bundle
     if (!isServer) {
       config.resolve.fallback = {

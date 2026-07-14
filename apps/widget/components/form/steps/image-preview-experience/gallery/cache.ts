@@ -1,7 +1,7 @@
 "use client";
 
 import { notifyPreviewCacheUpdated } from "./preview-cache-bridge";
-import type { CachedPricing, PreviewCacheV2, PreviewCacheV3, PreviewRun } from "./types";
+import type { CachedPricing, ConceptPresentation, PreviewCacheV2, PreviewCacheV3, PreviewRun } from "./types";
 import { isPlaceholderPreviewImage, isValidUrlLikeImage } from "./utils/images";
 import { normalizeNumericRange } from "./utils/pricing";
 
@@ -46,6 +46,9 @@ export function loadCache(instanceId: string, sessionId: string): PreviewCacheV3
             ? (r as any).images.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src))
             : [];
           const rawPricing = Array.isArray((r as any).imagePricing) ? (r as any).imagePricing : [];
+          const rawConceptPresentations = Array.isArray((r as any).conceptPresentations)
+            ? (r as any).conceptPresentations
+            : [];
           const imagePricing: (CachedPricing | undefined)[] = imgs.map((_: string, i: number) => {
             const p = rawPricing[i];
             if (!p || typeof p !== "object" || !Number.isFinite(p.totalMin) || !Number.isFinite(p.totalMax)) {
@@ -107,6 +110,29 @@ export function loadCache(instanceId: string, sessionId: string): PreviewCacheV3
               calibrationKey: typeof p.calibrationKey === "string" ? p.calibrationKey : undefined,
             };
           });
+          const conceptPresentations: (ConceptPresentation | undefined)[] = imgs.map((_: string, i: number) => {
+            const rawPresentation = rawConceptPresentations[i];
+            if (!rawPresentation || typeof rawPresentation !== "object") return undefined;
+            const title =
+              typeof rawPresentation.title === "string"
+                ? rawPresentation.title.trim()
+                : typeof rawPresentation.label === "string"
+                  ? rawPresentation.label.trim()
+                  : "";
+            if (!title) return undefined;
+            const id =
+              typeof rawPresentation.id === "string"
+                ? rawPresentation.id.trim()
+                : typeof rawPresentation.slotId === "string"
+                  ? rawPresentation.slotId.trim()
+                  : "";
+            const summary = typeof rawPresentation.summary === "string" ? rawPresentation.summary.trim() : "";
+            return {
+              ...(id ? { id } : {}),
+              title,
+              ...(summary ? { summary } : {}),
+            };
+          });
           return {
             id: typeof (r as any).id === "string" ? (r as any).id : newRunId(),
             createdAt: Number((r as any).createdAt) || Date.now(),
@@ -126,6 +152,7 @@ export function loadCache(instanceId: string, sessionId: string): PreviewCacheV3
                 ? ((r as any).stepDataSnapshot as Record<string, any>)
                 : undefined,
             ...(imagePricing.some(Boolean) ? { imagePricing } : {}),
+            ...(conceptPresentations.some(Boolean) ? { conceptPresentations } : {}),
           };
         })
         .filter((r) => Boolean(r.images?.length));

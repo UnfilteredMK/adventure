@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/database';
+import { compactDesignConfigToV2 } from '@/lib/design-config-v2';
+import { defaultDesignSettingsV2 } from '@/types/design-v2';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,6 +84,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+    const initialConfig = compactDesignConfigToV2(
+      {
+        ...defaultDesignSettingsV2,
+        suggestions_enabled: false,
+        visual_pricing_journey_version: 'legacy',
+        form_status_enabled: true,
+        form_show_progress_bar: true,
+        form_show_step_descriptions: true,
+        lead_capture_enabled: true,
+        gallery_show_placeholder_images: false,
+      },
+      { fillDefaults: true },
+    );
     
     // Use RLS - user_id will be set automatically via RLS
     const { data: instance, error } = await supabase
@@ -96,7 +111,8 @@ export async function POST(request: Request) {
         company_summary: typeof company_summary === 'string' && company_summary.trim().length > 0 ? company_summary.trim() : null,
         is_public: true, // Default to public for new instances
         submission_limit_enabled: false,
-        max_submissions_per_session: 5
+        max_submissions_per_session: 5,
+        config: initialConfig,
       })
       .select()
       .single();
@@ -107,4 +123,4 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
-} 
+}

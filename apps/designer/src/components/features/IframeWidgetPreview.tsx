@@ -53,6 +53,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isIframeLoaded, setIsIframeLoaded] = useState(false);
   const [iframeError, setIframeError] = useState<string | null>(null);
+  const [resizedIframeHeight, setResizedIframeHeight] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [freshNonce, setFreshNonce] = useState(0);
   const [designerSessionId, setDesignerSessionId] = useState<string>(() => {
@@ -96,6 +97,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
     if (fullPage) url.searchParams.set('fullPage', 'true');
     // Designer preview runs embedded in an iframe.
     url.searchParams.set('embed', '1');
+    url.searchParams.set('surface', 'embed');
     url.searchParams.set('designerRefresh', String(refreshNonce));
 
     // Only request a "new session" when the user explicitly clicks Refresh.
@@ -117,12 +119,25 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
     return url.toString();
   }, [designerSessionId, freshNonce, fullPage, instanceId, refreshNonce]);
 
+  const getTargetOrigin = useCallback(() => {
+    try {
+      return new URL(getTargetUrl()).origin;
+    } catch {
+      return null;
+    }
+  }, [getTargetUrl]);
+
+  useEffect(() => {
+    setResizedIframeHeight(null);
+  }, [instanceId, liveConfig?.iframe_height, previewMode]);
+
   // Allow parent designer UI to force-refresh the iframe (e.g. after placeholder gallery reorder).
   useEffect(() => {
     const handler = () => {
       widgetReadyRef.current = false;
       setIsIframeLoaded(false);
       setIframeError(null);
+      setResizedIframeHeight(null);
       // Generate a brand-new session id so per-session usage limits reset.
       setDesignerSessionId(`designer_${Math.random().toString(36).slice(2)}_${Date.now()}`);
       // Force the runtime to start a new session via the supported contract.
@@ -131,13 +146,15 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
 
       // Best-effort: ask the runtime to clear any in-memory counters before reload.
       try {
+        const targetOrigin = getTargetOrigin();
+        if (!targetOrigin) return;
         iframeRef.current?.contentWindow?.postMessage(
           { type: 'SIF_RESET_SESSION', sessionId: designerSessionId, timestamp: Date.now() },
-          '*',
+          targetOrigin,
         );
         iframeRef.current?.contentWindow?.postMessage(
           { type: 'RESET_SESSION', sessionId: designerSessionId, timestamp: Date.now() },
-          '*',
+          targetOrigin,
         );
       } catch {}
     };
@@ -145,18 +162,19 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
     return () => {
       window.removeEventListener('designer-refresh-widget-preview', handler as EventListener);
     };
-  }, [designerSessionId]);
+  }, [designerSessionId, getTargetOrigin]);
 
   // Send config once (no debounce) to the iframe
   const sendConfigOnce = useCallback((config: DesignSettings) => {
-    if (iframeRef.current?.contentWindow) {
+    const targetOrigin = getTargetOrigin();
+    if (iframeRef.current?.contentWindow && targetOrigin) {
       // Compatibility payload: some runtimes may expect `config`, others `design` / `designConfig`.
       const payload = { config, design: config, designConfig: config, timestamp: Date.now() };
       // Unified runtime: send both messages for compatibility.
-      iframeRef.current.contentWindow.postMessage({ type: 'UPDATE_CONFIG', ...payload }, '*');
-      iframeRef.current.contentWindow.postMessage({ type: 'UPDATE_FLOW_CONFIG', ...payload }, '*');
+      iframeRef.current.contentWindow.postMessage({ type: 'UPDATE_CONFIG', ...payload }, targetOrigin);
+      iframeRef.current.contentWindow.postMessage({ type: 'UPDATE_FLOW_CONFIG', ...payload }, targetOrigin);
     }
-  }, [mode]);
+  }, [getTargetOrigin, mode]);
 
   // Schedule reliable delivery: burst a few times until we see READY/ACK
   const scheduleSend = useCallback(() => {
@@ -203,10 +221,23 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
   // Listen for messages from the iframe (ready/ack)
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      const frameWindow = iframeRef.current?.contentWindow;
+      const expectedOrigin = getTargetOrigin();
+      if (!frameWindow || !expectedOrigin) return;
+      if (event.source !== frameWindow || event.origin !== expectedOrigin) return;
       const data: any = event.data;
       if (!data || typeof data !== 'object') return;
       const type = data.type as string | undefined;
       if (!type) return;
+      if (type === 'ADVENTURE_RESIZE') {
+        if (previewMode !== 'iframe' || data.instanceId !== instanceId) return;
+        if (!['project', 'look', 'concepts', 'estimate'].includes(String(data.phase || ''))) return;
+        if (typeof data.height !== 'number' || !Number.isFinite(data.height)) return;
+        const nextHeight = Math.ceil(data.height);
+        if (nextHeight < 320 || nextHeight > 5000) return;
+        setResizedIframeHeight(`${nextHeight}px`);
+        return;
+      }
       if (
         type === 'WIDGET_READY' ||
         type === 'FORM_READY' ||
@@ -225,15 +256,16 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [getTargetOrigin, instanceId, previewMode]);
 
   // Bridge "preview-demo-overlay" custom event to the iframe
   useEffect(() => {
     const forwardPreviewEvent = () => {
-      if (iframeRef.current?.contentWindow) {
+      const targetOrigin = getTargetOrigin();
+      if (iframeRef.current?.contentWindow && targetOrigin) {
         iframeRef.current.contentWindow.postMessage(
           { type: 'PREVIEW_DEMO_OVERLAY' },
-          '*'
+          targetOrigin
         );
       }
     };
@@ -241,7 +273,7 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
     return () => {
       window.removeEventListener('preview-demo-overlay', forwardPreviewEvent as EventListener);
     };
-  }, []);
+  }, [getTargetOrigin]);
 
   // Track previous config to detect major changes
   const prevConfigRef = useRef<DesignSettings | null>(null);
@@ -304,8 +336,8 @@ const IframeWidgetPreview: React.FC<IframeWidgetPreviewProps> = ({
       case 'mobile':
         return { height: '844px', width: '390px' };
       case 'iframe':
-        const width = liveConfig?.iframe_width || '500px';
-        const height = liveConfig?.iframe_height || '600px';
+        const width = liveConfig?.iframe_width || '100%';
+        const height = resizedIframeHeight || liveConfig?.iframe_height || '760px';
         return { height, width };
       default:
         return { height: '100%', width: '100%' };

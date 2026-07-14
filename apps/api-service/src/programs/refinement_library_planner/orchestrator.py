@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 from programs.common.dspy_runtime import configure_dspy, extract_dspy_usage, make_dspy_lm_for_module
 from programs.common.visual_text_safety import sanitize_visual_context_text
 from programs.refinement_library_planner.program import RefinementLibraryPlannerProgram
-from programs.refinement_library_planner.validation import validate_and_normalize_planner_payload
+from programs.refinement_library_planner.validation import slugify_component_key, validate_and_normalize_planner_payload
 
 
 def _compact_json(obj: object) -> str:
@@ -56,15 +56,34 @@ def _resolve_context(payload: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _resolve_existing_components(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _resolve_excluded_component_keys(payload: Dict[str, Any]) -> List[str]:
+    raw = payload.get("excluded_component_keys") or payload.get("excludedComponentKeys") or []
+    values = raw if isinstance(raw, list) else []
+    seen: set[str] = set()
+    keys: List[str] = []
+    for value in values:
+        key = slugify_component_key(str(value or ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys[:20]
+
+
+def _resolve_existing_components(
+    payload: Dict[str, Any],
+    *,
+    excluded_component_keys: List[str],
+) -> List[Dict[str, Any]]:
     raw = payload.get("existing_components") or payload.get("existingComponents") or []
+    excluded = set(excluded_component_keys)
     items: List[Dict[str, Any]] = []
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, dict):
             continue
-        key = str(item.get("key") or "").strip()
+        key = slugify_component_key(str(item.get("key") or "").strip())
         label = sanitize_visual_context_text(item.get("label") or key or "", max_len=120)
-        if not key:
+        if not key or key in excluded:
             continue
         items.append({"key": key, "label": label or key, "priority": item.get("priority")})
     return items
@@ -73,6 +92,7 @@ def _resolve_existing_components(payload: Dict[str, Any]) -> List[Dict[str, Any]
 def _run_planner_once(
     *,
     ctx: Dict[str, str],
+    excluded_component_keys: List[str],
     existing_components: List[Dict[str, Any]],
     target_component_count: int,
     target_options_per_component: int,
@@ -86,6 +106,7 @@ def _run_planner_once(
         "company_summary": ctx["company_summary"] or None,
         "service_summary": ctx["service_summary"] or None,
         "existing_components": existing_components,
+        "excluded_component_keys": excluded_component_keys,
         "target_component_count": target_component_count,
         "target_options_per_component": target_options_per_component,
         "planning_goal": (
@@ -133,7 +154,11 @@ def _run_planner_once(
 def plan_refinement_library(payload: Dict[str, Any]) -> Dict[str, Any]:
     request_id = f"refinement_library_plan_{int(time.time() * 1000)}"
     ctx = _resolve_context(payload)
-    existing_components = _resolve_existing_components(payload)
+    excluded_component_keys = _resolve_excluded_component_keys(payload)
+    existing_components = _resolve_existing_components(
+        payload,
+        excluded_component_keys=excluded_component_keys,
+    )
     target_component_count = max(
         1,
         min(10, _coerce_int(payload.get("target_component_count") or payload.get("targetComponentCount"), 10)),
@@ -157,6 +182,7 @@ def plan_refinement_library(payload: Dict[str, Any]) -> Dict[str, Any]:
     for attempt in range(2):
         parsed, usage = _run_planner_once(
             ctx=ctx,
+            excluded_component_keys=excluded_component_keys,
             existing_components=existing_components,
             target_component_count=target_component_count,
             target_options_per_component=target_options,
@@ -172,6 +198,7 @@ def plan_refinement_library(payload: Dict[str, Any]) -> Dict[str, Any]:
             parsed,
             target_component_count=target_component_count,
             target_options_per_component=target_options,
+            excluded_component_keys=excluded_component_keys,
         )
         if ok:
             return {
@@ -185,13 +212,14 @@ def plan_refinement_library(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "lmUsage": last_usage,
                 "targetComponentCount": target_component_count,
                 "targetOptionsPerComponent": target_options,
+                "excludedComponentKeys": excluded_component_keys,
             }
 
         last_error = err or "validation_failed"
         retry_hint = (
             f"Previous plan failed validation ({last_error}). "
             "Ensure every component has a matching optionSeeds group with strong imagePrompt strings (>=12 chars) "
-            "and no process/admin categories."
+            "and no process/admin categories. Never return an excluded component key."
         )
 
     return {

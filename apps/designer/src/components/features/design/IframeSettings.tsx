@@ -45,21 +45,20 @@ export const IframeSettings: React.FC<IframeSettingsProps> = ({
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground">Width</label>
                     <input
-                      type="number"
-                      value={config.iframe_width?.replace('px', '') || ''}
+                      type="text"
+                      value={config.iframe_width || ''}
                       onChange={(e) => {
                         const value = e.target.value;
-                        updateConfig({ iframe_width: value ? `${value}px` : '' });
+                        updateConfig({ iframe_width: value });
                       }}
                       onBlur={(e) => {
                         if (!e.target.value) {
-                          updateConfig({ iframe_width: '500px' });
+                          updateConfig({ iframe_width: '100%' });
                         }
                       }}
                       className="w-full px-2 py-1 text-xs border border-border rounded"
-                      min={100}
-                      max={2000}
-                      placeholder="500 (px)"
+                      inputMode="text"
+                      placeholder="100%"
                     />
                   </div>
                   <div className="space-y-1">
@@ -73,13 +72,13 @@ export const IframeSettings: React.FC<IframeSettingsProps> = ({
                       }}
                       onBlur={(e) => {
                         if (!e.target.value) {
-                          updateConfig({ iframe_height: '600px' });
+                          updateConfig({ iframe_height: '760px' });
                         }
                       }}
                       className="w-full px-2 py-1 text-xs border border-border rounded"
                       min={100}
-                      max={2000}
-                      placeholder="600 (px)"
+                      max={5000}
+                      placeholder="760 (px)"
                     />
                   </div>
                 </div>

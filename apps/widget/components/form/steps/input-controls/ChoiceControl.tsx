@@ -118,6 +118,10 @@ export function Choice({
   const multiple = isUIStep
     ? Boolean((step as any).multi_select ?? ((step as any).type === "chips_multi"))
     : Boolean((step as StepDefinition).data?.multiple || (step as StepDefinition).data?.multiSelect);
+  const requestedColumns = isUIStep
+    ? Number((step as any)?.columns ?? 1)
+    : Number((step as StepDefinition).data?.columns ?? 1);
+  const useCompactGrid = Boolean(isCompact && Number.isFinite(requestedColumns) && requestedColumns > 1);
 
   const [selected, setSelected] = useState<any>(stepData ?? (multiple ? [] : null));
   const [otherText, setOtherText] = useState<string>("");
@@ -226,7 +230,9 @@ export function Choice({
       >
         <div
           className={cn(
-            isCompact
+            useCompactGrid
+              ? "grid w-full grid-cols-2 gap-2 px-1"
+              : isCompact
               ? "flex w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-2 px-1"
               : "flex flex-wrap items-center justify-center gap-1.5 sm:gap-2"
           )}
@@ -302,7 +308,9 @@ export function Choice({
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
                   "shadow-sm hover:shadow",
                   isCompact
-                    ? "h-7 gap-1 overflow-hidden px-2 shadow-none hover:shadow-none sm:h-8 sm:px-2.5"
+                    ? useCompactGrid
+                      ? "min-h-10 w-full justify-center gap-1 px-2.5 py-2 text-center shadow-none hover:shadow-none"
+                      : "h-7 gap-1 overflow-hidden px-2 shadow-none hover:shadow-none sm:h-8 sm:px-2.5"
                     : "px-3 py-1.5 text-[12px] min-h-9 sm:px-4 sm:py-2 sm:text-[13px] sm:min-h-10",
                   picked
                     ? "bg-primary text-white border-primary shadow-sm"
@@ -336,7 +344,14 @@ export function Choice({
                 }}
               >
                 {picked && !isOther && <Check className={cn(isCompact ? "h-2 w-2 shrink-0" : "h-3.5 w-3.5")} strokeWidth={2.5} />}
-                <span className={cn(isCompact ? "block truncate leading-none" : undefined)}>{label}</span>
+                <span
+                  className={cn(
+                    isCompact && !useCompactGrid ? "block truncate leading-none" : undefined,
+                    useCompactGrid ? "line-clamp-2 whitespace-normal text-center leading-tight" : undefined,
+                  )}
+                >
+                  {label}
+                </span>
               </button>
             );
           })}

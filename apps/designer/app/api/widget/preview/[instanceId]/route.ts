@@ -12,7 +12,9 @@ export async function GET(
   const config = configStr ? JSON.parse(configStr) as DesignSettings : null;
 
   // Determine widget host using environment variable
-  const widgetHost = process.env.NEXT_PUBLIC_WIDGET_URL || 'http://localhost:3001';
+  const rawWidgetHost = process.env.NEXT_PUBLIC_WIDGET_URL || 'http://localhost:3001';
+  const widgetHost = /^https?:\/\//i.test(rawWidgetHost) ? rawWidgetHost : `http://${rawWidgetHost}`;
+  const widgetOrigin = new URL(widgetHost).origin;
 
   // Create the HTML content for the preview
   // NOTE: This endpoint intentionally avoids hardcoding Next.js chunk URLs from the widget app.
@@ -48,12 +50,14 @@ export async function GET(
     (function() {
       const instanceId = ${JSON.stringify(params.instanceId)};
       const widgetHost = ${JSON.stringify(widgetHost)};
+      const widgetOrigin = ${JSON.stringify(widgetOrigin)};
       const fullPage = ${JSON.stringify(fullPage)};
       const deployment = ${JSON.stringify(deployment)};
       const config = ${JSON.stringify(config)};
 
       const iframe = document.getElementById('adventure-frame');
       const u = new URL('/adventure/' + encodeURIComponent(instanceId), widgetHost);
+      u.searchParams.set('surface', 'embed');
       if (fullPage) u.searchParams.set('fullPage', 'true');
       if (deployment) u.searchParams.set('deployment', 'true');
       iframe.src = u.toString();
@@ -62,8 +66,8 @@ export async function GET(
         if (!config) return;
         try {
           const payload = { config, timestamp: Date.now() };
-          iframe.contentWindow && iframe.contentWindow.postMessage({ type: 'UPDATE_CONFIG', ...payload }, '*');
-          iframe.contentWindow && iframe.contentWindow.postMessage({ type: 'UPDATE_FLOW_CONFIG', ...payload }, '*');
+          iframe.contentWindow && iframe.contentWindow.postMessage({ type: 'UPDATE_CONFIG', ...payload }, widgetOrigin);
+          iframe.contentWindow && iframe.contentWindow.postMessage({ type: 'UPDATE_FLOW_CONFIG', ...payload }, widgetOrigin);
         } catch {}
       }
 
@@ -73,6 +77,7 @@ export async function GET(
       });
 
       window.addEventListener('message', (event) => {
+        if (event.source !== iframe.contentWindow || event.origin !== widgetOrigin) return;
         const data = event && event.data;
         const type = data && typeof data === 'object' ? data.type : null;
         if (!type) return;

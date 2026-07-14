@@ -42,8 +42,12 @@
   "lead_step2_name_placeholder": "What's your name?",
   "lead_step2_phone_placeholder": "Enter your phone number",
 
-  "iframe_width": "500px",
-  "iframe_height": "600px",
+  "visual_pricing_journey_version": "legacy",
+  "pricing_gate_strategy": "blurred",
+  "pricing_gate_experiment_percent": 50,
+
+  "iframe_width": "100%",
+  "iframe_height": "760px",
   "iframe_loading": "lazy",
   "iframe_sandbox": "allow-scripts allow-same-origin allow-forms",
   "iframe_referrerpolicy": "no-referrer-when-downgrade",

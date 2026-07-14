@@ -1,5 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hexToRgba } from "@/types/design";
 import { getStepJoggerLabel } from "../utils/step-jogger";
@@ -14,6 +15,14 @@ export function StepEngineHeaderSection(args: {
   maxVisitedIndex: number;
   onNavigateToStep: (index: number) => void;
   onSetAdventureInputModeQuestions: () => void;
+  studioPhases?: Array<{
+    key: string;
+    label: string;
+    active: boolean;
+    complete: boolean;
+    enabled: boolean;
+  }>;
+  onNavigateStudioPhase?: (key: string) => void;
   theme: {
     primaryColor?: string;
     textColor?: string;
@@ -30,8 +39,22 @@ export function StepEngineHeaderSection(args: {
     maxVisitedIndex,
     onNavigateToStep,
     onSetAdventureInputModeQuestions,
+    studioPhases = [],
+    onNavigateStudioPhase,
     theme,
   } = args;
+
+  const activeStudioPhaseRef = React.useRef<HTMLButtonElement | null>(null);
+  const activeStudioPhaseKey = studioPhases.find((phase) => phase.active)?.key ?? null;
+
+  React.useEffect(() => {
+    if (studioPhases.length === 0) return;
+    activeStudioPhaseRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [activeStudioPhaseKey, studioPhases.length]);
 
   const currentVisiblePosition = stepJoggerSteps.findIndex(({ index }) => index === currentStepIndex);
 
@@ -62,6 +85,49 @@ export function StepEngineHeaderSection(args: {
             />
           </div>
         </div>
+      ) : null}
+      {studioPhases.length > 0 ? (
+        <nav aria-label="Design progress" className="overflow-x-auto px-3 py-2 [scrollbar-width:none] sm:px-5 sm:py-2.5 [&::-webkit-scrollbar]:hidden">
+          <ol className="mx-auto flex w-max min-w-max items-center justify-center whitespace-nowrap">
+            {studioPhases.map((phase, index) => (
+              <React.Fragment key={phase.key}>
+                {index > 0 ? (
+                  <li aria-hidden className="h-px w-5 shrink-0 bg-foreground/12 sm:w-9" />
+                ) : null}
+                <li className="shrink-0">
+                  <button
+                    ref={phase.active ? activeStudioPhaseRef : undefined}
+                    type="button"
+                    disabled={!phase.enabled || phase.active}
+                    onClick={() => onNavigateStudioPhase?.(phase.key)}
+                    aria-current={phase.active ? "step" : undefined}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold transition-all sm:text-xs",
+                      phase.active
+                        ? "border-primary/25 text-foreground shadow-sm"
+                        : phase.enabled
+                          ? "border-transparent text-foreground/65 hover:border-primary/20 hover:bg-primary/5 hover:text-foreground"
+                          : "border-transparent text-foreground/32",
+                    )}
+                    style={phase.active ? { backgroundColor: hexToRgba(theme.primaryColor || "#3b82f6", 0.09) || undefined } : undefined}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-4 w-4 items-center justify-center rounded-full border text-[9px]",
+                        phase.complete || phase.active
+                          ? "border-primary/40 text-primary"
+                          : "border-foreground/15 text-foreground/35",
+                      )}
+                    >
+                      {phase.complete ? <Check className="h-2.5 w-2.5" strokeWidth={3} /> : <span className="h-1 w-1 rounded-full bg-current" />}
+                    </span>
+                    {phase.label}
+                  </button>
+                </li>
+              </React.Fragment>
+            ))}
+          </ol>
+        </nav>
       ) : null}
       {stepJoggerVisible ? (
         <div className="pb-1.5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 sm:pb-2">

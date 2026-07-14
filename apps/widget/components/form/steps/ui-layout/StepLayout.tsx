@@ -68,8 +68,6 @@ export function StepLayout({
   children,
   onComplete,
   onBack,
-  /** @deprecated Visibility is tied to `onBack`; kept for call-site compatibility. */
-  canGoBack: _canGoBackUnused = false,
   isLoading = false,
   canContinue = true,
   continueLabel,
@@ -89,6 +87,8 @@ export function StepLayout({
   const useCompactPane = compactInPreview;
   const useCompactHeaderControlRow = Boolean(useCompactPane && headerInlineControl);
   const stepType = String(step?.type || step?.componentType || "").toLowerCase();
+  const stepId = String(step?.id || step?.key || "").toLowerCase();
+  const isStarterGalleryStep = stepId === "step-style-direction";
   const isImageChoiceGridStep = stepType === "image_choice_grid";
   const isGalleryStep = stepType === "gallery";
   const isScrollOwnedStep = isImageChoiceGridStep || isGalleryStep;
@@ -147,7 +147,9 @@ export function StepLayout({
   const standardInnerStackClass = useCompactPane ? "gap-0.5" : isCompact ? "gap-2" : "gap-3";
   const contentViewportClassName = cn(
     "flex-1 min-h-0 w-full min-w-0",
-    useCompactPane && isVisualAnswerStep && !isScrollOwnedStep
+    isStarterGalleryStep
+      ? "overflow-hidden"
+      : useCompactPane && isVisualAnswerStep && !isScrollOwnedStep
       ? "overflow-hidden"
       : useCompactPane && isChoiceStep
         ? "overflow-y-auto overflow-x-hidden"
@@ -162,7 +164,11 @@ export function StepLayout({
       : null
   );
   const compactAnswerInnerClass = cn(
-    isScrollOwnedStep ? "flex min-h-0 min-w-0 flex-col" : "flex h-full min-h-0 min-w-0 flex-col",
+    isStarterGalleryStep
+      ? "flex h-full min-h-0 min-w-0 flex-col"
+      : isScrollOwnedStep
+        ? "flex min-h-0 min-w-0 flex-col"
+        : "flex h-full min-h-0 min-w-0 flex-col",
     useCompactPane
       ? isVisualAnswerStep
         ? isScrollOwnedStep
@@ -173,6 +179,8 @@ export function StepLayout({
         : isChoiceStep
           ? "w-full max-w-none justify-start overflow-visible"
           : "mx-auto w-full max-w-none justify-center overflow-hidden"
+      : isStarterGalleryStep
+        ? "h-full w-full justify-start overflow-hidden"
       : isScrollOwnedStep
         ? "w-full justify-start overflow-visible"
         : "justify-start overflow-hidden"
@@ -292,7 +300,13 @@ export function StepLayout({
                 ) : null}
                 <h2
                   className={cn(
-                    useCompactPane ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center") : isCompact ? "text-xl" : "text-2xl",
+                    useCompactPane
+                      ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center")
+                      : isStarterGalleryStep
+                        ? "mx-auto max-w-[46rem] text-center text-[clamp(1.55rem,2.4vw,2.05rem)] leading-[1.08] tracking-[-0.025em]"
+                        : isCompact
+                          ? "text-xl"
+                          : "text-2xl",
                     "font-semibold min-w-0 break-words"
                   )}
                   style={{
@@ -309,7 +323,9 @@ export function StepLayout({
                       "opacity-80",
                       useCompactPane
                         ? isVisualAnswerStep ? "mt-0 leading-tight line-clamp-1 text-center" : "mt-0 leading-tight line-clamp-2 text-center"
-                        : "mt-0 text-sm"
+                        : isStarterGalleryStep
+                          ? "mx-auto mt-2 max-w-2xl text-center text-sm leading-relaxed sm:text-base"
+                          : "mt-0 text-sm"
                     )}
                     style={{
                       ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky"),
@@ -460,7 +476,13 @@ export function StepLayout({
                   ) : null}
                   <h2
                     className={cn(
-                      useCompactPane ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center") : isCompact ? "text-xl" : "text-2xl",
+                      useCompactPane
+                        ? (isVisualAnswerStep ? "leading-tight line-clamp-1 text-center" : "leading-tight text-center")
+                        : isStarterGalleryStep
+                          ? "mx-auto max-w-[46rem] text-center text-[clamp(1.55rem,2.4vw,2.05rem)] leading-[1.08] tracking-[-0.025em]"
+                          : isCompact
+                            ? "text-xl"
+                            : "text-2xl",
                       "font-semibold min-w-0 break-words"
                     )}
                     style={{
@@ -477,7 +499,9 @@ export function StepLayout({
                         "opacity-80",
                         useCompactPane
                           ? isVisualAnswerStep ? "mt-0 leading-tight line-clamp-1 text-center" : "mt-0 leading-tight text-center"
-                          : "mt-0 text-sm"
+                          : isStarterGalleryStep
+                            ? "mx-auto mt-2 max-w-2xl text-center text-sm leading-relaxed sm:text-base"
+                            : "mt-0 text-sm"
                       )}
                       style={{
                         ...withLayoutDebugStyle(undefined, layoutDebugEnabled, "sky"),

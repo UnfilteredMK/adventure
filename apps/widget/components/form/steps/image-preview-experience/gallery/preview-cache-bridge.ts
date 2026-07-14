@@ -32,6 +32,7 @@ export type PreviewCacheSnapshot = {
   selectedConceptIndex?: number | null;
   viewMode?: "gallery" | "single" | null;
   message?: string | null;
+  error?: string | null;
   updatedAt?: number | null;
 };
 
@@ -88,4 +89,17 @@ export function updatePreviewCacheSnapshot(
   } catch {}
   notifyPreviewCacheUpdated(instanceId, sessionId, next);
   return next;
+}
+
+/**
+ * Remove a generation run without changing the form session. Studio V1 uses
+ * this when an answer that shaped the concepts is edited, so an old concept
+ * can never be mistaken for a result of the new direction.
+ */
+export function clearPreviewCacheSnapshot(instanceId: string, sessionId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(storageKeyV3(instanceId, sessionId));
+  } catch {}
+  notifyPreviewCacheUpdated(instanceId, sessionId, null);
 }

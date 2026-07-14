@@ -12,6 +12,8 @@ Python microservice for the SIF AI form flow. Runs the DSPy planner and returns 
 - `POST /v1/api/generate/try-on`
 - `POST /v1/api/generate/scene-placement`
 - `POST /v1/api/generate/drilldown`
+- `POST /v1/api/refinement-library-planner/plan`
+- `POST /v1/api/refinement-library-planner/validate-components` (one relevance score and reason per candidate)
 
 ## API contract workflow (OpenAPI)
 

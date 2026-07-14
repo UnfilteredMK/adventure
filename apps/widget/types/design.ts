@@ -239,6 +239,12 @@ export interface DesignSettings {
   // ===========================================
   /** Single source of truth for "form mode enabled". */
   form_status_enabled?: boolean;
+
+  // Visual Pricing Journey V1 rollout and pricing-gate experiment.
+  visual_pricing_journey_version?: "legacy" | "v1" | "studio_v1";
+  pricing_gate_strategy?: "blurred" | "coarse_visible" | "experiment";
+  pricing_gate_experiment_percent?: number;
+  pricing_gate_experiment_key?: string;
   form_show_progress_bar?: boolean;
   form_show_step_descriptions?: boolean;
   form_name?: string;
@@ -346,13 +352,13 @@ export const defaultDesignSettings: DesignSettings = {
   iframe_border_color: "#e5e7eb",
   iframe_border_radius: 12,
   iframe_border_width: 1,
-  iframe_height: "600px",
+  iframe_height: "760px",
   iframe_loading: "lazy",
   iframe_referrerpolicy: "no-referrer-when-downgrade",
   iframe_sandbox: "allow-scripts allow-same-origin allow-forms",
   iframe_scrolling: "auto",
   iframe_shadow: "medium",
-  iframe_width: "500px",
+  iframe_width: "100%",
   layout_mode: "prompt-top",
   lead_capture_enabled: false,
   lead_capture_trigger: "submit",
@@ -757,8 +763,8 @@ export const getCompleteTheme = (theme: DesignTheme): DesignSettings => ({
   cta_color: theme.cta_color ?? "#374151",
   
   // Iframe Settings
-  iframe_width: theme.iframe_width ?? "500px",
-  iframe_height: theme.iframe_height ?? "600px",
+  iframe_width: theme.iframe_width ?? "100%",
+  iframe_height: theme.iframe_height ?? "760px",
   iframe_border: theme.iframe_border ?? true,
   iframe_border_width: theme.iframe_border_width ?? 1,
   iframe_border_color: theme.iframe_border_color ?? "#e5e7eb",

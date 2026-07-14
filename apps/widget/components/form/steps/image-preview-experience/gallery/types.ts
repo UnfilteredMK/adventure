@@ -44,6 +44,12 @@ export type PricingRequestInputs = {
   budgetRange?: number | null;
 };
 
+export type ConceptPresentation = {
+  id?: string;
+  title: string;
+  summary?: string;
+};
+
 export type PreviewRun = {
   id: string;
   createdAt: number;
@@ -54,6 +60,7 @@ export type PreviewRun = {
   message?: string | null;
   stepDataSnapshot?: Record<string, any>;
   imagePricing?: (CachedPricing | undefined)[];
+  conceptPresentations?: (ConceptPresentation | undefined)[];
 };
 
 export type PreviewViewMode = "gallery" | "single";

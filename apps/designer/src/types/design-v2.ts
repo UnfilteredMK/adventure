@@ -54,6 +54,10 @@ export interface DesignSettingsV2 {
 
   // AI Form (Flow) status flag. Mirrors `instances.flow_config.enabled`.
   form_status_enabled: boolean;
+  visual_pricing_journey_version?: "legacy" | "v1" | "studio_v1";
+  pricing_gate_strategy?: "blurred" | "coarse_visible" | "experiment";
+  pricing_gate_experiment_percent?: number;
+  pricing_gate_experiment_key?: string;
 
   // AI Form UI toggles (stored in instances.config; default to on)
   form_show_progress_bar: boolean;
@@ -143,12 +147,16 @@ export const defaultDesignSettingsV2: DesignSettingsV2 = {
   lead_step2_phone_placeholder: "Enter your phone number",
 
   form_status_enabled: false,
+  // Missing flags must remain legacy so existing instances are never migrated by a config save.
+  visual_pricing_journey_version: "legacy",
+  pricing_gate_strategy: "blurred",
+  pricing_gate_experiment_percent: 50,
   form_show_progress_bar: true,
   form_show_step_descriptions: true,
   form_config: null,
 
-  iframe_width: "500px",
-  iframe_height: "600px",
+  iframe_width: "100%",
+  iframe_height: "760px",
   iframe_loading: "lazy",
   iframe_sandbox: "allow-scripts allow-same-origin allow-forms",
   iframe_referrerpolicy: "no-referrer-when-downgrade",

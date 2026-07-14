@@ -1,3 +1,4 @@
 from programs.refinement_library_planner.orchestrator import plan_refinement_library
+from programs.refinement_library_planner.semantic_validator import validate_refinement_components
 
-__all__ = ["plan_refinement_library"]
+__all__ = ["plan_refinement_library", "validate_refinement_components"]

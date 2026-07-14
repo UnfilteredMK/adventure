@@ -5,7 +5,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { useFormTheme } from "../../demo/FormThemeProvider";
 import { cn } from "@/lib/utils";
-import { animate, motion, useMotionValue, useTransform } from "framer-motion";
+import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLayoutDensity } from "../ui-layout/layout-density";
 import { formatCurrency } from "@/lib/ai-form/utils/currency";
@@ -34,7 +34,9 @@ interface ImageChoiceGridProps {
   thumbnailMode?: boolean;
   compactScroller?: boolean;
   hideOptionText?: boolean;
-  displayMode?: "default" | "priced_examples";
+  displayMode?: "default" | "priced_examples" | "starter_concepts";
+  /** Shared layout identity used to visually carry selected cards into the journey summary. */
+  sharedSelectionLayoutPrefix?: string;
 }
 
 function formatPriceRangeLabel(
@@ -97,9 +99,11 @@ export function ImageChoiceGrid({
   compactScroller = false,
   hideOptionText = false,
   displayMode = "default",
+  sharedSelectionLayoutPrefix,
 }: ImageChoiceGridProps) {
   const { theme } = useFormTheme();
   const density = useLayoutDensity();
+  const reduceMotion = useReducedMotion();
   const isCompact = density === "compact";
   const selectedArray = Array.isArray(value) ? value : (value ? [value] : []);
   const maxSelectionLimit = Number.isFinite(Number(maxSelections)) ? Math.max(1, Math.floor(Number(maxSelections))) : null;
@@ -572,6 +576,7 @@ export function ImageChoiceGrid({
   const requestedColumns = clampColumns(columns);
   const optionCount = Math.max(1, options.length);
   const isPricedExamples = displayMode === "priced_examples";
+  const isStarterConcepts = displayMode === "starter_concepts";
   const safeRequestedColumns = requestedColumns ? Math.min(requestedColumns, optionCount) : undefined;
   const mobileColumns = thumbnailMode
     ? (safeRequestedColumns ? Math.min(3, Math.max(1, safeRequestedColumns)) : (optionCount <= 2 ? 2 : 3))
@@ -600,6 +605,135 @@ export function ImageChoiceGrid({
             ? 3
             : 4;
   const gridColumns = isNarrowViewport ? mobileColumns : adaptiveDesktopColumns;
+
+  if (isPricedExamples) {
+    const deckOption = options[activeIndex] ?? options[0];
+    const deckKey = deckOption ? deckOption.value || deckOption.label : "";
+    const deckPicked = deckKey ? selectedArray.includes(deckKey) : false;
+    const deckPrice = formatPriceRangeLabel(deckOption?.priceRange, pricingLocale) || "$••• - $•••";
+    const showPrevious = activeIndex > 0;
+    const showNext = activeIndex < maxIndex;
+
+    return (
+      <div className={cn("mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col", className)}>
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-1 sm:px-12">
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-[9%] bottom-1 top-6 rounded-[2rem] border border-black/5 bg-black/[0.035] shadow-sm sm:inset-x-[15%]"
+            style={{ transform: "translateY(10px) scale(.96)", borderRadius: cardRadius }}
+          />
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-[6%] bottom-2 top-3 rounded-[2rem] border border-black/[0.07] bg-white/80 shadow-md sm:inset-x-[12%]"
+            style={{ transform: "translateY(5px) scale(.98)", borderRadius: cardRadius }}
+          />
+
+          <AnimatePresence mode="wait" initial={false}>
+            {deckOption ? (
+              <motion.button
+                key={deckKey}
+                type="button"
+                initial={reduceMotion ? false : { opacity: 0, x: 28, scale: 0.985 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -28, scale: 0.985 }}
+                transition={{ duration: reduceMotion ? 0 : 0.22, ease: "easeOut" }}
+                disabled={Boolean(deckOption.disabled)}
+                onClick={() => toggle(deckKey)}
+                aria-label={`Choose ${deckOption.label}, estimated ${deckPrice}`}
+                className={cn(
+                  "group relative z-10 w-full max-w-3xl overflow-hidden border bg-black text-left shadow-[0_24px_70px_-28px_rgba(15,23,42,0.7)] transition",
+                  "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/30",
+                  deckPicked ? "border-primary ring-2 ring-primary/25" : "border-white/15",
+                  deckOption.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer active:scale-[0.992]"
+                )}
+                style={{ borderRadius: cardRadius }}
+              >
+                <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-[16/9]">
+                  {deckOption.imageUrl ? (
+                    <img
+                      src={deckOption.imageUrl}
+                      alt={deckOption.label}
+                      loading="eager"
+                      decoding="async"
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.025]"
+                    />
+                  ) : (
+                    <div className="h-full w-full animate-pulse bg-muted/40" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/5 to-black/10" />
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-4 sm:p-6">
+                    <div className="min-w-0 text-white">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/65">
+                        Concept {activeIndex + 1} of {options.length}
+                      </div>
+                      <div className="mt-1 truncate text-base font-semibold sm:text-xl">{deckOption.label}</div>
+                    </div>
+                    <div className="shrink-0 rounded-xl border border-white/20 bg-black/45 px-3 py-2 text-right text-white shadow-lg backdrop-blur-md sm:px-4">
+                      <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/60">Estimated range</div>
+                      <div className="mt-0.5 text-sm font-semibold tabular-nums sm:text-lg">{deckPrice}</div>
+                    </div>
+                  </div>
+                  <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-white/20 bg-black/40 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/90 backdrop-blur-md">
+                    Tap to choose this concept
+                  </div>
+                  {deckPicked ? (
+                    <div className="absolute right-4 top-4 rounded-full bg-primary p-2 text-white shadow-lg">
+                      <Check className="h-4 w-4" strokeWidth={3} />
+                    </div>
+                  ) : null}
+                </div>
+              </motion.button>
+            ) : null}
+          </AnimatePresence>
+
+          {options.length > 1 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
+                disabled={!showPrevious}
+                className="absolute left-0 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white/95 shadow-lg transition hover:scale-105 disabled:opacity-25 sm:left-2 sm:h-11 sm:w-11"
+                aria-label="Previous concept"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveIndex((index) => Math.min(maxIndex, index + 1))}
+                disabled={!showNext}
+                className="absolute right-0 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white/95 shadow-lg transition hover:scale-105 disabled:opacity-25 sm:right-2 sm:h-11 sm:w-11"
+                aria-label="Next concept"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </>
+          ) : null}
+        </div>
+
+        {options.length > 1 ? (
+          <div className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 overflow-x-auto px-1 pb-2">
+            {options.map((option, index) => (
+              <button
+                key={option.value || option.label}
+                type="button"
+                onClick={() => setActiveIndex(index)}
+                className={cn(
+                  "relative h-14 w-20 shrink-0 overflow-hidden rounded-lg border-2 transition sm:h-16 sm:w-24",
+                  index === activeIndex ? "border-primary shadow-md" : "border-transparent opacity-55 hover:opacity-90"
+                )}
+                aria-label={`View concept ${index + 1}`}
+                aria-current={index === activeIndex ? "true" : undefined}
+              >
+                {option.imageUrl ? <img src={option.imageUrl} alt="" className="h-full w-full object-cover" /> : <div className="h-full w-full bg-muted" />}
+                <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-[9px] font-semibold text-white">{index + 1}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -614,7 +748,13 @@ export function ImageChoiceGrid({
       <div
         className={cn(
           "grid w-full min-w-0 content-start",
-          thumbnailMode ? "gap-1.5 py-0 content-start" : isCompact ? "gap-3 pb-4" : "gap-4 pb-4",
+          thumbnailMode
+            ? "gap-1.5 py-0 content-start"
+            : isStarterConcepts
+              ? "gap-3 pb-1 sm:gap-4"
+              : isCompact
+                ? "gap-3 pb-4"
+                : "gap-4 pb-4",
           className
         )}
         style={{
@@ -629,17 +769,24 @@ export function ImageChoiceGrid({
           return (
             <motion.button
               key={key}
-              initial={{ opacity: 0, y: 10 }}
+              layoutId={sharedSelectionLayoutPrefix ? `${sharedSelectionLayoutPrefix}-${key}` : undefined}
+              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
+              transition={reduceMotion ? { duration: 0 } : { delay: index * 0.035, duration: 0.24, ease: "easeOut" }}
               disabled={disabled || Boolean(opt.disabled)}
               onClick={() => toggle(key)}
               aria-disabled={disabled || Boolean(opt.disabled)}
               className={cn(
                 "group relative flex h-full min-h-0 min-w-0 flex-col transition-all",
-                thumbnailMode ? "overflow-hidden rounded-lg border" : "overflow-hidden rounded-2xl border-4",
+                thumbnailMode
+                  ? "overflow-hidden rounded-lg border"
+                  : isStarterConcepts
+                    ? "overflow-hidden rounded-2xl border"
+                    : "overflow-hidden rounded-2xl border-4",
                 isPricedExamples
                   ? "transform-gpu shadow-sm hover:shadow-xl active:scale-[0.985] md:hover:scale-[1.03] md:hover:-translate-y-0.5"
+                  : isStarterConcepts
+                    ? "transform-gpu shadow-sm hover:z-10 hover:-translate-y-1 hover:shadow-xl active:scale-[0.985]"
                   : desktopThumbnailMode
                     ? "transform-gpu hover:scale-[1.06] hover:-translate-y-0.5 hover:z-10 hover:shadow-xl"
                     : null,
@@ -648,6 +795,8 @@ export function ImageChoiceGrid({
                   ? (picked ? "border-primary bg-transparent" : "border-black/10 bg-transparent hover:border-black/25")
                   : isPricedExamples
                     ? (picked ? "border-primary bg-black/[0.02]" : "border-black/10 bg-black/[0.02] hover:border-black/20")
+                    : isStarterConcepts
+                      ? (picked ? "border-primary ring-2 ring-primary/25" : "border-black/10 bg-black/[0.02] hover:border-primary/45")
                     : (picked ? "border-primary" : "border-transparent bg-muted/20")
               )}
               style={{ borderRadius: cardRadius }}
@@ -657,7 +806,7 @@ export function ImageChoiceGrid({
                   "relative w-full overflow-hidden bg-muted/30 min-h-0",
                   thumbnailMode
                     ? (isNarrowViewport ? "aspect-square min-w-0" : "aspect-[2/1] min-w-0")
-                    : isPricedExamples
+                    : isPricedExamples || isStarterConcepts
                       ? "aspect-[4/3] flex-1"
                       : isNarrowViewport
                       ? "aspect-[4/3] flex-1"
@@ -686,6 +835,12 @@ export function ImageChoiceGrid({
                         {formatPriceRangeLabel(opt.priceRange, pricingLocale) || "$••• - $•••"}
                       </div>
                     </div>
+                  </div>
+                ) : null}
+                {isStarterConcepts ? (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-left">
+                    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+                    <div className="relative z-10 truncate text-sm font-semibold text-white drop-shadow-sm">{opt.label}</div>
                   </div>
                 ) : null}
               </div>

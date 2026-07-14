@@ -5,7 +5,7 @@ import { useFormTheme } from '../../../demo/FormThemeProvider';
 import { detectCurrencyFromLocale, formatCurrency } from '@/lib/ai-form/utils/currency';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { BadgeDollarSign, Info } from 'lucide-react';
+import { BadgeDollarSign, Info, LockKeyhole } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LeadGenPopover } from '@/components/form/steps/image-preview-experience/lead-gen/LeadGenPopover';
 import { PRICING_LEAD_COPY } from '@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy';
@@ -334,17 +334,25 @@ const PricingPill = React.forwardRef<HTMLButtonElement, PricingPillProps>(functi
           </div>
           <div
             data-pricing-reveal
-            className={valueFrameClass}
+            className={cn(valueFrameClass, !revealed && "group/reveal relative overflow-hidden")}
             style={{ fontFamily: pricingFont }}
           >
             {revealed ? (
               <span className="min-w-0">{price}</span>
             ) : (
-              <LockedPriceValueBlurred
-                text={lockedPrice || price || "$•••–$•••"}
-                className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em] select-none")}
-                style={lockedValueStyle}
-              />
+              <>
+                <LockedPriceValueBlurred
+                  text={lockedPrice || price || "$•••–$•••"}
+                  className={cn(lockedValueTextClass, "px-[0.12em] py-[0.05em] opacity-35 select-none transition-opacity group-hover/reveal:opacity-20")}
+                  style={lockedValueStyle}
+                />
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/30 px-3 py-1.5 font-sans text-[clamp(0.62rem,3.5cqi,0.78rem)] font-semibold uppercase tracking-[0.12em] text-white shadow-sm backdrop-blur-md transition group-hover/reveal:scale-[1.03] group-hover/reveal:bg-black/40">
+                    <LockKeyhole className="h-[1em] w-[1em]" strokeWidth={2.4} />
+                    Tap to reveal
+                  </span>
+                </span>
+              </>
             )}
           </div>
         </div>

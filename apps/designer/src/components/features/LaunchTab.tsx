@@ -17,6 +17,16 @@ interface LaunchTabProps {
   updateConfig: (updates: Partial<DesignSettings>) => void;
 }
 
+type LaunchSurface = "page" | "embed" | "popup" | "inline";
+
+function normalizeCssDimension(value: unknown, fallback: string): string {
+  const raw = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  if (!raw) return fallback;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return `${raw}px`;
+  if (/^\d+(?:\.\d+)?(?:px|%|vh|vw|dvh|svh|lvh)$/.test(raw)) return raw;
+  return fallback;
+}
+
 export const LaunchTab: React.FC<LaunchTabProps> = ({
   config,
   instanceId,
@@ -28,6 +38,7 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
   const { user } = useAuth();
   const { currentInstance } = useInstance();
   const [embedCode, setEmbedCode] = useState<string | null>(null);
+  const [inlineEmbedCode, setInlineEmbedCode] = useState<string | null>(null);
   const [modalEmbedCode, setModalEmbedCode] = useState<string | null>(null);
   const [showMadeWith, setShowMadeWith] = useState(false);
 
@@ -69,21 +80,33 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
     return withProtocol.replace(/\/+$/g, "");
   }, []);
 
-  const adventureUrl = useMemo(
-    () => `${widgetBaseUrl}/adventure/${instanceId}`,
-    [widgetBaseUrl, instanceId]
+  const adventureUrlForSurface = useCallback(
+    (surface: LaunchSurface) => {
+      const url = new URL(`/adventure/${encodeURIComponent(instanceId)}`, widgetBaseUrl);
+      url.searchParams.set("surface", surface);
+      return url.toString();
+    },
+    [instanceId, widgetBaseUrl]
+  );
+
+  const pageAdventureUrl = useMemo(
+    () => adventureUrlForSurface("page"),
+    [adventureUrlForSurface]
   );
 
   const madeWithHref = process.env.NEXT_PUBLIC_SITE_URL || "https://adventure.app";
 
-  const buildIframeEmbedCode = useCallback(() => {
+  const buildContainedEmbedCode = useCallback((surface: "embed" | "inline") => {
     const productName = "Adventure";
+    const adventureUrl = adventureUrlForSurface(surface);
+    const safeInstanceId = instanceId.replace(/[^a-zA-Z0-9_-]/g, "");
+    const iframeId = `adventure-${surface}-${safeInstanceId || "widget"}`;
     const madeWith = showMadeWith
       ? `\n<div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px;">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
       : "";
 
-    const iframeWidth = config.iframe_width || "900";
-    const iframeHeight = config.iframe_height || "600";
+    const iframeWidth = normalizeCssDimension(config.iframe_width, "100%");
+    const iframeHeight = normalizeCssDimension(config.iframe_height, "760px");
     const iframeBorderRadius = config.iframe_border_radius || 12;
     const iframeBorderWidth = config.iframe_border === false ? 0 : config.iframe_border_width || 1;
     const iframeBorderColor = config.iframe_border_color || "#e5e7eb";
@@ -106,12 +129,13 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
 
     const resolvedShadow = shadowStyles[String(iframeShadow)] ?? shadowStyles.medium;
 
-    return `<div style="display: flex; justify-content: center; margin: 20px 0;">
+    return `<div style="display: flex; width: 100%; justify-content: center; margin: 20px 0;">
   <iframe 
+    id="${iframeId}"
     src="${adventureUrl}"
     width="${iframeWidth}"
     height="${iframeHeight}"
-    style="border-radius: ${iframeBorderRadius}px; border: ${iframeBorderWidth}px solid ${iframeBorderColor}; background-color: ${iframeBackgroundColor}; box-shadow: ${resolvedShadow};"
+    style="display: block; width: ${iframeWidth}; max-width: 100%; height: ${iframeHeight}; border-radius: ${iframeBorderRadius}px; border: ${iframeBorderWidth}px solid ${iframeBorderColor}; background-color: ${iframeBackgroundColor}; box-shadow: ${resolvedShadow};"
     frameborder="0"
     loading="${iframeLoading}"
     scrolling="${iframeScrolling}"
@@ -121,51 +145,75 @@ export const LaunchTab: React.FC<LaunchTabProps> = ({
   ></iframe>
 </div>${madeWith}
 
-<!-- ${productName} Widget Exit Intent Detector -->
+<!-- ${productName} iframe bridge: secure resize + exit intent -->
 <script>
 (function() {
   const IFRAME_MESSAGE_TYPE = 'MAGE_WIDGET_EXIT_INTENT';
-  const registeredIframes = new Set();
+  const RESIZE_MESSAGE_TYPE = 'ADVENTURE_RESIZE';
+  const INSTANCE_ID = ${JSON.stringify(instanceId)};
+  const IFRAME_ID = ${JSON.stringify(iframeId)};
+  const VALID_PHASES = new Set(['project', 'look', 'concepts', 'estimate']);
+  const iframe = document.getElementById(IFRAME_ID);
+  if (!iframe) return;
+  let expectedOrigin;
+  try {
+    expectedOrigin = new URL(iframe.src, document.baseURI).origin;
+  } catch (e) {
+    return;
+  }
+  let registered = false;
   let mouseLeaveTimeout;
 
   window.addEventListener('message', (event) => {
-    if (event.data?.type === IFRAME_MESSAGE_TYPE && event.data?.action === 'register') {
-      registeredIframes.add(event.data.instanceId);
+    if (event.source !== iframe.contentWindow || event.origin !== expectedOrigin) return;
+    const data = event.data;
+    if (!data || typeof data !== 'object' || data.instanceId !== INSTANCE_ID) return;
+
+    if (data.type === RESIZE_MESSAGE_TYPE) {
+      if (!VALID_PHASES.has(data.phase)) return;
+      if (typeof data.height !== 'number' || !Number.isFinite(data.height)) return;
+      const nextHeight = Math.ceil(data.height);
+      if (nextHeight < 320 || nextHeight > 5000) return;
+      iframe.style.height = nextHeight + 'px';
+      iframe.setAttribute('height', String(nextHeight));
+      return;
+    }
+
+    if (data.type === IFRAME_MESSAGE_TYPE && data.action === 'register') {
+      registered = true;
     }
   });
 
-  function notifyIframes() {
-    registeredIframes.forEach(instanceId => {
-      document.querySelectorAll('iframe').forEach(iframe => {
-        try {
-          iframe.contentWindow.postMessage({
-            type: IFRAME_MESSAGE_TYPE,
-            action: 'exit-intent',
-            instanceId
-          }, '*');
-        } catch (e) {}
-      });
-    });
+  function notifyIframe() {
+    if (!registered || !iframe.contentWindow) return;
+    try {
+      iframe.contentWindow.postMessage({
+        type: IFRAME_MESSAGE_TYPE,
+        action: 'exit-intent',
+        instanceId: INSTANCE_ID
+      }, expectedOrigin);
+    } catch (e) {}
   }
 
   document.addEventListener('mousemove', (e) => {
     if (e.clientY <= 0 || e.clientX <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
       if (mouseLeaveTimeout) clearTimeout(mouseLeaveTimeout);
-      mouseLeaveTimeout = setTimeout(notifyIframes, 1000);
+      mouseLeaveTimeout = setTimeout(notifyIframe, 1000);
     } else {
       if (mouseLeaveTimeout) clearTimeout(mouseLeaveTimeout);
     }
   });
 
-  document.addEventListener('visibilitychange', () => { if (document.hidden) notifyIframes(); });
-  window.addEventListener('beforeunload', notifyIframes);
-  window.addEventListener('unload', notifyIframes);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) notifyIframe(); });
+  window.addEventListener('beforeunload', notifyIframe);
+  window.addEventListener('unload', notifyIframe);
 })();
 </script>`;
-  }, [adventureUrl, config, madeWithHref, showMadeWith]);
+  }, [adventureUrlForSurface, config, instanceId, madeWithHref, showMadeWith]);
 
   const buildPopupEmbedCode = useCallback(() => {
     const productName = "Adventure";
+    const adventureUrl = adventureUrlForSurface("popup");
     const madeWith = showMadeWith
       ? `\n    <div style="text-align: center; font-size: 12px; padding: 8px 12px; color: #6b7280; border-top: 1px solid rgba(0,0,0,0.06);">Made with <a href="${madeWithHref}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">Adventure</a></div>`
       : "";
@@ -282,15 +330,21 @@ ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
   });` : ""}
 })();
 </script>`;
-  }, [adventureUrl, config, madeWithHref, showMadeWith]);
+  }, [adventureUrlForSurface, config, madeWithHref, showMadeWith]);
 
   const hasAiForm = Boolean((config as any)?.form_status_enabled);
 
   const ensureIframeCode = useCallback(() => {
-    const next = buildIframeEmbedCode();
+    const next = buildContainedEmbedCode("embed");
     setEmbedCode(next);
     return next;
-  }, [buildIframeEmbedCode]);
+  }, [buildContainedEmbedCode]);
+
+  const ensureInlineCode = useCallback(() => {
+    const next = buildContainedEmbedCode("inline");
+    setInlineEmbedCode(next);
+    return next;
+  }, [buildContainedEmbedCode]);
 
   const ensurePopupCode = useCallback(() => {
     const next = buildPopupEmbedCode();
@@ -366,17 +420,17 @@ ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
     <div className="space-y-4 pt-2">
       <p className="px-1 text-xs text-muted-foreground leading-relaxed">
         Direct link and embed codes point at{" "}
-        <code className="rounded bg-muted/50 px-1 py-0.5 font-mono text-[11px]">/adventure/{instanceId}</code>
+        <code className="rounded bg-muted/50 px-1 py-0.5 font-mono text-[11px]">/adventure/{instanceId}?surface=…</code>
         {hasAiForm ? " (AI form when enabled for this instance, otherwise the classic widget)." : "."}
       </p>
 
-      <Card title="Open in browser" description="Same URL visitors get in an embed.">
+      <Card title="Open in browser" description="Centered standalone page experience.">
         <div className="flex">
           <Button
             variant="outline"
             size="sm"
             className="h-8 text-xs"
-            onClick={() => window.open(adventureUrl, "_blank")}
+            onClick={() => window.open(pageAdventureUrl, "_blank")}
           >
             Open
           </Button>
@@ -393,6 +447,10 @@ ${modalCloseOnEscape ? `  document.addEventListener('keydown', (e) => {
           />
         </div>
         <CodeBlock code={embedCode} ensureCode={ensureIframeCode} copyLabel="Iframe embed code copied" />
+      </Card>
+
+      <Card title="Inline embed" description="Responsive homepage embed with automatic height updates.">
+        <CodeBlock code={inlineEmbedCode} ensureCode={ensureInlineCode} copyLabel="Inline embed code copied" />
       </Card>
 
       <Card title="Popup" description="HTML/JS embed. Expand settings to edit; preview uses Popup mode on Launch.">

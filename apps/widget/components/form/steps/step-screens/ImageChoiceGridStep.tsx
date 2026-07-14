@@ -20,6 +20,8 @@ interface ImageChoiceGridStepProps {
   actionsVariant?: "default" | "sticky_mobile" | "icon_only";
   compactInPreview?: boolean;
   layoutDebugEnabled?: boolean;
+  instanceId?: string;
+  onProjectPhotoSelected?: (url: string) => void | Promise<void>;
 }
 
 type PriceTier = "$" | "$$" | "$$$" | "$$$$";
@@ -89,9 +91,7 @@ function useIsNarrowViewport(maxWidthPx: number): boolean {
       return () => mql.removeEventListener("change", onChange);
     }
     // Safari < 14
-    // eslint-disable-next-line deprecation/deprecation
     mql.addListener(onChange);
-    // eslint-disable-next-line deprecation/deprecation
     return () => mql.removeListener(onChange);
   }, [maxWidthPx]);
 
@@ -235,14 +235,14 @@ export function ImageChoiceGridStep({
     <StepLayout
       step={step}
       onComplete={() => onComplete(value)}
-      onBack={onBack}
+      onBack={isStyleStep ? undefined : onBack}
       canGoBack={canGoBack}
       isLoading={isLoading}
       canContinue={canContinue}
       headerInlineControl={resolvedHeaderInlineControl}
-      actionsVariant={actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
+      actionsVariant={isStyleStep ? "default" : actionsVariant ?? (isNarrowViewport ? "sticky_mobile" : "default")}
       stickyActionsTransparent={isStyleStep}
-      hideContinueAction={isPricedGridStep}
+      hideContinueAction={isPricedGridStep || isStyleStep}
       compactInPreview={isPricedGridStep ? false : compactInPreview}
       preferWideLayout={isPricedGridStep || !compactInPreview}
       layoutDebugEnabled={layoutDebugEnabled}
@@ -252,6 +252,8 @@ export function ImageChoiceGridStep({
           layoutDebugEnabled,
           isPricedGridStep
             ? "flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+            : isStyleStep
+              ? "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
             : !isPricedGridStep && compactInPreview
               ? "mx-auto flex w-full max-w-none min-w-0 shrink-0 flex-col min-h-0"
               : "flex min-h-0 w-full min-w-0 flex-col"
@@ -263,6 +265,8 @@ export function ImageChoiceGridStep({
             layoutDebugEnabled,
             isPricedGridStep
               ? "w-full min-w-0 flex min-h-0 flex-1 flex-col"
+              : isStyleStep
+                ? "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
               : "w-full min-h-0 flex-1 flex flex-col"
           )}
           style={
@@ -276,9 +280,12 @@ export function ImageChoiceGridStep({
           ) : null}
           <div
             className={cn(
-              isPricedGridStep ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y" : null
+              isPricedGridStep || isStyleStep
+                ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y"
+                : null,
+              isStyleStep ? "pb-3 sm:pb-4" : null,
             )}
-            style={isPricedGridStep ? ({ WebkitOverflowScrolling: "touch" } as React.CSSProperties) : undefined}
+            style={isPricedGridStep || isStyleStep ? ({ WebkitOverflowScrolling: "touch" } as React.CSSProperties) : undefined}
           >
             <ImageChoiceGrid
               value={value}
@@ -295,7 +302,8 @@ export function ImageChoiceGridStep({
               thumbnailMode={isPricedGridStep ? false : Boolean(guidedThumbnailMode || compactInPreview)}
               compactScroller={isPricedGridStep ? false : Boolean(compactInPreview)}
               hideOptionText={isStyleStep || isPricedGridStep}
-              displayMode={isPricedGridStep ? "priced_examples" : "default"}
+              displayMode={isPricedGridStep ? "priced_examples" : isStyleStep ? "starter_concepts" : "default"}
+              sharedSelectionLayoutPrefix={isStyleStep ? "starting-idea" : undefined}
               className={!isPricedGridStep && compactInPreview ? "w-full min-h-0 shrink-0" : undefined}
             />
           </div>

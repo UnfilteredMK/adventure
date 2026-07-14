@@ -9,6 +9,8 @@ export const REFINEMENT_OPTION_MODEL_ID = "black-forest-labs/flux-schnell";
 export const REFINEMENT_LIBRARY_TARGET_COMPONENTS = 10;
 export const REFINEMENT_LIBRARY_MAX_COMPONENTS = 10;
 export const REFINEMENT_LIBRARY_MIN_IMAGES_PER_COMPONENT = 6;
+export const REFINEMENT_LIBRARY_MIN_VALID_COMPONENTS = 4;
+export const REFINEMENT_COMPONENT_RELEVANCE_THRESHOLD = 0.75;
 export const REFINEMENT_PLANNER_SOURCE = "dspy_refinement_library_planner";
 
 const IMAGES_BUCKET = "images";
@@ -29,6 +31,13 @@ export type RefinementPlannerComponent = {
   key: string;
   label: string;
   priority: number;
+  reason: string;
+};
+
+export type RefinementComponentValidationResult = {
+  key: string;
+  label?: string;
+  relevanceScore: number;
   reason: string;
 };
 
@@ -61,7 +70,27 @@ export type EnsureRefinementLibraryResult = {
   plannerOk?: boolean;
   storedImages?: number;
   componentsPersisted?: boolean;
+  semanticValidationCalled?: boolean;
+  semanticReplanCalled?: boolean;
 };
+
+export type FilteredSemanticRefinementPlan = {
+  components: RefinementPlannerComponent[];
+  optionSeeds: any[];
+  rejectedKeys: string[];
+  validationResults: RefinementComponentValidationResult[];
+};
+
+export type SemanticRefinementPlanResolution =
+  | ({
+      ok: true;
+      semanticReplanCalled: boolean;
+    } & FilteredSemanticRefinementPlan)
+  | {
+      ok: false;
+      error: string;
+      semanticReplanCalled: boolean;
+    };
 
 type RefinementImageRow = {
   account_id: string | null;
@@ -644,6 +673,7 @@ export async function planRefinementLibrary(params: {
   categoryId?: string | null;
   categoryName?: string | null;
   companySummary?: string | null;
+  excludedComponentKeys?: string[];
   existingComponents?: StoredSubcategoryComponent[];
   serviceSummary: string;
   subcategoryId: string;
@@ -658,6 +688,7 @@ export async function planRefinementLibrary(params: {
       categoryId: params.categoryId,
       categoryName: params.categoryName,
       companySummary: params.companySummary,
+      excludedComponentKeys: params.excludedComponentKeys || [],
       existingComponents: params.existingComponents || [],
       serviceSummary: params.serviceSummary,
       subcategoryId: params.subcategoryId,
@@ -666,6 +697,39 @@ export async function planRefinementLibrary(params: {
       targetOptionsPerComponent: params.targetOptionsPerComponent ?? REFINEMENT_LIBRARY_MIN_IMAGES_PER_COMPONENT,
     },
   });
+}
+
+export async function validateRefinementComponents(params: {
+  baseUrls: string[];
+  categoryId?: string | null;
+  categoryName?: string | null;
+  companySummary?: string | null;
+  components: RefinementPlannerComponent[];
+  serviceSummary: string;
+  subcategoryId: string;
+  subcategoryName: string;
+}): Promise<
+  | { ok: true; results: unknown[]; json: any }
+  | { ok: false; error: unknown }
+> {
+  const response = await callFormServiceJson({
+    baseUrls: params.baseUrls,
+    path: "/v1/api/refinement-library-planner/validate-components",
+    payload: {
+      categoryId: params.categoryId,
+      categoryName: params.categoryName,
+      companySummary: params.companySummary,
+      components: params.components,
+      serviceSummary: params.serviceSummary,
+      subcategoryId: params.subcategoryId,
+      subcategoryName: params.subcategoryName,
+    },
+  });
+  if ("error" in response) return { error: response.error, ok: false };
+  if (!response.json?.ok || !Array.isArray(response.json?.results)) {
+    return { error: "semantic_validation_invalid_response", ok: false };
+  }
+  return { json: response.json, ok: true, results: response.json.results };
 }
 
 async function seedAllMissingImages(params: {
@@ -758,16 +822,171 @@ async function seedAllMissingImages(params: {
 function plannerComponentsFromResponse(json: any): RefinementPlannerComponent[] {
   const raw = Array.isArray(json?.components) ? json.components : [];
   const out: RefinementPlannerComponent[] = [];
+  const seen = new Set<string>();
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const key = normalizeComponentKey((item as any).key);
     const label = String((item as any).label || "").trim() || key;
     const reason = String((item as any).reason || "").trim() || `${label} is a visual refinement for this service.`;
     const priority = normalizePriority((item as any).priority, out.length + 1);
-    if (!key) continue;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     out.push({ key, label, priority, reason });
   }
   return out.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+}
+
+export function filterRefinementPlanBySemanticValidation(params: {
+  planJson: any;
+  results: unknown;
+  threshold?: number;
+}):
+  | ({ ok: true } & FilteredSemanticRefinementPlan)
+  | { ok: false; error: string } {
+  const threshold = Number.isFinite(params.threshold)
+    ? Number(params.threshold)
+    : REFINEMENT_COMPONENT_RELEVANCE_THRESHOLD;
+  const components = plannerComponentsFromResponse(params.planJson);
+  const rawSeeds = Array.isArray(params.planJson?.optionSeeds) ? params.planJson.optionSeeds : null;
+  if (components.length === 0 || !rawSeeds) {
+    return { error: "refinement_planner_empty", ok: false };
+  }
+  if (!Array.isArray(params.results)) {
+    return { error: "semantic_validation_results_missing", ok: false };
+  }
+
+  const candidateKeys = new Set(components.map((component) => component.key));
+  const resultsByKey = new Map<string, RefinementComponentValidationResult>();
+  for (const rawResult of params.results) {
+    if (!rawResult || typeof rawResult !== "object" || Array.isArray(rawResult)) {
+      return { error: "semantic_validation_result_invalid", ok: false };
+    }
+    const record = rawResult as Record<string, unknown>;
+    const key = normalizeComponentKey(record.key);
+    const score = record.relevanceScore;
+    const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+    if (
+      !key ||
+      !candidateKeys.has(key) ||
+      resultsByKey.has(key) ||
+      typeof score !== "number" ||
+      !Number.isFinite(score) ||
+      score < 0 ||
+      score > 1 ||
+      !reason
+    ) {
+      return { error: "semantic_validation_result_invalid", ok: false };
+    }
+    resultsByKey.set(key, {
+      key,
+      ...(typeof record.label === "string" && record.label.trim() ? { label: record.label.trim() } : {}),
+      reason,
+      relevanceScore: score,
+    });
+  }
+
+  if (resultsByKey.size !== components.length || components.some((component) => !resultsByKey.has(component.key))) {
+    return { error: "semantic_validation_result_incomplete", ok: false };
+  }
+
+  const acceptedComponents = components.filter(
+    (component) => (resultsByKey.get(component.key)?.relevanceScore ?? -1) >= threshold,
+  );
+  const acceptedKeys = new Set(acceptedComponents.map((component) => component.key));
+  const rejectedKeys = components
+    .filter((component) => !acceptedKeys.has(component.key))
+    .map((component) => component.key);
+
+  const filteredSeeds: any[] = [];
+  const seenSeedKeys = new Set<string>();
+  for (const rawGroup of rawSeeds) {
+    if (!rawGroup || typeof rawGroup !== "object" || Array.isArray(rawGroup)) continue;
+    const key = normalizeComponentKey((rawGroup as any).componentKey || (rawGroup as any).component_key);
+    if (!key || !acceptedKeys.has(key)) continue;
+    if (seenSeedKeys.has(key) || !Array.isArray((rawGroup as any).options) || (rawGroup as any).options.length === 0) {
+      return { error: "semantic_validation_option_seeds_invalid", ok: false };
+    }
+    seenSeedKeys.add(key);
+    filteredSeeds.push({ ...(rawGroup as any), componentKey: key });
+  }
+  if (acceptedComponents.some((component) => !seenSeedKeys.has(component.key))) {
+    return { error: "semantic_validation_option_seeds_incomplete", ok: false };
+  }
+
+  return {
+    components: acceptedComponents,
+    ok: true,
+    optionSeeds: filteredSeeds,
+    rejectedKeys,
+    validationResults: components.map((component) => resultsByKey.get(component.key)!),
+  };
+}
+
+export async function resolveSemanticallyValidatedRefinementPlan(params: {
+  initialPlanJson: any;
+  minValidComponents?: number;
+  replan: (input: {
+    acceptedComponents: RefinementPlannerComponent[];
+    excludedComponentKeys: string[];
+  }) => Promise<{ ok: true; json: any } | { ok: false; error: unknown }>;
+  threshold?: number;
+  validate: (
+    components: RefinementPlannerComponent[],
+  ) => Promise<{ ok: true; results: unknown[] } | { ok: false; error: unknown }>;
+}): Promise<SemanticRefinementPlanResolution> {
+  const requestedMin = Number(params.minValidComponents ?? REFINEMENT_LIBRARY_MIN_VALID_COMPONENTS);
+  const minValid = Number.isFinite(requestedMin)
+    ? Math.max(1, Math.floor(requestedMin))
+    : REFINEMENT_LIBRARY_MIN_VALID_COMPONENTS;
+  const initialComponents = plannerComponentsFromResponse(params.initialPlanJson);
+  if (initialComponents.length === 0 || !Array.isArray(params.initialPlanJson?.optionSeeds)) {
+    return { error: "refinement_planner_empty", ok: false, semanticReplanCalled: false };
+  }
+
+  const initialValidation = await params.validate(initialComponents);
+  if (!initialValidation.ok) {
+    return { error: "refinement_semantic_validation_failed", ok: false, semanticReplanCalled: false };
+  }
+  const first = filterRefinementPlanBySemanticValidation({
+    planJson: params.initialPlanJson,
+    results: initialValidation.results,
+    threshold: params.threshold,
+  });
+  if ("error" in first) {
+    return { error: first.error, ok: false, semanticReplanCalled: false };
+  }
+  if (first.components.length >= minValid) {
+    return { ...first, semanticReplanCalled: false };
+  }
+
+  const replanned = await params.replan({
+    acceptedComponents: first.components,
+    excludedComponentKeys: first.rejectedKeys,
+  });
+  if (!replanned.ok || !replanned.json?.ok) {
+    return { error: "refinement_semantic_replan_failed", ok: false, semanticReplanCalled: true };
+  }
+  const replannedComponents = plannerComponentsFromResponse(replanned.json);
+  if (replannedComponents.length === 0 || !Array.isArray(replanned.json?.optionSeeds)) {
+    return { error: "refinement_semantic_replan_empty", ok: false, semanticReplanCalled: true };
+  }
+
+  const replannedValidation = await params.validate(replannedComponents);
+  if (!replannedValidation.ok) {
+    return { error: "refinement_semantic_validation_failed", ok: false, semanticReplanCalled: true };
+  }
+  const second = filterRefinementPlanBySemanticValidation({
+    planJson: replanned.json,
+    results: replannedValidation.results,
+    threshold: params.threshold,
+  });
+  if ("error" in second) {
+    return { error: second.error, ok: false, semanticReplanCalled: true };
+  }
+  if (second.components.length < minValid) {
+    return { error: "refinement_semantic_insufficient", ok: false, semanticReplanCalled: true };
+  }
+  return { ...second, semanticReplanCalled: true };
 }
 
 export async function ensureRefinementLibraryForSubcategory(params: {
@@ -834,11 +1053,79 @@ export async function ensureRefinementLibraryForSubcategory(params: {
     return { error: "refinement_planner_failed", ok: false, plannerCalled: true, plannerOk: false };
   }
 
-  const components = plannerComponentsFromResponse(planned.json);
-  const optionSeeds = planned.json.optionSeeds;
-  if (components.length === 0 || !Array.isArray(optionSeeds)) {
+  const plannedComponents = plannerComponentsFromResponse(planned.json);
+  if (plannedComponents.length === 0 || !Array.isArray(planned.json.optionSeeds)) {
     return { error: "refinement_planner_empty", ok: false, plannerCalled: true, plannerOk: false };
   }
+
+  const semanticPlan = await resolveSemanticallyValidatedRefinementPlan({
+    initialPlanJson: planned.json,
+    replan: async ({ acceptedComponents, excludedComponentKeys }) => {
+      const replanned = await planRefinementLibrary({
+        baseUrls: params.baseUrls,
+        categoryId: params.categoryId,
+        categoryName: params.categoryName,
+        companySummary: params.companySummary,
+        excludedComponentKeys,
+        existingComponents: acceptedComponents.map((component) => ({
+          key: component.key,
+          label: component.label,
+          priority: component.priority,
+          reason: component.reason,
+          source: REFINEMENT_PLANNER_SOURCE,
+        })),
+        serviceSummary: params.serviceSummary,
+        subcategoryId: params.subcategoryId,
+        subcategoryName: params.subcategoryName,
+      });
+      if (!replanned.ok || !replanned.json?.ok) {
+        return {
+          error: replanned.ok ? replanned.json : (replanned as any).error,
+          ok: false as const,
+        };
+      }
+      return { json: replanned.json, ok: true as const };
+    },
+    validate: async (components) => {
+      const validated = await validateRefinementComponents({
+        baseUrls: params.baseUrls,
+        categoryId: params.categoryId,
+        categoryName: params.categoryName,
+        companySummary: params.companySummary,
+        components,
+        serviceSummary: params.serviceSummary,
+        subcategoryId: params.subcategoryId,
+        subcategoryName: params.subcategoryName,
+      });
+      if (!validated.ok) return validated;
+      return { ok: true as const, results: validated.results };
+    },
+  });
+
+  if ("error" in semanticPlan) {
+    log("refinement_semantic_validation_failed", {
+      error: semanticPlan.error,
+      semanticReplanCalled: semanticPlan.semanticReplanCalled,
+      subcategoryId: params.subcategoryId,
+    });
+    return {
+      error: semanticPlan.error,
+      ok: false,
+      plannerCalled: true,
+      plannerOk: semanticPlan.error !== "refinement_semantic_replan_failed",
+      semanticReplanCalled: semanticPlan.semanticReplanCalled,
+      semanticValidationCalled: true,
+    };
+  }
+
+  const components = semanticPlan.components;
+  const optionSeeds = semanticPlan.optionSeeds;
+  log("refinement_semantic_validation_passed", {
+    acceptedComponentCount: components.length,
+    rejectedKeys: semanticPlan.rejectedKeys,
+    semanticReplanCalled: semanticPlan.semanticReplanCalled,
+    subcategoryId: params.subcategoryId,
+  });
 
   const allowed = new Set(components.map((c) => c.key));
   await deleteRefinementOptionsOutsideKeys({
@@ -859,7 +1146,7 @@ export async function ensureRefinementLibraryForSubcategory(params: {
     supabase: params.supabase,
   });
 
-  if (!persist.ok) {
+  if ("error" in persist) {
     return { error: persist.error, ok: false, plannerCalled: true, plannerOk: true };
   }
 
@@ -887,6 +1174,8 @@ export async function ensureRefinementLibraryForSubcategory(params: {
     ok: true,
     plannerCalled: true,
     plannerOk: true,
+    semanticReplanCalled: semanticPlan.semanticReplanCalled,
+    semanticValidationCalled: true,
     storedImages,
   };
 }

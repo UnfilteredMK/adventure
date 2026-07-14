@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,9 +22,11 @@ import {
 } from "@/lib/ai-form/state/form-state-storage";
 import { buildPreviewPricingFromConfig } from "@/lib/ai-form/components/structural-steps";
 import { detectCurrencyFromLocale, formatCurrency } from "@/lib/ai-form/utils/currency";
-import { ArrowLeft, ChevronDown, ChevronRight, Download, Loader2, Mail, Maximize2, Phone } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Mail, Maximize2, Phone, Send, Sparkles } from "lucide-react";
 import { AdventureLoader } from "@/components/form/AdventureLoader";
+import { usePreviewSuggestions } from "@/components/form/state/PreviewSuggestionsContext";
 import { PRICING_LEAD_COPY } from "@/components/form/steps/image-preview-experience/lead-gen/pricingLeadCopy";
+import type { Suggestion } from "@/types";
 import { isDevModeEnabled } from "@/lib/ai-form/dev-mode";
 import { PricingExperience } from "../pricing/PricingExperience";
 import { useFormSubmission } from "@/hooks/use-form-submission";
@@ -81,6 +83,37 @@ function formatPhoneInput(value: string): { display: string; digits: string } {
   return { display: `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`, digits };
 }
 
+const SUGGESTION_CONTEXT_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "for",
+  "of",
+  "or",
+  "the",
+  "to",
+  "with",
+  "style",
+  "type",
+  "option",
+  "design",
+  "project",
+]);
+
+function suggestionTokens(value: unknown): Set<string> {
+  const parts = Array.isArray(value) ? value : [value];
+  const tokens = parts
+    .flatMap((part) =>
+      String(part || "")
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .replace(/[^a-z0-9 ]+/g, " ")
+        .split(/\s+/),
+    )
+    .filter((token) => token.length > 2 && !SUGGESTION_CONTEXT_STOP_WORDS.has(token));
+  return new Set(tokens);
+}
+
 type PreviewCacheV2 = {
   schemaVersion: 2;
   status: "idle" | "running" | "complete" | "error";
@@ -128,6 +161,12 @@ type PricingRequestInputs = {
   budgetRange?: number | null;
 };
 
+type ConceptPresentation = {
+  id?: string;
+  title: string;
+  summary?: string;
+};
+
 type PreviewRun = {
   id: string;
   createdAt: number;
@@ -139,22 +178,86 @@ type PreviewRun = {
   stepDataSnapshot?: Record<string, any>;
   /** Per-image pricing: imagePricing[i] corresponds to images[i]. Fetched once, fixed to the image. */
   imagePricing?: (CachedPricing | undefined)[];
+  /** Visitor-facing direction names returned with each generated image. */
+  conceptPresentations?: (ConceptPresentation | undefined)[];
 };
 
 const CONCEPT_GALLERY_COUNT = 4;
 const INITIAL_PROGRESSIVE_GRID_PLACEHOLDERS = 4;
-const GALLERY_LOADING_TITLE = "Generating your starter concepts…";
-const GALLERY_LOADING_SUBTITLE = "Turning your answers into design directions…";
+const GALLERY_LOADING_TITLE = "Creating your personalized concepts…";
+const GALLERY_LOADING_SUBTITLE = "Building from your starter, project, and budget…";
 const GALLERY_LOADING_MESSAGES = [
   GALLERY_LOADING_TITLE,
-  "Exploring a few design directions for your project…",
+  "Exploring distinct directions for your project…",
   GALLERY_LOADING_SUBTITLE,
-  "Matching your scope, style, and inspiration picks…",
-  "Trying a few different looks for you…",
+  "Matching your scope, priorities, and selected starter…",
+  "Trying personalized looks for you…",
   "Refining the strongest concepts…",
   "Pulling together the best options…",
   "Almost there…",
 ] as const;
+const CONCEPT_SLOT_LOADING_MESSAGES = [
+  "Exploring layout, tone, and materials…",
+  "Trying a distinct layout and atmosphere…",
+  "Balancing your project choices…",
+  "Refining the finishing details…",
+] as const;
+const CONCEPT_PRESENTATION_FALLBACKS: readonly ConceptPresentation[] = [
+  {
+    id: "signature_direction",
+    title: "Signature Direction",
+    summary: "A balanced interpretation that stays closest to your chosen starting point.",
+  },
+  {
+    id: "bright_open",
+    title: "Bright & Open",
+    summary: "A lighter, more open interpretation with a clean and spacious feel.",
+  },
+  {
+    id: "warm_inviting",
+    title: "Warm & Inviting",
+    summary: "A softer direction with warmer details and a more welcoming atmosphere.",
+  },
+  {
+    id: "simplified_direction",
+    title: "Simplified Direction",
+    summary: "A restrained interpretation focused on the most important changes.",
+  },
+] as const;
+
+function normalizeConceptPresentation(raw: any): ConceptPresentation | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const titleRaw =
+    typeof raw.title === "string"
+      ? raw.title
+      : typeof raw.label === "string"
+        ? raw.label
+        : "";
+  const title = titleRaw.trim();
+  if (!title) return undefined;
+  const idRaw =
+    typeof raw.id === "string"
+      ? raw.id
+      : typeof raw.slotId === "string"
+        ? raw.slotId
+        : typeof raw.slot_id === "string"
+          ? raw.slot_id
+          : "";
+  const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
+  return {
+    ...(idRaw.trim() ? { id: idRaw.trim() } : {}),
+    title,
+    ...(summary ? { summary } : {}),
+  };
+}
+
+function conceptPresentationFor(run: PreviewRun | null | undefined, index: number): ConceptPresentation {
+  return (
+    run?.conceptPresentations?.[index] ??
+    CONCEPT_PRESENTATION_FALLBACKS[index % CONCEPT_PRESENTATION_FALLBACKS.length] ??
+    CONCEPT_PRESENTATION_FALLBACKS[0]
+  );
+}
 
 /** "gallery" = show concept grid; "single" = show chosen hero with option to go back */
 type PreviewViewMode = "gallery" | "single";
@@ -198,6 +301,26 @@ type PreviewStackLayer = {
   key: string;
   src: string;
   kind: "transition" | "history";
+};
+
+export type PreviewPricingGateVariant = "blurred" | "coarse_visible";
+
+export type PreviewConceptSelection = {
+  index: number;
+  imageUrl: string;
+  runId: string | null;
+  pricing: {
+    totalMin: number;
+    totalMax: number;
+    currency: string;
+  } | null;
+};
+
+export type StudioStarterConcept = {
+  value: string;
+  label: string;
+  imageUrl: string;
+  isProjectPhoto?: boolean;
 };
 
 function storageKeyV1(instanceId: string, sessionId: string) {
@@ -483,6 +606,9 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
             ? (r as any).images.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src))
             : [];
           const rawPricing = Array.isArray((r as any).imagePricing) ? (r as any).imagePricing : [];
+          const rawConceptPresentations = Array.isArray((r as any).conceptPresentations)
+            ? (r as any).conceptPresentations
+            : [];
           const imagePricing: (CachedPricing | undefined)[] = imgs.map((_: string, i: number) => {
             const p = rawPricing[i];
             if (!p || typeof p !== "object" || !Number.isFinite(p.totalMin) || !Number.isFinite(p.totalMax))
@@ -543,6 +669,9 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
               calibrationKey: typeof p.calibrationKey === "string" ? p.calibrationKey : undefined,
             };
           });
+          const conceptPresentations = imgs.map((_: string, i: number) =>
+            normalizeConceptPresentation(rawConceptPresentations[i]),
+          );
           return {
             id: typeof (r as any).id === "string" ? (r as any).id : newRunId(),
             createdAt: Number((r as any).createdAt) || Date.now(),
@@ -562,6 +691,7 @@ function loadCache(instanceId: string, sessionId: string): PreviewCacheV3 | null
                 ? ((r as any).stepDataSnapshot as Record<string, any>)
                 : undefined,
             ...(imagePricing.some(Boolean) ? { imagePricing } : {}),
+            ...(conceptPresentations.some(Boolean) ? { conceptPresentations } : {}),
           };
         })
         .filter((r) => Boolean(r.images?.length));
@@ -704,6 +834,8 @@ export function ImagePreviewExperience(props: {
   leadGateEnabled?: boolean;
   /** When true, removes the card/surface background behind the preview. */
   transparentChrome?: boolean;
+  /** Run generation/cache effects without mounting the legacy preview chrome. */
+  headless?: boolean;
   /** Fires when a real preview image becomes available (hero exists). */
   onHasImageChange?: (hasImage: boolean) => void;
   config?: {
@@ -730,6 +862,20 @@ export function ImagePreviewExperience(props: {
   toolingEnabled?: boolean;
   /** When true, disable concept gallery picker and keep hero in single-image mode. */
   disableConceptPicker?: boolean;
+  /** Overrides the configured concept count (V1 uses exactly four). */
+  conceptCount?: number;
+  /** Progressively fill the initial gallery and preserve multi-concept generation with an uploaded photo. */
+  progressiveConcepts?: boolean;
+  /** The visual foundation chosen before generation; shown in the continuous studio status. */
+  studioStarterConcept?: StudioStarterConcept | null;
+  /** Replaces legacy single-preview overlays with the final studio estimate composition. */
+  studioEstimateMode?: boolean;
+  /** Fires when the user explicitly chooses a concept tile. */
+  onConceptSelected?: (detail: PreviewConceptSelection) => void;
+  /** Suppress all built-in lead overlays/popovers so an adjacent parent panel can own conversion. */
+  suppressInlineLeadGate?: boolean;
+  /** Card-level pricing treatment. Detailed pricing remains lead-gated. */
+  pricingGateVariant?: PreviewPricingGateVariant;
   /** Optional hook to bring Guided controls into focus. */
   onKeepDesigning?: () => void;
   /** Matches visible preview chrome: concept grid vs single hero vs no image yet. */
@@ -738,12 +884,14 @@ export function ImagePreviewExperience(props: {
   stepNavReturnToGalleryNonce?: number;
 }) {
   const { theme, config: designConfig } = useFormTheme();
+  const reduceMotion = useReducedMotion();
   const {
     instanceId,
     sessionId,
     enabled,
     leadGateEnabled = true,
     transparentChrome = false,
+    headless = false,
     onHasImageChange,
     stepDataSoFar,
     answeredQuestionCount = 0,
@@ -760,6 +908,13 @@ export function ImagePreviewExperience(props: {
     suppressUploadOverlay = false,
     toolingEnabled = true,
     disableConceptPicker = false,
+    conceptCount,
+    progressiveConcepts = false,
+    studioStarterConcept = null,
+    studioEstimateMode = false,
+    onConceptSelected,
+    suppressInlineLeadGate = false,
+    pricingGateVariant = "blurred",
     onKeepDesigning,
     onPreviewSurfaceModeChange,
     stepNavReturnToGalleryNonce = 0,
@@ -782,8 +937,15 @@ export function ImagePreviewExperience(props: {
     [designConfig]
   );
   const conceptGalleryTargetCount = useMemo(
-    () => Math.max(CONCEPT_GALLERY_COUNT, Math.min(12, Math.max(galleryMaxImages || CONCEPT_GALLERY_COUNT, CONCEPT_GALLERY_COUNT))),
-    [galleryMaxImages]
+    () => {
+      const requested = Number(conceptCount);
+      if (Number.isFinite(requested)) return Math.max(1, Math.min(12, Math.floor(requested)));
+      return Math.max(
+        CONCEPT_GALLERY_COUNT,
+        Math.min(12, Math.max(galleryMaxImages || CONCEPT_GALLERY_COUNT, CONCEPT_GALLERY_COUNT))
+      );
+    },
+    [conceptCount, galleryMaxImages]
   );
 
   const sceneUploadUrl = useMemo(() => {
@@ -806,6 +968,9 @@ export function ImagePreviewExperience(props: {
       .trim()
       .toLowerCase()
       .replace(/_/g, "-");
+    if (progressiveConcepts && (cache?.runs?.length || 0) === 0) {
+      return conceptGalleryTargetCount;
+    }
     if (
       normalizedUseCase === "tryon" ||
       normalizedUseCase === "scene-placement" ||
@@ -824,7 +989,15 @@ export function ImagePreviewExperience(props: {
       return 1;
     }
     return conceptGalleryTargetCount;
-  }, [cache?.runs?.length, conceptGalleryTargetCount, config, sceneUploadUrl, uploadedImages.length, userUploadUrl]);
+  }, [
+    cache?.runs?.length,
+    conceptGalleryTargetCount,
+    config,
+    progressiveConcepts,
+    sceneUploadUrl,
+    uploadedImages.length,
+    userUploadUrl,
+  ]);
   const refreshRegenAllowance = useCallback(async () => {
     if (!instanceId) return;
     try {
@@ -868,6 +1041,40 @@ export function ImagePreviewExperience(props: {
   const debugSessionRef = useRef<string | null>(null);
   const debugLeadCapturedRef = useRef<boolean | null>(null);
   const [galleryLoadingMessageIndex, setGalleryLoadingMessageIndex] = useState(0);
+  const [studioRefinementDraft, setStudioRefinementDraft] = useState("");
+  const [studioSuggestionOffset, setStudioSuggestionOffset] = useState(0);
+  const { suggestions: studioSuggestions, loading: studioSuggestionsLoading } = usePreviewSuggestions();
+  const rankedStudioSuggestions = useMemo(() => {
+    const contextTokens = new Set<string>();
+    Object.entries(stepDataSoFar || {}).forEach(([stepId, answer]) => {
+      if (!/^step-(style-direction|project-|service)/.test(stepId)) return;
+      suggestionTokens(answer).forEach((token) => contextTokens.add(token));
+    });
+    return studioSuggestions
+      .map((suggestion, index) => {
+        const tokens = suggestionTokens([
+          suggestion.suggestionLabel,
+          suggestion.text,
+          suggestion.category,
+          suggestion.subcategory,
+          suggestion.prompt,
+        ]);
+        let score = 0;
+        tokens.forEach((token) => {
+          if (contextTokens.has(token)) score += 1;
+        });
+        return { suggestion, index, score };
+      })
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ suggestion }) => suggestion);
+  }, [stepDataSoFar, studioSuggestions]);
+  const visibleStudioSuggestions = useMemo(() => {
+    if (rankedStudioSuggestions.length <= 3) return rankedStudioSuggestions;
+    return Array.from(
+      { length: 3 },
+      (_, index) => rankedStudioSuggestions[(studioSuggestionOffset + index) % rankedStudioSuggestions.length],
+    );
+  }, [rankedStudioSuggestions, studioSuggestionOffset]);
   const pendingActionRef = useRef<null | "refresh" | "upload" | "download">(null);
   const pendingGenerateModeRef = useRef<"manual" | "auto">("manual");
   const gateContextRef = useRef<string>("design_and_estimate");
@@ -1089,9 +1296,14 @@ export function ImagePreviewExperience(props: {
       return;
     }
 
-    setPendingExactPricingReveal(true);
-    setAccuratePricingStatus("running");
-    void fetchAccuratePricingRef.current?.();
+    if (pendingRefinementNotesRef.current) {
+      setStudioRefinementDraft("");
+      void postLeadUnlockActionRef.current.runGenerate("manual");
+    } else {
+      setPendingExactPricingReveal(true);
+      setAccuratePricingStatus("running");
+      void fetchAccuratePricingRef.current?.();
+    }
   }, [
     centeredPricingEmail,
     centeredPricingName,
@@ -1247,16 +1459,41 @@ export function ImagePreviewExperience(props: {
     return idx >= 0 ? idx : Math.max(0, runs.length - 1);
   }, [activeRunId, runs]);
 
+  const [stagedConceptIndex, setStagedConceptIndex] = useState(0);
+  const [conceptSlideDirection, setConceptSlideDirection] = useState<1 | -1>(1);
+
+  useEffect(() => {
+    const images = activeRun?.images ?? [];
+    if (images.length === 0) {
+      setStagedConceptIndex(0);
+      return;
+    }
+    setStagedConceptIndex((current) => {
+      if (images[current]) return current;
+      const firstReadyIndex = images.findIndex(Boolean);
+      return firstReadyIndex >= 0 ? firstReadyIndex : 0;
+    });
+  }, [activeRun?.id, activeRun?.images]);
+
   const selectedConceptIndex = cache?.selectedConceptIndex ?? null;
   const viewMode = (cache?.viewMode === "gallery" || cache?.viewMode === "single" ? cache.viewMode : null) as PreviewViewMode | null;
+  const pendingInitialConceptGrid = Boolean(
+    progressiveConcepts &&
+      !disableConceptPicker &&
+      cache?.status === "running" &&
+      !activeRun &&
+      selectedConceptIndex === null,
+  );
   const activeRunExpectedImageCount =
     typeof activeRun?.expectedImageCount === "number" && Number.isFinite(activeRun.expectedImageCount)
       ? Math.max(activeRun.expectedImageCount, activeRun?.images?.length ?? 0)
-      : activeRun?.images?.length ?? 0;
+      : pendingInitialConceptGrid
+        ? conceptGalleryTargetCount
+        : activeRun?.images?.length ?? 0;
   const showGalleryGrid =
     !disableConceptPicker &&
     (viewMode === "gallery" || (viewMode === null && selectedConceptIndex === null)) &&
-    Boolean(activeRun) &&
+    (Boolean(activeRun) || pendingInitialConceptGrid) &&
     activeRunExpectedImageCount > 1;
   const showConceptPicker = showGalleryGrid;
 
@@ -1274,6 +1511,26 @@ export function ImagePreviewExperience(props: {
         : 0;
     return activeRun.images[idx] ?? activeRun.images[0] ?? null;
   }, [activeRun, selectedConceptIndex]);
+  // A concept click is itself the commit into Estimate. Also derive this from the
+  // local cache so we never render the legacy single-preview screen while the
+  // parent is catching up with the cache event.
+  const conceptSelectionCommitted = Boolean(
+    progressiveConcepts &&
+      selectedConceptIndex !== null &&
+      Number.isFinite(selectedConceptIndex) &&
+      hero &&
+      !showConceptPicker,
+  );
+  const studioEstimateActive = Boolean(
+    (studioEstimateMode || conceptSelectionCommitted) && hero && !showConceptPicker,
+  );
+  const selectedConceptApiPresentation =
+    activeRun?.conceptPresentations?.[
+      selectedConceptIndex !== null && Number.isFinite(selectedConceptIndex) ? selectedConceptIndex : 0
+    ];
+  const selectedConceptDisplayTitle =
+    selectedConceptApiPresentation?.title?.trim() || "Your selected concept";
+  const selectedConceptDisplaySummary = selectedConceptApiPresentation?.summary?.trim() || "";
 
   const previewSurfaceMode = useMemo((): "gallery" | "single" | "empty" => {
     // Gallery first (including progressive load with placeholders) so the shell can hide the question pane until the user picks a tile.
@@ -1422,6 +1679,9 @@ export function ImagePreviewExperience(props: {
   const runGenerate = useCallback(
     async (reason: "auto" | "manual") => {
       if (!enabled) return;
+      // Estimate must open on the concept the visitor deliberately selected. Only an
+      // explicit refinement may replace it with another generated image.
+      if (studioEstimateActive && reason === "auto") return;
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       let responseErrorDetails: string | null = null;
@@ -1516,8 +1776,11 @@ export function ImagePreviewExperience(props: {
         isBudgetDrivenRegeneration
           ? (originalUploadedAnchorImage || activeAnchorImage)
           : activeAnchorImage;
+      // The selected starter is the visual foundation for the first concept run.
+      // Initial scene generations treat option-card images as guide-only references,
+      // so they influence the direction without being mistaken for the user's property.
       const shouldUseOptionCardImagesAsGenerationRefs =
-        hasExistingPreview || useCase !== "scene" || Boolean(runAnchorImage);
+        selectedOptionReferenceImages.length > 0;
       const generationIntent: "initial" | "small_improvement" | "regenerate" | "budget_tier_shift" = isBudgetDrivenRegeneration
         ? isBudgetTierShift
           ? "budget_tier_shift"
@@ -1696,7 +1959,7 @@ export function ImagePreviewExperience(props: {
 		        const ensuredRefs = await Promise.all(refsForGeneration.map((u) => ensureUrlLikeImage(u)));
 		        const uniqueRefs = Array.from(new Set(ensuredRefs.filter(isValidUrlLikeImage))).slice(0, 6);
 
-		        const endpoint =
+		        const specializedEndpoint =
               normalizedUseCase === "tryon"
                 ? "/api/generate/try-on"
                 : normalizedUseCase === "scene-placement"
@@ -1712,21 +1975,29 @@ export function ImagePreviewExperience(props: {
 		        const refinementNotes =
 		          typeof refinementNotesRaw === "string" && refinementNotesRaw.trim() ? refinementNotesRaw.trim() : undefined;
 		        const hasDirectImageInput = Boolean(userImage || productImage || sceneImage);
-		        // Multi-image concept grid: text + style refs only. A real upload (room/person/product) uses edit routing.
-		        const shouldGenerateConceptGallery =
-		          generationIntent === "initial" && !hasDirectImageInput;
+		        // Legacy only creates a concept grid without direct image input. V1 progressive mode intentionally
+            // keeps the four-concept gallery when a project photo is present.
+            const shouldGenerateConceptGallery =
+		          generationIntent === "initial" && (!hasDirectImageInput || progressiveConcepts);
 		        const numOutputs = shouldGenerateConceptGallery ? conceptGalleryTargetCount : 1;
+            const initialConceptBatchSize =
+              progressiveConcepts && shouldGenerateConceptGallery ? 1 : numOutputs;
+            // The generic route's structured price-ladder program supports deterministic slot offsets and
+            // uploaded scene anchors. Specialized edit routes clamp several models to a single output.
+            const useStructuredConceptGeneration = Boolean(progressiveConcepts && shouldGenerateConceptGallery);
+            const endpoint = useStructuredConceptGeneration ? "/api/generate" : specializedEndpoint;
             const generationMessage =
               !hasExistingPreview || shouldGenerateConceptGallery
                 ? GALLERY_LOADING_TITLE
                 : isBudgetTierShift
                   ? "Reworking your design for the new budget tier…"
                   : "Refreshing your design…";
-		        const requestBodyBase: any = {
+            const requestBodyBase: any = {
 		          instanceId,
 		          sessionId,
 		          useCase: normalizedUseCase,
 		          generationIntent,
+              ...(useStructuredConceptGeneration ? { aspectRatio: "4:3" } : {}),
               stepDataSoFar: effectiveStepDataSoFar ?? {},
 		          answeredQA,
               askedStepIds,
@@ -1785,8 +2056,13 @@ export function ImagePreviewExperience(props: {
               images?: string[];
               appendImages?: boolean;
               message?: string | null;
+              error?: string | null;
+              errorDetails?: string | null;
               imagePricing?: (CachedPricing | undefined)[];
               imagePricingOffset?: number;
+              conceptPresentations?: (ConceptPresentation | undefined)[];
+              conceptPresentationOffset?: number;
+              imageSlot?: number;
               generated?: boolean;
             }) => {
               setCache((prev) => {
@@ -1809,6 +2085,12 @@ export function ImagePreviewExperience(props: {
                   carryoverImages.length > 0 && Array.isArray(priorActiveRun?.imagePricing) && priorActiveRun.imagePricing.length > 0
                     ? [...priorActiveRun.imagePricing]
                     : ([] as (CachedPricing | undefined)[]);
+                const carryoverConceptPresentations =
+                  carryoverImages.length > 0 &&
+                  Array.isArray(priorActiveRun?.conceptPresentations) &&
+                  priorActiveRun.conceptPresentations.length > 0
+                    ? [...priorActiveRun.conceptPresentations]
+                    : ([] as (ConceptPresentation | undefined)[]);
                 const existingRun =
                   existingIndex >= 0
                     ? nextRuns[existingIndex]
@@ -1822,21 +2104,57 @@ export function ImagePreviewExperience(props: {
                         message: generationMessage,
                         stepDataSnapshot: pricingContextForNextRun.stepDataSnapshot,
                         ...(carryoverPricing.length > 0 ? { imagePricing: carryoverPricing } : {}),
+                        ...(carryoverConceptPresentations.length > 0
+                          ? { conceptPresentations: carryoverConceptPresentations }
+                          : {}),
                       } satisfies PreviewRun);
-                const mergedImages =
-                  params.images && params.images.length > 0
-                    ? params.appendImages
+                const imageSlot = Number.isFinite(Number(params.imageSlot))
+                  ? Math.max(0, Math.floor(Number(params.imageSlot)))
+                  : null;
+                const mergedImages = (() => {
+                  if (imageSlot !== null && params.images?.[0]) {
+                    const slotted = Array.from(
+                      { length: Math.max(numOutputs, existingRun.images.length, imageSlot + 1) },
+                      (_, index) => existingRun.images[index] ?? "",
+                    );
+                    slotted[imageSlot] = params.images[0];
+                    return slotted;
+                  }
+                  if (params.images && params.images.length > 0) {
+                    return params.appendImages
                       ? mergeUniqueImageUrls(existingRun.images, params.images)
-                      : params.images
-                    : existingRun.images;
+                      : params.images;
+                  }
+                  return existingRun.images;
+                })();
                 const mergedPricing = Array.isArray(existingRun.imagePricing) ? [...existingRun.imagePricing] : [];
                 if (Array.isArray(params.imagePricing)) {
                   const pricingOffset = Math.max(
                     0,
-                    Number.isFinite(Number(params.imagePricingOffset)) ? Math.floor(Number(params.imagePricingOffset)) : 0
+                    imageSlot !== null
+                      ? imageSlot
+                      : Number.isFinite(Number(params.imagePricingOffset))
+                        ? Math.floor(Number(params.imagePricingOffset))
+                        : 0
                   );
                   params.imagePricing.forEach((value, index) => {
                     if (value) mergedPricing[pricingOffset + index] = value;
+                  });
+                }
+                const mergedConceptPresentations = Array.isArray(existingRun.conceptPresentations)
+                  ? [...existingRun.conceptPresentations]
+                  : [];
+                if (Array.isArray(params.conceptPresentations)) {
+                  const presentationOffset = Math.max(
+                    0,
+                    imageSlot !== null
+                      ? imageSlot
+                      : Number.isFinite(Number(params.conceptPresentationOffset))
+                        ? Math.floor(Number(params.conceptPresentationOffset))
+                        : 0,
+                  );
+                  params.conceptPresentations.forEach((value, index) => {
+                    if (value) mergedConceptPresentations[presentationOffset + index] = value;
                   });
                 }
                 const nextRun: PreviewRun = {
@@ -1846,21 +2164,46 @@ export function ImagePreviewExperience(props: {
                   message: params.message ?? existingRun.message ?? generationMessage,
                   stepDataSnapshot: existingRun.stepDataSnapshot ?? pricingContextForNextRun.stepDataSnapshot,
                   ...(mergedPricing.some(Boolean) ? { imagePricing: mergedPricing } : {}),
+                  ...(mergedConceptPresentations.some(Boolean)
+                    ? { conceptPresentations: mergedConceptPresentations }
+                    : {}),
                 };
                 if (existingIndex >= 0) nextRuns[existingIndex] = nextRun;
                 else nextRuns.push(nextRun);
 
                 const preserveViewMode = base.viewMode === "single" || base.viewMode === "gallery";
+                // Remaining progressive slots can finish after the visitor chooses a
+                // concept. Preserve that explicit selection while this same run fills
+                // in, rather than throwing them back into the gallery.
+                const committedConceptIndex =
+                  base.activeRunId === runId &&
+                  base.viewMode === "single" &&
+                  typeof base.selectedConceptIndex === "number" &&
+                  Number.isFinite(base.selectedConceptIndex)
+                    ? Math.max(0, Math.min(numOutputs - 1, Math.floor(base.selectedConceptIndex)))
+                    : null;
                 const next: PreviewCacheV3 = {
                   ...base,
                   status: params.status,
                   runs: nextRuns,
                   activeRunId: runId,
-                  selectedConceptIndex: preserveViewMode && base.viewMode === "single" && numOutputs === 1 ? 0 : null,
-                  viewMode: numOutputs > 1 ? "gallery" : preserveViewMode ? base.viewMode : "single",
+                  selectedConceptIndex:
+                    committedConceptIndex !== null
+                      ? committedConceptIndex
+                      : preserveViewMode && base.viewMode === "single" && numOutputs === 1
+                        ? 0
+                        : null,
+                  viewMode:
+                    committedConceptIndex !== null
+                      ? "single"
+                      : numOutputs > 1
+                        ? "gallery"
+                        : preserveViewMode
+                          ? base.viewMode
+                          : "single",
                   message: params.message ?? nextRun.message ?? generationMessage,
-                  error: null,
-                  errorDetails: null,
+                  error: params.status === "error" ? params.error ?? "Some concepts could not be generated." : null,
+                  errorDetails: params.status === "error" ? params.errorDetails ?? null : null,
                   runStartedAt: params.status === "running" ? base.runStartedAt ?? Date.now() : null,
                   updatedAt: Date.now(),
                   lastContextSignature: signatureAtStart,
@@ -1878,87 +2221,300 @@ export function ImagePreviewExperience(props: {
             setActiveGenerationReason(reason);
             writeRunState({ status: "running", message: generationMessage });
 
-            const requestBody: any = {
-              ...requestBodyBase,
-              numOutputs,
-            };
-            if (generationIndex !== undefined) requestBody.generationIndex = generationIndex;
-            if (process.env.NODE_ENV !== "production") {
-              console.debug("[preview] generate request", {
-                endpoint,
-                useCase: normalizedUseCase,
-                generationIntent,
-                hasExistingPreview,
-                isInitialConceptGalleryRun,
-                guideOnlyInitialSceneRun,
-                numOutputs,
-                stepDataKeys:
-                  requestBody.stepDataSoFar && typeof requestBody.stepDataSoFar === "object"
-                    ? Object.keys(requestBody.stepDataSoFar).slice(0, 20)
-                    : [],
-                askedStepIdsCount: Array.isArray(requestBody.askedStepIds) ? requestBody.askedStepIds.length : 0,
-                answeredQACount: Array.isArray(requestBody.answeredQA) ? requestBody.answeredQA.length : 0,
-                hasSceneImage: Boolean(requestBody.sceneImage),
-                hasUserImage: Boolean(requestBody.userImage),
-                hasProductImage: Boolean(requestBody.productImage),
-                referenceImagesCount: Array.isArray(requestBody.referenceImages) ? requestBody.referenceImages.length : 0,
-                budgetRange: requestBody.budgetRange ?? null,
+            const fetchGenerationBatch = async (
+              requestedOutputs: number,
+              variantStartIndex: number,
+              attemptIndex: number
+            ): Promise<{
+              images: string[];
+              imagePricing: (CachedPricing | undefined)[];
+              conceptPresentations: (ConceptPresentation | undefined)[];
+              message: string;
+            }> => {
+              const requestBody: any = {
+                ...requestBodyBase,
+                numOutputs: requestedOutputs,
+                ...(useStructuredConceptGeneration
+                  ? { variationMode: "price_ladder_9", variantStartIndex }
+                  : {}),
+              };
+              if (generationIndex !== undefined) requestBody.generationIndex = generationIndex + attemptIndex;
+              if (process.env.NODE_ENV !== "production") {
+                console.debug("[preview] generate request", {
+                  endpoint,
+                  useCase: normalizedUseCase,
+                  generationIntent,
+                  hasExistingPreview,
+                  isInitialConceptGalleryRun,
+                  guideOnlyInitialSceneRun,
+                  numOutputs: requestedOutputs,
+                  variantStartIndex,
+                  progressiveConcepts,
+                  stepDataKeys:
+                    requestBody.stepDataSoFar && typeof requestBody.stepDataSoFar === "object"
+                      ? Object.keys(requestBody.stepDataSoFar).slice(0, 20)
+                      : [],
+                  askedStepIdsCount: Array.isArray(requestBody.askedStepIds) ? requestBody.askedStepIds.length : 0,
+                  answeredQACount: Array.isArray(requestBody.answeredQA) ? requestBody.answeredQA.length : 0,
+                  hasSceneImage: Boolean(requestBody.sceneImage),
+                  hasUserImage: Boolean(requestBody.userImage),
+                  hasProductImage: Boolean(requestBody.productImage),
+                  referenceImagesCount: Array.isArray(requestBody.referenceImages) ? requestBody.referenceImages.length : 0,
+                  budgetRange: requestBody.budgetRange ?? null,
+                });
+              }
+              const res = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                cache: "no-store",
+                body: JSON.stringify(requestBody),
               });
-            }
-            const res = await fetch(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              cache: "no-store",
-              body: JSON.stringify(requestBody),
-            });
-            const json = await res.json().catch(() => ({}));
-            if (!res.ok) {
-              const errorMessage =
-                res.status === 413
-                  ? "That photo is too large to process. Try a smaller image (or retake the photo)."
-                  : typeof (json as any)?.error === "string"
-                    ? (json as any).error
-                    : `Failed (${res.status})`;
-              const detailsRaw = (json as any)?.details;
-              const normalizedDetails =
-                typeof detailsRaw === "string"
-                  ? detailsRaw
-                  : detailsRaw && typeof detailsRaw === "object"
-                    ? safeJsonStringify(detailsRaw)
-                    : null;
-              responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
-              const err = new Error(errorMessage) as Error & { details?: string | null };
-              err.details = responseErrorDetails;
-              throw err;
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                const errorMessage =
+                  res.status === 413
+                    ? "That photo is too large to process. Try a smaller image (or retake the photo)."
+                    : typeof (json as any)?.error === "string"
+                      ? (json as any).error
+                      : `Failed (${res.status})`;
+                const detailsRaw = (json as any)?.details;
+                const normalizedDetails =
+                  typeof detailsRaw === "string"
+                    ? detailsRaw
+                    : detailsRaw && typeof detailsRaw === "object"
+                      ? safeJsonStringify(detailsRaw)
+                      : null;
+                responseErrorDetails = normalizedDetails ? normalizedDetails.slice(0, 800) : null;
+                const err = new Error(errorMessage) as Error & { details?: string | null };
+                err.details = responseErrorDetails;
+                throw err;
+              }
+
+              const imgs = Array.isArray((json as any)?.images)
+                ? (json as any).images.filter((x: any) => typeof x === "string" && x)
+                : [];
+              const normalizedImages = mergeUniqueImageUrls(
+                [],
+                imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src))
+              ).slice(0, requestedOutputs);
+              if (normalizedImages.length === 0) {
+                throw new Error(
+                  imgs.length === 0
+                    ? "Preview generated, but no images were returned."
+                    : "Preview generated, but only a placeholder image was returned."
+                );
+              }
+
+              const pricingByImage = new Map<string, CachedPricing>();
+              const presentationByImage = new Map<string, ConceptPresentation>();
+              const variants = Array.isArray((json as any)?.variants) ? (json as any).variants : [];
+              for (const variant of variants) {
+                const imageUrl = typeof variant?.imageUrl === "string" ? variant.imageUrl : "";
+                const presentation = normalizeConceptPresentation(variant);
+                if (imageUrl && presentation) presentationByImage.set(imageUrl, presentation);
+                const priceRange = normalizeNumericRange(variant?.priceRange ?? variant?.price_range);
+                if (!imageUrl || !priceRange) continue;
+                const currency =
+                  typeof variant?.priceRange?.currency === "string"
+                    ? String(variant.priceRange.currency).trim().toUpperCase()
+                    : typeof variant?.price_range?.currency === "string"
+                      ? String(variant.price_range.currency).trim().toUpperCase()
+                      : "USD";
+                const budgetTierRangesRaw = variant?.budgetTierRanges ?? variant?.budget_tier_ranges;
+                const budgetTierRanges =
+                  budgetTierRangesRaw && typeof budgetTierRangesRaw === "object"
+                    ? Object.fromEntries(
+                        Object.entries(budgetTierRangesRaw)
+                          .map(([key, value]) => [key, normalizeNumericRange(value)])
+                          .filter((entry): entry is [string, { low: number; high: number }] => Boolean(entry[1]))
+                      )
+                    : undefined;
+                pricingByImage.set(imageUrl, {
+                  totalMin: priceRange.low,
+                  totalMax: priceRange.high,
+                  currency: currency || "USD",
+                  imagePriceRange: priceRange,
+                  ...(typeof variant?.budgetTier === "string"
+                    ? { budgetTier: String(variant.budgetTier).trim().toLowerCase() }
+                    : {}),
+                  ...(budgetTierRanges && Object.keys(budgetTierRanges).length > 0 ? { budgetTierRanges } : {}),
+                  ...(typeof variant?.calibrationKey === "string"
+                    ? { calibrationKey: String(variant.calibrationKey) }
+                    : {}),
+                });
+              }
+
+              return {
+                images: normalizedImages,
+                imagePricing: normalizedImages.map((src: string) => pricingByImage.get(src)),
+                conceptPresentations: normalizedImages.map((src: string) => presentationByImage.get(src)),
+                message:
+                  shouldGenerateConceptGallery || !hasExistingPreview
+                    ? generationMessage
+                    : typeof (json as any)?.message === "string"
+                      ? String((json as any).message)
+                      : generationMessage,
+              };
+            };
+
+            const fetchUntilFilled = async (requestedOutputs: number, variantStartIndex: number) => {
+              let collected: string[] = [];
+              let message = generationMessage;
+              let attempt = 0;
+              const pricingByImage = new Map<string, CachedPricing>();
+              const presentationByImage = new Map<string, ConceptPresentation>();
+              const maxAttempts = useStructuredConceptGeneration ? 2 : 1;
+              while (collected.length < requestedOutputs && attempt < maxAttempts) {
+                const remaining = requestedOutputs - collected.length;
+                const batch = await fetchGenerationBatch(remaining, variantStartIndex + collected.length, attempt);
+                message = batch.message;
+                batch.images.forEach((src, index) => {
+                  const pricing = batch.imagePricing[index];
+                  if (pricing && !pricingByImage.has(src)) pricingByImage.set(src, pricing);
+                  const presentation = batch.conceptPresentations[index];
+                  if (presentation && !presentationByImage.has(src)) presentationByImage.set(src, presentation);
+                });
+                const merged = mergeUniqueImageUrls(collected, batch.images);
+                const gained = merged.length - collected.length;
+                collected = merged;
+                attempt += 1;
+                if (gained <= 0) break;
+              }
+              return {
+                images: collected,
+                imagePricing: collected.map((src) => pricingByImage.get(src)),
+                conceptPresentations: collected.map((src) => presentationByImage.get(src)),
+                message,
+              };
+            };
+
+            if (useStructuredConceptGeneration && numOutputs > 1) {
+              const resolvedImages = Array<string>(numOutputs).fill("");
+              const resolvedPricing = Array<CachedPricing | undefined>(numOutputs).fill(undefined);
+              const resolvedConceptPresentations = Array<ConceptPresentation | undefined>(numOutputs).fill(undefined);
+              const slotErrors: string[] = [];
+              let nextSlot = 0;
+
+              writeRunState({
+                status: "running",
+                images: resolvedImages,
+                appendImages: false,
+                message: generationMessage,
+                generated: false,
+              });
+
+              const runSlotWorker = async () => {
+                while (nextSlot < numOutputs) {
+                  const slot = nextSlot;
+                  nextSlot += 1;
+                  try {
+                    const result = await fetchUntilFilled(1, slot);
+                    const image = result.images[0];
+                    if (!image) throw new Error(`Concept ${slot + 1} returned no image.`);
+                    resolvedImages[slot] = image;
+                    resolvedPricing[slot] = result.imagePricing[0];
+                    resolvedConceptPresentations[slot] = result.conceptPresentations[0];
+                    writeRunState({
+                      status: "running",
+                      images: [image],
+                      imagePricing: [result.imagePricing[0]],
+                      conceptPresentations: [result.conceptPresentations[0]],
+                      imageSlot: slot,
+                      message: result.message,
+                      generated: false,
+                    });
+                  } catch (slotError) {
+                    slotErrors.push(
+                      slotError instanceof Error
+                        ? `Concept ${slot + 1}: ${slotError.message}`
+                        : `Concept ${slot + 1} could not be generated.`,
+                    );
+                  }
+                }
+              };
+
+              await Promise.all(
+                Array.from({ length: Math.min(3, numOutputs) }, () => runSlotWorker()),
+              );
+              const completedConceptCount = resolvedImages.filter(Boolean).length;
+              const completedConceptSet = completedConceptCount === numOutputs;
+              writeRunState({
+                status: completedConceptSet ? "complete" : "error",
+                images: resolvedImages,
+                appendImages: false,
+                imagePricing: resolvedPricing,
+                conceptPresentations: resolvedConceptPresentations,
+                message: completedConceptSet ? "Your concepts are ready." : generationMessage,
+                error: completedConceptSet
+                  ? null
+                  : `${completedConceptCount} of ${numOutputs} concepts are ready. Try again to finish the set.`,
+                errorDetails: slotErrors.length > 0 ? slotErrors.join(" | ").slice(0, 800) : responseErrorDetails,
+                generated: completedConceptSet,
+              });
+            } else {
+              const firstBatch = await fetchUntilFilled(initialConceptBatchSize, 0);
+              const remainingAfterFirstBatch = Math.max(0, numOutputs - firstBatch.images.length);
+              writeRunState({
+                status: remainingAfterFirstBatch > 0 ? "running" : "complete",
+                images: firstBatch.images,
+                appendImages: false,
+                message: firstBatch.message,
+                imagePricing: firstBatch.imagePricing,
+                conceptPresentations: firstBatch.conceptPresentations,
+                generated: remainingAfterFirstBatch === 0,
+              });
+
+              if (remainingAfterFirstBatch > 0) {
+                try {
+                  const deferredBatch = await fetchUntilFilled(remainingAfterFirstBatch, firstBatch.images.length);
+                  const firstBatchImageSet = new Set(firstBatch.images);
+                  const deferredImages: string[] = [];
+                  const deferredImagePricing: (CachedPricing | undefined)[] = [];
+                  const deferredConceptPresentations: (ConceptPresentation | undefined)[] = [];
+                  deferredBatch.images.forEach((src, index) => {
+                    if (firstBatchImageSet.has(src)) return;
+                    deferredImages.push(src);
+                    deferredImagePricing.push(deferredBatch.imagePricing[index]);
+                    deferredConceptPresentations.push(deferredBatch.conceptPresentations[index]);
+                  });
+                  const mergedConcepts = mergeUniqueImageUrls(firstBatch.images, deferredImages);
+                  const completedConceptSet = mergedConcepts.length === numOutputs;
+                  writeRunState({
+                    status: completedConceptSet ? "complete" : "error",
+                    images: deferredImages,
+                    appendImages: true,
+                    message: deferredBatch.message,
+                    error: completedConceptSet
+                      ? null
+                      : `Generated ${mergedConcepts.length} of ${numOutputs} concepts. Try again to complete the set.`,
+                    imagePricing: deferredImagePricing,
+                    imagePricingOffset: firstBatch.images.length,
+                    conceptPresentations: deferredConceptPresentations,
+                    conceptPresentationOffset: firstBatch.images.length,
+                    generated: completedConceptSet,
+                  });
+                } catch (deferredError) {
+                  const deferredMessage =
+                    deferredError instanceof Error ? deferredError.message : "The remaining concepts could not be generated.";
+                  const deferredDetails =
+                    deferredError &&
+                    typeof deferredError === "object" &&
+                    "details" in deferredError &&
+                    typeof (deferredError as any).details === "string"
+                      ? String((deferredError as any).details)
+                      : responseErrorDetails;
+                  writeRunState({
+                    status: "error",
+                    message: firstBatch.message,
+                    error: deferredMessage,
+                    errorDetails: deferredDetails,
+                    generated: false,
+                  });
+                }
+              }
             }
 
-            const imgs = Array.isArray((json as any)?.images) ? (json as any).images.filter((x: any) => typeof x === "string" && x) : [];
-            if (process.env.NODE_ENV !== "production") {
-              console.debug("[preview] images received", imgs.length, imgs.length === 1 ? "(single-image mode; hero will display)" : "(gallery mode)");
-            }
-            if (imgs.length === 0) {
-              throw new Error("Preview generated, but no images were returned.");
-            }
-            const normalizedImages = imgs.filter(isValidUrlLikeImage).filter((src: string) => !isPlaceholderPreviewImage(src));
-            if (normalizedImages.length === 0) {
-              throw new Error("Preview generated, but only a placeholder image was returned.");
-            }
-            const completedMessage =
-              shouldGenerateConceptGallery || !hasExistingPreview
-                ? generationMessage
-                : typeof (json as any)?.message === "string"
-                  ? String((json as any).message)
-                  : generationMessage;
-
-        writeRunState({
-          status: "complete",
-          images: normalizedImages,
-          appendImages: false,
-          message: completedMessage,
-          generated: true,
-        });
-
-        void refreshRegenAllowance();
+            void refreshRegenAllowance();
       } catch (e) {
         pendingBudgetRefineRef.current = false;
         pendingBudgetTierShiftRef.current = false;
@@ -1987,14 +2543,23 @@ export function ImagePreviewExperience(props: {
               generatedForContextSignature: null,
               lastGeneratedAnsweredCount: null,
             } satisfies PreviewCacheV3);
-          const nextRuns = (Array.isArray(base.runs) ? base.runs : []).filter((run) => run.id !== runId);
+          const currentRuns = Array.isArray(base.runs) ? base.runs : [];
+          const keepFailedConceptRun = Boolean(
+            progressiveConcepts && currentRuns.some((run) => run.id === runId && Number(run.expectedImageCount) > 1),
+          );
+          const nextRuns = keepFailedConceptRun ? currentRuns : currentRuns.filter((run) => run.id !== runId);
           const nextActiveRunId =
-            base.activeRunId === runId ? nextRuns.at(-1)?.id ?? null : base.activeRunId ?? nextRuns.at(-1)?.id ?? null;
+            keepFailedConceptRun
+              ? runId
+              : base.activeRunId === runId
+                ? nextRuns.at(-1)?.id ?? null
+                : base.activeRunId ?? nextRuns.at(-1)?.id ?? null;
           const next: PreviewCacheV3 = {
             ...base,
             status: "error",
             runs: nextRuns,
             activeRunId: nextActiveRunId,
+            viewMode: keepFailedConceptRun ? "gallery" : base.viewMode,
             error: message,
             errorDetails: details || null,
             runStartedAt: null,
@@ -2021,9 +2586,11 @@ export function ImagePreviewExperience(props: {
       conceptGalleryTargetCount,
       hero,
       instanceId,
+      progressiveConcepts,
       refreshRegenAllowance,
       runs,
       sessionId,
+      studioEstimateActive,
       effectiveStepDataSoFar,
     ]
   );
@@ -2098,16 +2665,17 @@ export function ImagePreviewExperience(props: {
   // Auto-generate the first preview once enabled (if no runs yet).
   useEffect(() => {
     if (!enabled) return;
+    if (studioEstimateActive) return;
     if ((cache?.runs?.length || 0) > 0) return;
     if (cache?.status === "running") return;
     if (cache?.status === "error") return;
     void runGenerate("auto");
-  }, [cache?.runs?.length, cache?.status, enabled, runGenerate]);
+  }, [cache?.runs?.length, cache?.status, enabled, runGenerate, studioEstimateActive]);
 
   const isPlaceholderHero = useMemo(() => (hero ? isPlaceholderPreviewImage(hero) : false), [hero]);
   const lightboxLayoutId = `image-preview:${instanceId}:${sessionId}`;
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxContain, setLightboxContain] = useState(false);
+  const [lightboxContain, setLightboxContain] = useState(true);
   const previousActiveRunRef = useRef<{ runId: string | null; index: number; runsLength: number; hero: string | null }>({
     runId: null,
     index: 0,
@@ -2209,14 +2777,21 @@ export function ImagePreviewExperience(props: {
   const conceptGalleryGridCols =
     conceptGalleryCellCount <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(conceptGalleryCellCount)));
   const showRefreshMask = Boolean(hero && busy && !showConceptPicker);
-  const showOverlayLoader = Boolean((showLoader || busy) && !showProgressiveGalleryLoader);
+  const showOverlayLoader = Boolean((showLoader || busy) && !showProgressiveGalleryLoader && !studioEstimateActive);
   const autoRefreshBusy = Boolean(hero && busy && activeGenerationReason === "auto");
+  // The initial concept workers may still be filling unseen gallery slots after
+  // the visitor chooses one. That background work is not a refinement of the
+  // selected image and must not block or mask the Estimate screen.
+  const studioRefinementBusy = Boolean(
+    studioEstimateActive && busy && activeGenerationReason === "manual",
+  );
   const leadGateActive = leadGateEnabled && Boolean(hero) && !leadCaptured;
   const canUseLiveBudgetSlider = !leadGateEnabled || leadCaptured;
   /** Single-image mode with pricing unlocked (no gate, or lead captured). */
   const revenuePanelActive = Boolean(hero && !showConceptPicker && (!leadGateEnabled || leadCaptured));
 
   const openDesignEstimateLeadFlow = useCallback(() => {
+    if (suppressInlineLeadGate) return;
     if (!leadGateEnabled) return;
     if (leadCaptured) return;
     setShowCenteredPreviewActionLeadModal(false);
@@ -2225,10 +2800,11 @@ export function ImagePreviewExperience(props: {
     setCenteredPricingStep("email");
     setShowCenteredPricingForm(true);
     upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
-  }, [leadCaptured, leadGateEnabled, sessionId]);
+  }, [leadCaptured, leadGateEnabled, sessionId, suppressInlineLeadGate]);
 
   /** Question-pane Ideas gate: same lead steps as SHOW PRICING, but centered on the preview image. */
   const openCenteredIdeasToolbarLeadFlow = useCallback(() => {
+    if (suppressInlineLeadGate) return;
     if (!leadGateEnabled) return;
     if (leadCaptured) return;
     setShowCenteredPreviewActionLeadModal(false);
@@ -2237,7 +2813,25 @@ export function ImagePreviewExperience(props: {
     setCenteredPricingStep("email");
     setShowCenteredIdeasToolbarLeadModal(true);
     upsertLeadGate(sessionId, "design_and_estimate", { shownAt: Date.now() });
-  }, [leadCaptured, leadGateEnabled, sessionId]);
+  }, [leadCaptured, leadGateEnabled, sessionId, suppressInlineLeadGate]);
+
+  const applyStudioRefinement = useCallback(
+    (value: string | Suggestion) => {
+      const note =
+        typeof value === "string"
+          ? value.trim()
+          : String(value.prompt || value.text || "").trim();
+      if (!note || studioRefinementBusy) return;
+      pendingRefinementNotesRef.current = note;
+      if (leadGateEnabled && !leadCaptured) {
+        openDesignEstimateLeadFlow();
+        return;
+      }
+      setStudioRefinementDraft("");
+      requestManualGenerate();
+    },
+    [leadCaptured, leadGateEnabled, openDesignEstimateLeadFlow, requestManualGenerate, studioRefinementBusy],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2252,6 +2846,14 @@ export function ImagePreviewExperience(props: {
   }, [openCenteredIdeasToolbarLeadFlow, openDesignEstimateLeadFlow, sessionId]);
   const galleryLoadingMessage =
     GALLERY_LOADING_MESSAGES[galleryLoadingMessageIndex % GALLERY_LOADING_MESSAGES.length] ?? GALLERY_LOADING_TITLE;
+  const readyConceptCount = Math.min(
+    conceptGalleryTargetCount,
+    (activeRun?.images || []).filter((image) => typeof image === "string" && Boolean(image)).length,
+  );
+  const stagedConceptImage = activeRun?.images?.[stagedConceptIndex] ?? null;
+  const stagedConceptPresentation = conceptPresentationFor(activeRun, stagedConceptIndex);
+  const conceptGenerationComplete = readyConceptCount >= conceptGalleryTargetCount && !busy;
+  const conceptGenerationFailed = cache?.status === "error";
 
   const [overlayPricingExpanded, setOverlayPricingExpanded] = useState(false);
   const [overlayPricingCollapsedLocal, setOverlayPricingCollapsedLocal] = useState<boolean>(
@@ -2351,6 +2953,7 @@ export function ImagePreviewExperience(props: {
   // Auto-regenerate every N answered questions, starting after the first successful run.
   useEffect(() => {
     if (!enabled) return;
+    if (studioEstimateActive) return;
     if (!Number.isFinite(autoRegenerateEveryNAnsweredQuestions) || autoRegenerateEveryNAnsweredQuestions <= 0) return;
     if (cache?.status === "running") return;
     if (cache?.status === "error") return;
@@ -2386,6 +2989,7 @@ export function ImagePreviewExperience(props: {
     leadGateActive,
     runGenerate,
     runs,
+    studioEstimateActive,
   ]);
 
   // Prompt "Send" is an explicit action: always regenerate on each submit nonce bump.
@@ -2486,6 +3090,58 @@ export function ImagePreviewExperience(props: {
         .toUpperCase() || "USD",
     };
   }, [hasExplicitPricingConfig, previewPricing, pricingCurrency]);
+
+  const handleUseConcept = useCallback(
+    (index = stagedConceptIndex) => {
+      const imageUrl = activeRun?.images?.[index];
+      if (!imageUrl) return;
+      const selectedPricing = activeRun?.imagePricing?.[index] ?? previewPricingForTileFallback ?? null;
+      setCache((prev) => {
+        const base = prev ?? loadCache(instanceId, sessionId);
+        if (!base) return prev;
+        const next: PreviewCacheV3 = {
+          ...base,
+          selectedConceptIndex: index,
+          viewMode: "single",
+          updatedAt: Date.now(),
+        };
+        saveCache(instanceId, sessionId, next);
+        return next;
+      });
+      onConceptSelected?.({
+        index,
+        imageUrl,
+        runId: activeRun?.id ?? null,
+        pricing: selectedPricing
+          ? {
+              totalMin: selectedPricing.totalMin,
+              totalMax: selectedPricing.totalMax,
+              currency: selectedPricing.currency || "USD",
+            }
+          : null,
+      });
+    },
+    [
+      activeRun?.id,
+      activeRun?.imagePricing,
+      activeRun?.images,
+      instanceId,
+      onConceptSelected,
+      previewPricingForTileFallback,
+      sessionId,
+      stagedConceptIndex,
+    ],
+  );
+
+  const showConcept = useCallback(
+    (index: number) => {
+      const nextIndex = Math.max(0, Math.min(conceptGalleryCellCount - 1, index));
+      if (nextIndex === stagedConceptIndex) return;
+      setConceptSlideDirection(nextIndex > stagedConceptIndex ? 1 : -1);
+      setStagedConceptIndex(nextIndex);
+    },
+    [conceptGalleryCellCount, stagedConceptIndex],
+  );
 
   // Exact pricing is only fetched for the currently selected hero image.
   // The rest of the gallery keeps its original seeded ranges from the first pass.
@@ -2716,6 +3372,7 @@ export function ImagePreviewExperience(props: {
 
   const handleRefreshClick = useCallback(() => {
     if (leadGateActive) {
+      if (suppressInlineLeadGate) return;
       pendingActionRef.current = "refresh";
       pendingGenerateModeRef.current = "manual";
       gateContextRef.current = "regenerate_manual";
@@ -2728,10 +3385,11 @@ export function ImagePreviewExperience(props: {
       return;
     }
     requestManualGenerate();
-  }, [leadGateActive, requestManualGenerate, sessionId]);
+  }, [leadGateActive, requestManualGenerate, sessionId, suppressInlineLeadGate]);
 
   const handleUploadClick = useCallback(() => {
     if (leadGateActive) {
+      if (suppressInlineLeadGate) return;
       gateContextRef.current = "upload_reference";
       pendingActionRef.current = "upload";
       setShowCenteredPricingForm(false);
@@ -2743,11 +3401,12 @@ export function ImagePreviewExperience(props: {
       return;
     }
     uploadInputRef.current?.click();
-  }, [leadGateActive, sessionId]);
+  }, [leadGateActive, sessionId, suppressInlineLeadGate]);
 
   const handleDownloadClick = useCallback(() => {
     if (!hero) return;
     if (leadGateActive) {
+      if (suppressInlineLeadGate) return;
       gateContextRef.current = "download";
       pendingActionRef.current = "download";
       setShowCenteredPricingForm(false);
@@ -2759,7 +3418,7 @@ export function ImagePreviewExperience(props: {
       return;
     }
     void downloadActiveImage();
-  }, [downloadActiveImage, hero, leadGateActive, sessionId]);
+  }, [downloadActiveImage, hero, leadGateActive, sessionId, suppressInlineLeadGate]);
 
   // Let the parent know whether a real preview image is currently visible.
   useEffect(() => {
@@ -2822,7 +3481,7 @@ export function ImagePreviewExperience(props: {
   const stackedPreviewLayers = useMemo(() => {
     // Only show stack for isolated runs (separate generations) — never for gallery concepts from the same run.
     // Stack = previous/next run images only (chronological history of regenerations).
-    if (!hero || runs.length < 1 || showConceptPicker || isPlaceholderHero) return [] as PreviewStackLayer[];
+    if (!hero || runs.length < 1 || showConceptPicker || studioEstimateActive || isPlaceholderHero) return [] as PreviewStackLayer[];
 
     const layers: PreviewStackLayer[] = [];
     const seen = new Set<string>([hero]);
@@ -2845,7 +3504,7 @@ export function ImagePreviewExperience(props: {
     }
 
     return layers;
-  }, [activeIndex, activeNavigationTransition, activeRun, hero, isPlaceholderHero, runs, showConceptPicker]);
+  }, [activeIndex, activeNavigationTransition, activeRun, hero, isPlaceholderHero, runs, showConceptPicker, studioEstimateActive]);
   const goPrev = () => {
     if (!canPrev) return;
     const nextId = runs[activeIndex - 1]?.id;
@@ -2920,7 +3579,6 @@ export function ImagePreviewExperience(props: {
     overlayVars,
     singleModeOverlayVars,
     pricingPillVars,
-    galleryPlaceholderPillBg,
     singleModePricingPillBg,
   } = useMemo(() => {
       const overlayBg = "rgba(51, 65, 85, 0.52)";
@@ -2982,6 +3640,23 @@ export function ImagePreviewExperience(props: {
       };
     }, []);
 
+  const studioLeadFormVars = useMemo(
+    () =>
+      ({
+        ["--sif-lead-gen-overlay-bg" as any]: "var(--form-surface-color)",
+        ["--sif-lead-gen-fg" as any]: theme.textColor || "#0f172a",
+        ["--sif-lead-gen-muted" as any]: hexToRgba(theme.textColor || "#0f172a", 0.64) || "rgba(15,23,42,0.64)",
+        ["--sif-lead-gen-input-bg" as any]: "var(--background)",
+        ["--sif-lead-gen-input-border" as any]: hexToRgba(theme.textColor || "#0f172a", 0.14) || "rgba(15,23,42,0.14)",
+        ["--sif-lead-gen-placeholder" as any]: hexToRgba(theme.textColor || "#0f172a", 0.45) || "rgba(15,23,42,0.45)",
+        ["--sif-lead-gen-action-bg" as any]: primary,
+        ["--sif-lead-gen-action-fg" as any]: "#ffffff",
+        ["--sif-lead-gen-action-border" as any]: primary,
+        ["--sif-lead-gen-ring" as any]: hexToRgba(primary, 0.32) || primary,
+      }) as React.CSSProperties,
+    [primary, theme.textColor],
+  );
+
   const overlayButtonClass =
     "h-8 sm:h-7 inline-flex items-center gap-1.5 rounded-xl px-3 text-[0.6875rem] font-medium leading-none text-white/95 shadow-sm backdrop-blur-md bg-[var(--sif-overlay-bg)] hover:bg-[var(--sif-overlay-hover-bg)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:opacity-60 disabled:cursor-not-allowed";
   const overlayIconButtonClass =
@@ -3004,10 +3679,10 @@ export function ImagePreviewExperience(props: {
   const centeredPricingIconInset = "clamp(0.8rem, 2.9cqi, 0.95rem)";
   const centeredPricingInputPadLeft = "clamp(2.3rem, 8.2cqi, 2.7rem)";
 
-  // Pricing pill: show only in single mode (user has chosen one image), not while picking from the 4-tile gallery.
-  const shouldShowPricingPill = Boolean(hero && !showConceptPicker);
+  // Pricing pill: show only in legacy single mode. Studio estimate owns its pricing presentation.
+  const shouldShowPricingPill = Boolean(hero && !showConceptPicker && !studioEstimateActive);
   /** Single-image preview with tooling: bottom dock (suggestions, estimate, upload) — not concept grid. */
-  const singleModePreviewChrome = Boolean(hero && !showConceptPicker && toolingEnabled);
+  const singleModePreviewChrome = Boolean(hero && !showConceptPicker && toolingEnabled && !studioEstimateActive);
   const formattedPricingRange = previewPricing
     ? `${formatCurrency(previewPricing.totalMin, { locale: pricingLocale, currency: pricingCurrency })}-${formatCurrency(
         previewPricing.totalMax,
@@ -3134,6 +3809,17 @@ export function ImagePreviewExperience(props: {
 
   const overlayPricingRangeLabel = useMemo(() => {
     if (!overlayPricingRange) return "—";
+    if (leadGateEnabled && !leadCaptured) {
+      const largestValue = Math.max(Math.abs(overlayPricingRange.low), Math.abs(overlayPricingRange.high));
+      const roundingStep = largestValue >= 100_000 ? 10_000 : largestValue >= 10_000 ? 1_000 : largestValue >= 1_000 ? 500 : 100;
+      const coarseLow = Math.floor(overlayPricingRange.low / roundingStep) * roundingStep;
+      const coarseHigh = Math.ceil(overlayPricingRange.high / roundingStep) * roundingStep;
+      return `${formatCompactCurrency(coarseLow, pricingLocale, overlayPricingRange.currency)}–${formatCompactCurrency(
+        coarseHigh,
+        pricingLocale,
+        overlayPricingRange.currency,
+      )}`;
+    }
     return `${formatCurrency(overlayPricingRange.low, {
       locale: pricingLocale,
       currency: overlayPricingRange.currency,
@@ -3141,7 +3827,11 @@ export function ImagePreviewExperience(props: {
       locale: pricingLocale,
       currency: overlayPricingRange.currency,
     })}`;
-  }, [overlayPricingRange, pricingLocale]);
+  }, [leadCaptured, leadGateEnabled, overlayPricingRange, pricingLocale]);
+  // The Estimate screen only presents image-specific pricing returned by the pricing API.
+  // Config seeds and broad service ranges are useful internally, but are not credible project estimates.
+  const studioEstimateRangeLabel = formattedAccuratePricingRange || formattedCachedHeroPricingRange;
+  const studioEstimateReady = Boolean(studioEstimateRangeLabel && studioEstimateRangeLabel !== "$0-$0");
 
   const pricingDetailSummary = useMemo(() => {
     if (!accuratePricing) {
@@ -3190,13 +3880,14 @@ export function ImagePreviewExperience(props: {
   const pillLoading = waitingForExactPricing;
   const shouldShowBottomPricingPill = Boolean(shouldShowPricingPill && lockedPillPrice);
   const shouldShowCenteredLeadFormOverlay = Boolean(
-    leadGateEnabled &&
+    !suppressInlineLeadGate &&
+      leadGateEnabled &&
       !leadCaptured &&
       (showCenteredPricingForm || showCenteredPreviewActionLeadModal || showCenteredIdeasToolbarLeadModal)
   );
   /** Centered dimmed backdrop (preview actions or Ideas toolbar gate — not the bottom-anchored SHOW PRICING sheet). */
   const centeredLeadFormIsImageAction = Boolean(
-    showCenteredPreviewActionLeadModal || showCenteredIdeasToolbarLeadModal
+    studioEstimateActive || showCenteredPreviewActionLeadModal || showCenteredIdeasToolbarLeadModal
   );
   const showBottomPreviewDock = Boolean(
     singleModePreviewChrome && !lightboxOpen && !shouldShowCenteredLeadFormOverlay
@@ -3236,14 +3927,16 @@ export function ImagePreviewExperience(props: {
         autoReveal
         onClick={
           leadGateEnabled && !leadCaptured
-            ? openDesignEstimateLeadFlow
+            ? suppressInlineLeadGate
+              ? undefined
+              : openDesignEstimateLeadFlow
             : () => {
                 setOverlayPricingCollapsedPreference(false);
                 setOverlayPricingExpanded(true);
               }
         }
-        instanceId={leadGateEnabled && leadCaptured ? instanceId : undefined}
-        sessionId={leadGateEnabled && leadCaptured ? sessionId : undefined}
+        instanceId={!suppressInlineLeadGate && leadGateEnabled && leadCaptured ? instanceId : undefined}
+        sessionId={!suppressInlineLeadGate && leadGateEnabled && leadCaptured ? sessionId : undefined}
         gateContext="design_and_estimate"
         submissionData={{ surface: "preview_pricing" }}
         requirePhone
@@ -3343,7 +4036,7 @@ export function ImagePreviewExperience(props: {
     });
   };
 
-  const useResponsiveConceptGalleryShell = showConceptPicker;
+  const useResponsiveConceptGalleryShell = showConceptPicker || studioEstimateActive;
   const previewFrameStyle = useResponsiveConceptGalleryShell
     ? {
         width: "100%",
@@ -3355,7 +4048,7 @@ export function ImagePreviewExperience(props: {
     : {
         width: effectivePreviewSize,
         maxWidth: "100%",
-        aspectRatio: "1 / 1",
+        aspectRatio: progressiveConcepts ? "4 / 3" : "1 / 1",
         maxHeight: effectivePreviewSize,
         containerType: "inline-size",
         // Prevent "starts small then grows" when parent layout hasn't settled yet
@@ -3510,7 +4203,7 @@ export function ImagePreviewExperience(props: {
               ) : null}
 
               {/* Top controls: compact layout so actions stay available but less visually busy */}
-              {toolingEnabled && !showConceptPicker && hero ? (
+              {toolingEnabled && !showConceptPicker && !studioEstimateActive && hero ? (
                 <div className="absolute inset-x-2 top-2 z-[60] flex items-start justify-between pointer-events-none">
                   <div className="pointer-events-auto flex items-center gap-1.5">
                     {showGalleryBackControl ? (
@@ -3593,9 +4286,272 @@ export function ImagePreviewExperience(props: {
                 data-preview-mode={showConceptPicker ? "gallery" : hero ? "single" : "empty"}
               >
 	              {showConceptPicker ? (
+                  progressiveConcepts ? (
+                    <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden px-0 pb-2 sm:px-3 sm:pb-3">
+                      <div className="shrink-0 px-1 pb-2 pt-1 sm:px-0 sm:pb-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                          <div className="min-w-0">
+                            <p
+                              className="text-balance text-lg font-semibold leading-tight text-foreground sm:text-xl"
+                              style={{ fontFamily: theme.fontFamily }}
+                            >
+                              {conceptGenerationComplete
+                                ? "Choose the concept closest to your vision."
+                                : conceptGenerationFailed
+                                  ? readyConceptCount > 0
+                                    ? `${readyConceptCount} of ${conceptGalleryTargetCount} concepts are ready`
+                                    : "Concept generation paused"
+                                  : "Creating your concepts…"}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+                              {conceptGenerationComplete
+                                ? "Preview each concept, then choose one."
+                                : conceptGenerationFailed
+                                  ? readyConceptCount > 0
+                                    ? "Explore what’s ready or try generating the rest again."
+                                    : "We couldn’t finish these concepts. Try again in a moment."
+                                  : readyConceptCount > 0
+                                    ? "Explore each concept as it arrives."
+                                    : studioStarterConcept
+                                      ? `Building around ${studioStarterConcept.label}.`
+                                      : "Your first concept will appear here."}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 sm:shrink-0 sm:justify-start">
+                            <p className="text-xs font-semibold tabular-nums text-foreground/65 sm:text-sm">
+                              {readyConceptCount} of {conceptGalleryTargetCount} ready
+                            </p>
+                            {conceptGenerationFailed ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={handleRefreshClick}
+                                className="h-8 rounded-full px-3 text-xs font-semibold"
+                                style={{ fontFamily: theme.fontFamily }}
+                              >
+                                Try again
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                        {busy ? (
+                          <div className="mt-3 flex max-w-[18rem] items-center gap-1.5" aria-label={`${readyConceptCount} of ${conceptGalleryTargetCount} concepts ready`}>
+                            {Array.from({ length: conceptGalleryTargetCount }).map((_, index) => {
+                              const conceptReady = Boolean(activeRun?.images?.[index]);
+                              return (
+                                <motion.span
+                                  key={`concept-progress-${index}`}
+                                  className={cn("h-1 flex-1 rounded-full", conceptReady ? "bg-primary" : "bg-primary/15")}
+                                  animate={
+                                    !conceptReady && !reduceMotion
+                                      ? { opacity: [0.35, 0.85, 0.35] }
+                                      : { opacity: 1 }
+                                  }
+                                  transition={{ duration: 1.5, delay: index * 0.14, repeat: conceptReady ? 0 : Infinity, ease: "easeInOut" }}
+                                />
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <div
+                          className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-7 pb-5 sm:px-16 sm:pb-6"
+                          onKeyDown={(event) => {
+                            if (event.key === "ArrowLeft") {
+                              event.preventDefault();
+                              showConcept(stagedConceptIndex - 1);
+                            }
+                            if (event.key === "ArrowRight") {
+                              event.preventDefault();
+                              showConcept(stagedConceptIndex + 1);
+                            }
+                          }}
+                        >
+                          <div
+                          className="relative h-full min-h-[15rem] w-full max-w-[72rem]"
+                            tabIndex={0}
+                            aria-label="Personalized concept slideshow"
+                          >
+                            <AnimatePresence initial={false} custom={conceptSlideDirection} mode="popLayout">
+                              <motion.div
+                                key={`active-concept-${stagedConceptIndex}`}
+                                custom={conceptSlideDirection}
+                                layoutId={stagedConceptImage && activeRun?.id ? `generated-concept:${activeRun.id}:${stagedConceptIndex}` : undefined}
+                                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: conceptSlideDirection * 54, scale: 0.975 }}
+                                animate={{ opacity: 1, x: 0, rotate: 0, scale: 1 }}
+                                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: conceptSlideDirection * -90, rotate: conceptSlideDirection * -2.5, scale: 0.97 }}
+                                transition={{ duration: reduceMotion ? 0.1 : 0.32, ease: [0.16, 1, 0.3, 1] }}
+                                drag="x"
+                                dragConstraints={{ left: 0, right: 0 }}
+                                dragDirectionLock
+                                dragElastic={0.18}
+                                onDragEnd={(_, info) => {
+                                  const swipeLeft = info.offset.x < -55 || info.velocity.x < -360;
+                                  const swipeRight = info.offset.x > 55 || info.velocity.x > 360;
+                                  if (swipeLeft) showConcept(stagedConceptIndex + 1);
+                                  else if (swipeRight) showConcept(stagedConceptIndex - 1);
+                                }}
+                                className="absolute inset-0 z-10 cursor-grab overflow-hidden rounded-2xl border border-foreground/10 bg-muted shadow-[0_18px_50px_rgba(15,23,42,0.14)] active:cursor-grabbing"
+                                aria-label={stagedConceptPresentation.title}
+                              >
+                                {stagedConceptImage ? (
+                                  <>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={stagedConceptImage}
+                                      alt={stagedConceptPresentation.title}
+                                      className="absolute inset-0 h-full w-full select-none object-cover"
+                                      draggable={false}
+                                    />
+                                  </>
+                                ) : (
+                                  <div className="absolute inset-0 overflow-hidden bg-muted">
+                                    {studioStarterConcept?.imageUrl ? (
+                                      <>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                          src={studioStarterConcept.imageUrl}
+                                          alt=""
+                                          className="absolute inset-0 h-full w-full scale-[1.04] object-cover opacity-55 blur-[5px]"
+                                          aria-hidden
+                                        />
+                                        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px]" />
+                                      </>
+                                    ) : (
+                                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_32%_24%,rgba(255,255,255,0.85),transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.03),rgba(15,23,42,0.1))]" />
+                                    )}
+                                    {!conceptGenerationFailed ? (
+                                      <motion.div
+                                        className="absolute -inset-x-1/2 inset-y-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                                        animate={reduceMotion ? undefined : { x: ["-35%", "35%"] }}
+                                        transition={{ duration: 2.8, ease: "easeInOut", repeat: Infinity, repeatType: "mirror" }}
+                                      />
+                                    ) : null}
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+                                      <div className="inline-flex items-center gap-2.5 rounded-full border border-foreground/10 bg-background/85 px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm backdrop-blur-md">
+                                        {conceptGenerationFailed ? (
+                                          <Sparkles className="h-4 w-4 text-foreground/45" />
+                                        ) : (
+                                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        )}
+                                        <span>
+                                          {conceptGenerationFailed
+                                            ? "This concept needs another try"
+                                            : `Creating ${stagedConceptPresentation.title}`}
+                                        </span>
+                                      </div>
+                                      {!conceptGenerationFailed ? (
+                                        <p className="max-w-sm text-xs font-medium text-foreground/60 sm:text-sm">
+                                          {CONCEPT_SLOT_LOADING_MESSAGES[stagedConceptIndex % CONCEPT_SLOT_LOADING_MESSAGES.length] ?? "Exploring a personalized direction…"}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                )}
+                                {stagedConceptImage ? (
+                                  <Button
+                                    type="button"
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleUseConcept();
+                                    }}
+                                    className="absolute bottom-3 right-3 z-20 h-10 rounded-full px-5 text-sm font-semibold shadow-lg sm:bottom-4 sm:right-4"
+                                    style={{ backgroundColor: theme.primaryColor, color: "#fff", fontFamily: theme.fontFamily }}
+                                  >
+                                    Use this concept <ChevronRight className="ml-1 h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                              </motion.div>
+                            </AnimatePresence>
+                            {readyConceptCount > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => showConcept(stagedConceptIndex - 1)}
+                                  disabled={stagedConceptIndex <= 0}
+                                  className="absolute left-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-background/90 text-foreground shadow-md backdrop-blur-md transition hover:scale-105 disabled:pointer-events-none disabled:opacity-25 sm:flex"
+                                  aria-label="Previous concept"
+                                >
+                                  <ChevronLeft className="h-5 w-5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => showConcept(stagedConceptIndex + 1)}
+                                  disabled={stagedConceptIndex >= conceptGalleryCellCount - 1}
+                                  className="absolute right-3 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-background/90 text-foreground shadow-md backdrop-blur-md transition hover:scale-105 disabled:pointer-events-none disabled:opacity-25 sm:flex"
+                                  aria-label="Next concept"
+                                >
+                                  <ChevronRight className="h-5 w-5" />
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div
+                          className={cn(
+                            "mx-auto flex w-full max-w-5xl shrink-0 flex-col items-center gap-2 px-2 pt-1 sm:flex-row",
+                            "sm:justify-center",
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            {readyConceptCount > 0 ? (
+                              <span className="max-w-[18rem] truncate text-xs font-semibold text-foreground/65 sm:text-sm">
+                                {stagedConceptPresentation.title}
+                              </span>
+                            ) : null}
+                            <div className="flex items-center gap-1.5" aria-label={`${stagedConceptPresentation.title} selected`}>
+                              {Array.from({ length: conceptGalleryCellCount }).map((_, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => showConcept(idx)}
+                                  className={cn(
+                                    "h-2 rounded-full transition-all",
+                                    stagedConceptIndex === idx ? "w-5 bg-primary" : activeRun?.images?.[idx] ? "w-2 bg-foreground/35" : "w-2 bg-foreground/15",
+                                  )}
+                                  aria-label={`Show ${conceptPresentationFor(activeRun, idx).title}`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
 	                <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col px-0 pb-1.5 pt-0 sm:px-2 sm:pb-2">
 	                  <div className="relative isolate flex h-full min-h-0 w-full flex-1 flex-col gap-0.5 overflow-hidden">
-                  {showProgressiveGalleryLoader ? (
+                  {studioStarterConcept ? (
+                    <div className="mb-1.5 flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-foreground/10 bg-background/75 px-3 py-2.5 shadow-sm backdrop-blur-md sm:flex-nowrap sm:gap-3 sm:px-4">
+                      <div className="flex min-w-0 items-center gap-2.5 sm:mr-auto">
+                        <div className="h-10 w-14 shrink-0 overflow-hidden rounded-lg border border-foreground/10 bg-black/5 shadow-sm">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={studioStarterConcept.imageUrl} alt="" className="h-full w-full object-cover" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Foundation</p>
+                          <p className="truncate text-xs font-semibold text-foreground sm:text-sm">{studioStarterConcept.label}</p>
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[10px] font-semibold text-foreground/65 sm:text-[11px]">
+                        <span className="inline-flex items-center gap-1 text-foreground/80"><Check className="h-3 w-3 text-primary" /> Starter selected</span>
+                        <span aria-hidden className="text-foreground/25">·</span>
+                        <span className="inline-flex items-center gap-1 text-foreground/80"><Check className="h-3 w-3 text-primary" /> Project personalized</span>
+                        <span aria-hidden className="text-foreground/25">·</span>
+                        <span className="inline-flex items-center gap-1 text-primary">
+                          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                          {busy ? `Creating concepts ${readyConceptCount}/${conceptGalleryTargetCount}` : "Your concepts are ready"}
+                        </span>
+                        <span aria-hidden className="text-foreground/25">·</span>
+                        <span>Estimate next</span>
+                      </div>
+                    </div>
+                  ) : null}
+                  {showProgressiveGalleryLoader && !studioStarterConcept ? (
                     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4">
                       <div
                         className="inline-flex max-w-full items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[13px] font-semibold text-white shadow-sm backdrop-blur-md"
@@ -3612,7 +4568,7 @@ export function ImagePreviewExperience(props: {
                         className="text-base font-semibold leading-tight text-balance sm:text-lg md:text-xl"
                         style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
                       >
-                        Tap a starter concept to get started.
+                        Choose the personalized concept closest to your vision.
                       </p>
                     </div>
                   ) : null}
@@ -3659,7 +4615,9 @@ export function ImagePreviewExperience(props: {
                           locale: pricingLocale,
                           currency: pricingCurrency,
                         });
-                        const shouldBlurTilePrice = Boolean(leadGateEnabled && !leadCaptured);
+                        const shouldBlurTilePrice = Boolean(
+                          pricingGateVariant !== "coarse_visible" && leadGateEnabled && !leadCaptured
+                        );
                         const tilePriceDisplay =
                           tilePriceCompactText || tilePriceText || "$•••–$•••";
                         if (!src) {
@@ -3678,8 +4636,10 @@ export function ImagePreviewExperience(props: {
                           );
                         }
                         return (
-	                      <button
+	                      <motion.button
 	                        key={idx}
+	                        layoutId={activeRun?.id ? `generated-concept:${activeRun.id}:${idx}` : undefined}
+	                        transition={{ layout: { duration: reduceMotion ? 0.1 : 0.34, ease: [0.16, 1, 0.3, 1] } }}
 	                        type="button"
 	                        onClick={() => {
 	                          setCache((prev) => {
@@ -3694,6 +4654,19 @@ export function ImagePreviewExperience(props: {
 	                            saveCache(instanceId, sessionId, next);
 	                            return next;
 	                          });
+                            const selectedPricing = effectiveTilePricing ?? null;
+                            onConceptSelected?.({
+                              index: idx,
+                              imageUrl: src,
+                              runId: activeRun?.id ?? null,
+                              pricing: selectedPricing
+                                ? {
+                                    totalMin: selectedPricing.totalMin,
+                                    totalMax: selectedPricing.totalMax,
+                                    currency: selectedPricing.currency || "USD",
+                                  }
+                                : null,
+                            });
 	                        }}
 	                        className={cn(
                             "group relative aspect-square w-full min-w-0 overflow-hidden rounded-lg border bg-black/10 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 transition-all duration-200 md:hover:shadow-xl md:hover:scale-[1.02]",
@@ -3702,13 +4675,13 @@ export function ImagePreviewExperience(props: {
 	                        style={{
 	                          borderRadius: (designConfig as any)?.gallery_image_border_radius ?? 8,
 	                        }}
-	                        aria-label={`Select concept ${idx + 1}`}
+		                        aria-label={`Select ${conceptPresentationFor(activeRun, idx).title}`}
                           aria-pressed={selectedConceptIndex === idx}
 	                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={src}
-                          alt={`Concept ${idx + 1}`}
+	                          alt={conceptPresentationFor(activeRun, idx).title}
                           className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-200 md:group-hover:scale-[1.02]"
                         />
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2.5">
@@ -3718,7 +4691,7 @@ export function ImagePreviewExperience(props: {
                           >
                             {shouldBlurTilePrice ? (
                               <span className="select-none truncate text-[11px] font-semibold text-white/90">
-                                Tap to show pricing
+                                {suppressInlineLeadGate ? "Pricing after email" : "Tap to show pricing"}
                               </span>
                             ) : (
                               <span className="select-none truncate text-[11px] font-semibold tabular-nums text-white/95">
@@ -3727,16 +4700,213 @@ export function ImagePreviewExperience(props: {
                             )}
                           </div>
                         </div>
-	                      </button>
+	                      </motion.button>
                         );
                       })}
 	                    </div>
 	                  </div>
 	                </div>
 	                </div>
+	              )
 	              ) : hero ? (
+	                studioEstimateActive ? (
+                    <div className="h-full min-h-0 w-full overflow-hidden bg-background px-2 py-2 sm:px-4 sm:py-3 lg:px-6 lg:py-4">
+                      <motion.div
+                        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: reduceMotion ? 0.1 : 0.3, ease: "easeOut" }}
+                        className="mx-auto flex h-full min-h-0 w-full max-w-[80rem] flex-col gap-2"
+                        style={{ fontFamily: theme.fontFamily }}
+                      >
+                        <motion.figure
+                          layoutId={
+                            selectedConceptIndex !== null && activeRun?.id
+                              ? `generated-concept:${activeRun.id}:${selectedConceptIndex}`
+                              : undefined
+                          }
+                          transition={{ layout: { duration: reduceMotion ? 0.1 : 0.34, ease: [0.16, 1, 0.3, 1] } }}
+                          className="flex min-h-0 min-w-0 flex-1 flex-col"
+                        >
+                          <div className="group relative min-h-0 flex-1 overflow-hidden rounded-[1.35rem] border border-foreground/10 bg-muted shadow-[0_18px_50px_rgba(15,23,42,0.13)]">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={hero}
+                              alt="Selected design direction"
+                              className="absolute inset-0 h-full w-full object-cover"
+                            />
+                            {studioRefinementBusy ? (
+                              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/15 p-5">
+                                <div className="inline-flex items-center gap-2.5 rounded-full border border-white/25 bg-background/95 px-4 py-2.5 text-sm font-semibold text-foreground shadow-lg backdrop-blur-md">
+                                  <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden /> Applying your change…
+                                </div>
+                              </div>
+                            ) : null}
+                            {showGalleryBackControl ? (
+                              <button
+                                type="button"
+                                onClick={handleBackToGallery}
+                                className="absolute left-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/25 bg-background/90 px-3 text-xs font-semibold text-foreground shadow-sm backdrop-blur-md transition hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:left-4 sm:top-4"
+                              >
+                                <ArrowLeft className="h-3.5 w-3.5 text-primary" /> Back to concepts
+                              </button>
+                            ) : null}
+                            <div className="absolute right-3 top-3 flex items-center gap-1.5 sm:right-4 sm:top-4">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  void downloadActiveImage();
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-background/90 text-foreground shadow-sm backdrop-blur-md transition hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                                aria-label="Download selected concept"
+                                title="Download"
+                              >
+                                <Download className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={openLightbox}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-background/90 text-foreground shadow-sm backdrop-blur-md transition hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                                aria-label="View selected concept larger"
+                                title="View larger"
+                              >
+                                <Maximize2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            {!studioRefinementBusy ? (
+                              <div className="absolute bottom-3 right-3 z-20 max-w-[calc(100%-1.5rem)] sm:bottom-4 sm:right-4">
+                                {waitingForExactPricing ? (
+                                  <div className="inline-flex h-11 items-center gap-2 rounded-full border border-white/25 bg-background/95 px-4 text-sm font-semibold text-foreground shadow-lg backdrop-blur-md">
+                                    <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden /> Preparing estimate…
+                                  </div>
+                                ) : !leadGateEnabled || leadCaptured ? (
+                                  studioEstimateReady ? (
+                                    <div className="rounded-2xl border border-white/20 bg-background/95 px-4 py-2.5 text-right text-foreground shadow-lg backdrop-blur-md">
+                                      <span className="block text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Project estimate</span>
+                                      <span className="block text-sm font-semibold tracking-tight sm:text-base" style={{ fontFamily: theme.fontFamily }}>
+                                        {studioEstimateRangeLabel}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPendingExactPricingReveal(true);
+                                        setAccuratePricingStatus("running");
+                                        void fetchAccuratePricingRef.current?.();
+                                      }}
+                                      className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground shadow-lg transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+                                    >
+                                      Calculate project estimate <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                  )
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      pendingRefinementNotesRef.current = null;
+                                      openDesignEstimateLeadFlow();
+                                    }}
+                                    className="group inline-flex min-h-12 items-center gap-3 rounded-full border border-white/20 bg-primary px-5 py-2.5 text-left text-primary-foreground shadow-[0_12px_30px_rgba(0,0,0,0.22)] transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+                                  >
+                                    <span className="min-w-0">
+                                      <span className="block text-[9px] font-semibold uppercase tracking-[0.15em] text-primary-foreground/70">Project pricing</span>
+                                      <span className="block truncate text-sm font-semibold sm:text-base" style={{ fontFamily: theme.fontFamily }}>
+                                        Get project estimate
+                                      </span>
+                                    </span>
+                                    <ChevronRight className="h-4 w-4 shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                          <figcaption className="shrink-0 px-1 pt-2 text-center">
+                            <p className="text-sm font-semibold text-foreground/85 sm:text-base">
+                              {studioStarterConcept?.isProjectPhoto ? "Designed around your space" : selectedConceptDisplayTitle}
+                            </p>
+                            {selectedConceptDisplaySummary ? (
+                              <p className="mx-auto mt-0.5 max-w-2xl text-xs text-muted-foreground">{selectedConceptDisplaySummary}</p>
+                            ) : null}
+                          </figcaption>
+                        </motion.figure>
+
+                        <section className="mx-auto w-full shrink-0 px-1" aria-label="Refine this concept">
+                          <div className="px-1 py-1.5">
+                            <div className="flex w-full items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:flex-wrap sm:justify-center sm:overflow-visible [&::-webkit-scrollbar]:hidden">
+                              {studioSuggestionsLoading ? (
+                                <span className="inline-flex h-10 shrink-0 items-center gap-2 px-2 text-sm text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden /> Preparing ideas…
+                                </span>
+                              ) : (
+                                visibleStudioSuggestions.map((suggestion, index) => {
+                                  const label = suggestion.suggestionLabel?.trim() || suggestion.text;
+                                  return (
+                                    <button
+                                      key={suggestion.promptId ? `${suggestion.promptId}-${index}` : `${label}-${index}`}
+                                      type="button"
+                                      disabled={studioRefinementBusy}
+                                      onClick={() => applyStudioRefinement(suggestion)}
+                                      className="group inline-flex h-9 max-w-[17rem] shrink-0 items-center gap-2 rounded-full border border-foreground/10 bg-background/80 px-3.5 text-sm font-medium text-foreground/75 shadow-sm transition hover:border-primary/40 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-45"
+                                      title={leadGateEnabled && !leadCaptured ? `Save your concept to apply: ${label}` : `Apply: ${label}`}
+                                    >
+                                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                                      <span className="truncate">{label}</span>
+                                    </button>
+                                  );
+                                })
+                              )}
+                              {rankedStudioSuggestions.length > 3 && !studioSuggestionsLoading ? (
+                                <button
+                                  type="button"
+                                  disabled={studioRefinementBusy}
+                                  onClick={() => setStudioSuggestionOffset((offset) => (offset + 3) % rankedStudioSuggestions.length)}
+                                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full border border-foreground/10 bg-background/80 px-3.5 text-sm font-medium text-foreground/70 shadow-sm transition hover:border-primary/40 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-45"
+                                >
+                                  More ideas <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                              ) : null}
+                              <div className="flex h-9 min-w-[15rem] max-w-[22rem] flex-1 items-center gap-2 rounded-full border border-foreground/10 bg-background/80 pl-4 pr-1.5 shadow-sm focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15">
+                                <Input
+                                  value={studioRefinementDraft}
+                                  onChange={(event) => setStudioRefinementDraft(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" && !event.shiftKey) {
+                                      event.preventDefault();
+                                      applyStudioRefinement(studioRefinementDraft);
+                                    }
+                                  }}
+                                  disabled={studioRefinementBusy}
+                                  placeholder="Describe a change…"
+                                  aria-label="Describe a design change"
+                                  className="h-8 min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={studioRefinementBusy || !studioRefinementDraft.trim()}
+                                  onClick={() => applyStudioRefinement(studioRefinementDraft)}
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
+                                  aria-label="Apply design change"
+                                  title="Apply change"
+                                >
+                                  {studioRefinementBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Send className="h-3.5 w-3.5" aria-hidden />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                        </section>
+                      </motion.div>
+                    </div>
+                  ) : (
 	                <div className="relative h-full w-full isolate">
-	                  <div
+	                  <motion.div
+	                    layoutId={
+	                      selectedConceptIndex !== null && activeRun?.id
+	                        ? `generated-concept:${activeRun.id}:${selectedConceptIndex}`
+	                        : undefined
+	                    }
+	                    transition={{ layout: { duration: reduceMotion ? 0.1 : 0.34, ease: [0.16, 1, 0.3, 1] } }}
 	                    className="h-full w-full cursor-zoom-in"
 	                    role="button"
 	                    tabIndex={0}
@@ -3752,11 +4922,20 @@ export function ImagePreviewExperience(props: {
 	                    {/* eslint-disable-next-line @next/next/no-img-element */}
 	                    <img
 	                      src={hero}
-	                      alt="Preview"
-	                      className="h-full w-full object-cover"
+	                      alt=""
+	                      aria-hidden
+	                      className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-2xl"
 	                    />
-	                  </div>
-	                  {leadGateActive &&
+	                    <div className="absolute inset-0 bg-background/10" aria-hidden />
+	                    {/* eslint-disable-next-line @next/next/no-img-element */}
+	                    <img
+	                      src={hero}
+	                      alt="Preview"
+	                      className="absolute inset-0 h-full w-full object-contain"
+	                    />
+	                  </motion.div>
+	                  {!suppressInlineLeadGate &&
+	                  leadGateActive &&
 	                  !shouldShowCenteredLeadFormOverlay &&
 	                  !lightboxOpen ? (
 	                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-4">
@@ -3786,6 +4965,7 @@ export function ImagePreviewExperience(props: {
 	                    </div>
 	                  ) : null}
 	                </div>
+	                )
 	              ) : (
 	                <div className="h-full w-full bg-muted/40 isolate" />
 	              )}
@@ -3868,7 +5048,7 @@ export function ImagePreviewExperience(props: {
               </div>
             ) : null}
 
-	              {cache?.status === "error" && cache?.error ? (
+	              {!showConceptPicker && !studioEstimateActive && cache?.status === "error" && cache?.error ? (
 	                <div className="absolute inset-0 flex items-end">
                   <div className="w-full p-3 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
                     <div className="text-xs font-medium text-white">Having trouble updating the preview image.</div>
@@ -3896,14 +5076,19 @@ export function ImagePreviewExperience(props: {
                   className={cn(
                     "absolute inset-0 pointer-events-none",
                     centeredLeadFormIsImageAction
-                      ? "z-[38] flex items-center justify-center bg-black/35 p-4 sm:p-6"
+                      ? studioEstimateActive
+                        ? "z-[38] flex items-center justify-center bg-background/75 p-4 backdrop-blur-sm sm:p-6"
+                        : "z-[38] flex items-center justify-center bg-black/35 p-4 sm:p-6"
                       : "z-30 flex items-end justify-end"
                   )}
                   style={centeredLeadFormIsImageAction ? undefined : { padding: centeredPricingOverlayInset }}
                 >
                   <div
                     className={cn(
-                      "pointer-events-auto overflow-visible shadow-[0_10px_28px_rgba(15,23,42,0.24)] transition-[width,transform] duration-200",
+                      "pointer-events-auto overflow-visible transition-[width,transform] duration-200",
+                      studioEstimateActive
+                        ? "border border-foreground/10 shadow-[0_24px_70px_rgba(15,23,42,0.16)]"
+                        : "shadow-[0_10px_28px_rgba(15,23,42,0.24)]",
                       showCenteredPricingForm ||
                       showCenteredPreviewActionLeadModal ||
                       showCenteredIdeasToolbarLeadModal
@@ -3914,7 +5099,7 @@ export function ImagePreviewExperience(props: {
                       width: centeredPricingPanelWidth,
                       maxWidth: "100%",
                       borderRadius: centeredPricingPanelRadius,
-                      backgroundColor: singleModePricingPillBg,
+                      backgroundColor: studioEstimateActive ? "var(--form-surface-color)" : singleModePricingPillBg,
                       WebkitBackdropFilter: "blur(12px)",
                       backdropFilter: "blur(12px)",
                       containerType: "inline-size",
@@ -3929,7 +5114,11 @@ export function ImagePreviewExperience(props: {
                     >
                         <div
                           className="box-border flex w-full flex-col"
-                          style={{ fontFamily: theme.fontFamily, gap: centeredPricingPanelGap, ...pricingPillVars }}
+                          style={{
+                            fontFamily: theme.fontFamily,
+                            gap: centeredPricingPanelGap,
+                            ...(studioEstimateActive ? studioLeadFormVars : pricingPillVars),
+                          }}
                         >
                           <div className="flex items-center" style={{ gap: centeredPricingHeaderGap }}>
                             <button
@@ -3948,7 +5137,12 @@ export function ImagePreviewExperience(props: {
                                 setShowCenteredPreviewActionLeadModal(false);
                                 setShowCenteredIdeasToolbarLeadModal(false);
                               }}
-                              className="flex shrink-0 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                              className={cn(
+                                "flex shrink-0 items-center justify-center rounded-full transition-colors",
+                                studioEstimateActive
+                                  ? "text-foreground/60 hover:bg-foreground/5 hover:text-foreground"
+                                  : "text-white/70 hover:bg-white/10 hover:text-white"
+                              )}
                               style={{
                                 width: centeredPricingIconButtonSize,
                                 height: centeredPricingIconButtonSize,
@@ -4005,7 +5199,10 @@ export function ImagePreviewExperience(props: {
                                   onChange={(e) => setCenteredPricingEmail(e.target.value)}
                                   placeholder={PRICING_LEAD_COPY.emailPlaceholder}
                                   inputMode="email"
-                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  className={cn(
+                                    "rounded-xl bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0",
+                                    studioEstimateActive ? "border border-[color:var(--sif-lead-gen-input-border)]" : "border-0"
+                                  )}
                                   style={{
                                     height: centeredPricingInputHeight,
                                     paddingLeft: centeredPricingInputPadLeft,
@@ -4045,7 +5242,10 @@ export function ImagePreviewExperience(props: {
                                   onChange={(e) => setCenteredPricingName(e.target.value)}
                                   placeholder={PRICING_LEAD_COPY.namePlaceholder}
                                   autoComplete="name"
-                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] px-4 text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  className={cn(
+                                    "rounded-xl bg-[var(--sif-lead-gen-input-bg)] px-4 text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0",
+                                    studioEstimateActive ? "border border-[color:var(--sif-lead-gen-input-border)]" : "border-0"
+                                  )}
                                   style={{
                                     height: centeredPricingInputHeight,
                                     fontSize: centeredPricingInputTextSize,
@@ -4087,7 +5287,10 @@ export function ImagePreviewExperience(props: {
                                   onChange={(e) => setCenteredPricingPhone(formatPhoneInput(e.target.value).display)}
                                   placeholder="(555) 123-4567"
                                   inputMode="tel"
-                                  className="rounded-xl border-0 bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0"
+                                  className={cn(
+                                    "rounded-xl bg-[var(--sif-lead-gen-input-bg)] text-[var(--sif-lead-gen-fg)] placeholder:text-[color:var(--sif-lead-gen-placeholder)] focus-visible:ring-2 focus-visible:ring-offset-0",
+                                    studioEstimateActive ? "border border-[color:var(--sif-lead-gen-input-border)]" : "border-0"
+                                  )}
                                   style={{
                                     height: centeredPricingInputHeight,
                                     paddingLeft: centeredPricingInputPadLeft,
@@ -4125,7 +5328,10 @@ export function ImagePreviewExperience(props: {
                           )}
 
                           {centeredPricingError ? (
-                            <div className="leading-relaxed text-red-200" style={{ fontSize: centeredPricingMetaSize }}>
+                            <div
+                              className={cn("leading-relaxed", studioEstimateActive ? "text-red-600" : "text-red-200")}
+                              style={{ fontSize: centeredPricingMetaSize }}
+                            >
                               {centeredPricingError}
                             </div>
                           ) : (
@@ -4451,5 +5657,6 @@ export function ImagePreviewExperience(props: {
       </LayoutGroup>
   );
   }
+  if (headless) return null;
   return renderPreview();
 }

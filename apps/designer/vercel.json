@@ -1,7 +1,8 @@
 {
   "framework": "nextjs",
-  "installCommand": "node vercel-install.cjs",
-  "buildCommand": "npm run build",
+  "installCommand": "node apps/designer/vercel-install.cjs",
+  "buildCommand": "npm -w apps/designer run build",
+  "outputDirectory": "apps/designer/.next",
   "headers": [
     {
       "source": "/(.*)",

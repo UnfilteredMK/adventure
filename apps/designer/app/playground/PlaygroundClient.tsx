@@ -318,8 +318,18 @@ export default function PlaygroundClient() {
   }, []);
 
   const widgetHost = useMemo(() => {
-    return process.env.NEXT_PUBLIC_WIDGET_URL || "";
+    const raw = (process.env.NEXT_PUBLIC_WIDGET_URL || "").trim();
+    if (!raw) return "";
+    return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
   }, []);
+
+  const widgetOrigin = useMemo(() => {
+    try {
+      return new URL(widgetHost || "http://localhost:3001").origin;
+    } catch {
+      return null;
+    }
+  }, [widgetHost]);
 
   const selectedServiceId = useMemo(() => {
     if (!service) return null;
@@ -381,13 +391,13 @@ export default function PlaygroundClient() {
   const sendThemeOnce = useCallback(
     (settings: Partial<DesignSettings>) => {
       const win = iframeRef.current?.contentWindow;
-      if (!win) return;
+      if (!win || !widgetOrigin) return;
       // Compatibility payload: some runtimes may expect `config`, others `design` / `designConfig`.
       const payload = { config: settings, design: settings, designConfig: settings, timestamp: Date.now() };
       // Single source of truth: config (flow_config is deprecated).
-      win.postMessage({ type: "UPDATE_CONFIG", ...payload }, "*");
+      win.postMessage({ type: "UPDATE_CONFIG", ...payload }, widgetOrigin);
     },
-    [],
+    [widgetOrigin],
   );
 
   const scheduleThemeSend = useCallback(
@@ -426,6 +436,7 @@ export default function PlaygroundClient() {
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
+      if (!widgetOrigin || e.source !== iframeRef.current?.contentWindow || e.origin !== widgetOrigin) return;
       const data: any = e.data;
       if (!data || typeof data !== "object") return;
       const type = String(data.type || "");
@@ -452,7 +463,7 @@ export default function PlaygroundClient() {
         resendTimerRef.current = null;
       }
     };
-  }, []);
+  }, [widgetOrigin]);
 
   const previewUrl = useMemo(() => {
     if (!demoWidgetInstanceId) return null;
@@ -461,6 +472,7 @@ export default function PlaygroundClient() {
     if (view === "form") {
       const u = new URL(`/adventure/${demoWidgetInstanceId}`, base);
       u.searchParams.set("embed", "1");
+      u.searchParams.set("surface", "embed");
       u.searchParams.set("fresh", "1");
       u.searchParams.set("autostart", "1");
       // Playground cap (device + session) — enforced by runtime.
@@ -475,6 +487,7 @@ export default function PlaygroundClient() {
     const u = new URL(`/adventure/${demoWidgetInstanceId}`, base);
     u.searchParams.set("demo", "true");
     u.searchParams.set("embed", "1");
+    u.searchParams.set("surface", "embed");
     // Playground cap (device + session) — enforced by runtime.
     u.searchParams.set("playground", "1");
     u.searchParams.set("playgroundSessionId", playgroundSessionId);

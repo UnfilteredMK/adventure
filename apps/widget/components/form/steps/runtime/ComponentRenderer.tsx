@@ -40,6 +40,7 @@ interface ComponentRendererProps {
   guidedThumbnailMode?: boolean;
   compactInPreview?: boolean;
   layoutDebugEnabled?: boolean;
+  onProjectPhotoSelected?: (url: string) => void | Promise<void>;
 }
 
 export function ComponentRenderer(props: ComponentRendererProps) {
@@ -58,6 +59,7 @@ export function ComponentRenderer(props: ComponentRendererProps) {
     guidedThumbnailMode,
     compactInPreview,
     layoutDebugEnabled,
+    onProjectPhotoSelected,
   } = props;
   const resolvedLeadCaptured =
     typeof props.leadCaptured === "boolean"
@@ -81,6 +83,7 @@ export function ComponentRenderer(props: ComponentRendererProps) {
       compactInPreview,
       layoutDebugEnabled,
       instanceId: props.instanceId,
+      onProjectPhotoSelected,
     };
     // If a UIStep carries a backend function call hint, render a dedicated UI.
     // This preserves backend ordering while allowing mid-flow dynamic actions.
